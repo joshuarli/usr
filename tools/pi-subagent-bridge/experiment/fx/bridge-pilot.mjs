@@ -25,15 +25,15 @@ export async function bridgePilot(binary, scratch, options = {}) {
   }
   git('add', '.'); git('commit', '-qm', 'fixture'); writeFileSync(join(repo, '.git/info/exclude'), '/.work/\n')
   mkdirSync(join(repo, '.work/wt'), { recursive: true }); git('worktree', 'add', '-qb', 'pilot', cwd)
-  let requestBudget = 20, calls = [], requests = [], final = '', providerError, holdAt = 0, heldResolve = () => {}
+  let router = null, requestBudget = 20, calls = [], requests = [], final = '', providerError, holdAt = 0, heldResolve = () => {}
   const server = createServer(async (req, res) => {
     try {
       let raw = ''; for await (const chunk of req) { raw += chunk; if (raw.length > 1048576) throw new Error('request too large') }
       const body = JSON.parse(raw); assert.equal(body.model, 'fixture-model'); assert.equal(body.reasoning_effort, 'high')
       requests.push(body); if (requests.length > requestBudget) throw new Error('model-step budget exceeded')
       if (holdAt && requests.length === holdAt) { heldResolve(); return }
-      const call = calls.shift(), index = requests.length
-      const delta = call ? { role: 'assistant', tool_calls: [{ index: 0, id: 'call_' + index, type: 'function', function: { name: call[0], arguments: JSON.stringify(call[1]) } }] } : { role: 'assistant', content: final + '\nACCEPTANCE: met' }
+      const routed = router ? router(body) : undefined, call = router ? routed.call : calls.shift(), index = requests.length
+      const delta = call ? { role: 'assistant', tool_calls: [{ index: 0, id: 'call_' + index, type: 'function', function: { name: call[0], arguments: JSON.stringify(call[1]) } }] } : { role: 'assistant', content: (router ? routed.final : final) + '\nACCEPTANCE: met' }
       res.writeHead(200, { 'content-type': 'text/event-stream' }); res.end('data: ' + JSON.stringify({ id: 'fixture', object: 'chat.completion.chunk', model: 'fixture-model', choices: [{ index: 0, delta, finish_reason: call ? 'tool_calls' : 'stop' }], usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 } }) + '\n\ndata: [DONE]\n\n')
     } catch (error) { providerError = error; res.writeHead(400); res.end('fixture rejected request') }
   })
@@ -78,6 +78,50 @@ export async function bridgePilot(binary, scratch, options = {}) {
       await new Promise(r => setTimeout(r, 25))
     }
     throw new Error('bridge job did not terminate')
+  }
+  async function childScenario() {
+    reset(); requestBudget = 60; requests = []
+    const text = message => typeof message.content === 'string' ? message.content : JSON.stringify(message.content ?? '')
+    const childIds = messages => messages.filter(m => m.role === 'tool').map(m => /child_id\\?":\\?"([0-9a-f-]{36})/.exec(text(m))?.[1]).filter(Boolean)
+    router = body => {
+      const all = body.messages.map(text).join('\n'), tools = body.messages.filter(m => m.role === 'tool').length
+      if (all.includes('You are a scout child')) return tools === 0 ? { call: ['read_file', { path: 'arithmetic.py' }] } : { final: 'arithmetic.py:2 subtracts b instead of adding it' }
+      if (all.includes('You are a worker child')) return [
+        { call: ['write_file', { path: 'arithmetic.py', content: 'def add(a, b):\n    return a + b\n' }] },
+        { call: ['shell', { action: 'run', command: 'python3 check.py numbers' }] },
+      ][tools] ?? { final: 'PROOF: child ran python3 check.py numbers, exit 0' }
+      const ids = childIds(body.messages)
+      return [
+        { call: ['mcp_children_spawn', { tier: 'scout', task: 'Locate the arithmetic error with file and line evidence.', intent_id: 'scout-1' }] },
+        { call: ['mcp_children_wait', { child_id: ids[0], timeout_s: 60 }] },
+        { call: ['mcp_children_spawn', { tier: 'worker', task: 'Fix arithmetic.add for numbers and run python3 check.py numbers.', intent_id: 'worker-1' }] },
+        { call: ['mcp_children_wait', { child_id: ids[2], timeout_s: 60 }] },
+        { call: ['mcp_children_spawn', { tier: 'worker', task: 'override', intent_id: 'escape-1', model: 'other-model' }] },
+        { call: ['shell', { action: 'run', command: 'python3 check.py numbers' }] },
+      ][tools] ?? { final: 'PROOF: scout located arithmetic.py:2; worker child fixed it; root reran python3 check.py numbers, exit 0' }
+    }
+    const parentFx = makeFxAdapter({ transport, binary, binarySha256: JSON.parse(readFileSync(new URL('./pin.json', import.meta.url), 'utf8')).binary_sha256, home, provider: 'fixture', connection, allowedCommands: ['python3 check.py numbers'], wallMs: 60000, delegation: { maxChildren: 3, maxConcurrent: 2 } })
+    const parentBridge = qualificationBridge(parentFx)
+    try {
+      const root = await admit('Coordinate a scout child and a worker child to fix arithmetic.add; rerun the check yourself.', 'worker', scope, parentBridge)
+      const done = await settled(root.session_id, parentBridge)
+      assert.equal(done.state, 'succeeded', JSON.stringify(done)); assert.deepEqual(done.children_active, []); assert.deepEqual(done.out_of_scope_paths, [])
+      execFileSync('python3', ['check.py', 'numbers'], { cwd })
+      assert.equal(git('-C', cwd, 'diff', '--name-only'), 'arithmetic.py')
+      const job = JSON.parse(readFileSync(runOf(root.session_id).output + '.job.json', 'utf8'))
+      const ledger = JSON.parse(readFileSync(join(job.fxHome, 'children-ledger.json'), 'utf8'))
+      assert.deepEqual(ledger.children.map(child => [child.tier, child.spawn]), [['scout', 'started'], ['worker', 'started']])
+      const rootCalls = acpToolCalls(runOf(root.session_id))
+      assert.deepEqual(rootCalls.map(call => call.status), ['completed', 'completed', 'completed', 'completed', 'failed', 'completed'])
+      for (const child of ledger.children) {
+        const receipt = JSON.parse(readFileSync(child.run.output, 'utf8'))
+        assert.equal(receipt.reason, 'end_turn'); assert.equal(receipt.termination, 'verified')
+        const childJob = JSON.parse(readFileSync(child.run.output + '.job.json', 'utf8'))
+        assert.deepEqual(childJob.mcp_servers, [], 'children must not receive a controller')
+        assert.ok(childJob.deadlineAt <= job.deadlineAt, 'child outlived the root deadline')
+      }
+      return { root: done.state, children: ledger.children.map(child => child.tier), authority_override: 'refused', grandchildren: 'no controller', combined_check: 'python3 check.py numbers passed' }
+    } finally { router = null; requestBudget = 20 }
   }
   async function acpScenarios() {
     const out = {}
@@ -157,6 +201,7 @@ export async function bridgePilot(binary, scratch, options = {}) {
     assert.equal(decodeSession(JSON.parse(readFileSync(sessionPath(recovering.session_id), 'utf8')), cwd, recovering.session_id).attempts, attemptsBefore)
     writeFileSync(settingsPath, original)
     out.changed_configuration = 'refused before effects'
+    out.children = await childScenario()
     reset()
     return out
   }

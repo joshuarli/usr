@@ -6,6 +6,7 @@ type AcpJob = {
   nonce: string; executable: string; args: string[]; cwd: string; env: NodeJS.ProcessEnv; env_files?: Record<string, string>
   wallMs: number; output: string; errors: string; prompt: string; resume?: string; acp_log: string; events: string
   selection: { provider: string; model: string; effort: string }; exhaustion?: ExhaustionWatch; ungated_tools: string[]
+  mcp_servers?: Array<{ name: string; command: string; args: string[]; env: Array<{ name: string; value: string }> }>
 }
 type Reason = "end_turn" | "step_limit" | "refused" | "max_tokens" | "max_turn_requests" | "cancelled" | "deadline" | "exhausted"
   | "permission" | "policy" | "pin_mismatch" | "protocol" | "crash" | "spawn" | "supervision"
@@ -180,8 +181,8 @@ async function run(): Promise<void> {
   const info = (init.result as { agentInfo?: { version?: unknown } } | undefined)?.agentInfo
   if (info?.version !== "0.0.17") { stderr += "unexpected ACP agent: " + JSON.stringify(init).slice(0, 500); return stop("protocol") }
   const opened = job.resume
-    ? await call("session/resume", { sessionId: job.resume, cwd: job.cwd, mcpServers: [] })
-    : await call("session/new", { cwd: job.cwd, mcpServers: [] })
+    ? await call("session/resume", { sessionId: job.resume, cwd: job.cwd, mcpServers: job.mcp_servers ?? [] })
+    : await call("session/new", { cwd: job.cwd, mcpServers: job.mcp_servers ?? [] })
   const result = opened.result as { sessionId?: unknown; configOptions?: Array<{ id?: unknown; currentValue?: unknown }> } | undefined
   if (!result) { stderr += "ACP session admission failed: " + JSON.stringify(opened.error ?? opened).slice(0, 500); return stop("protocol") }
   const id = job.resume ?? result.sessionId

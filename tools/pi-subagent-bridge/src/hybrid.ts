@@ -1,4 +1,4 @@
-import { fxBudget, fxResult, type FxAdapter } from "./fx.ts"
+import { cancelFxChildren, fxBudget, fxChildren, fxResult, type FxAdapter, type FxSelection } from "./fx.ts"
 import type { PiAdapter } from "./pi-adapter.ts"
 import { randomUUID } from "node:crypto"
 import { execFileSync } from "node:child_process"
@@ -9,7 +9,7 @@ import { cancelCommand, commandResult, commandSession, processStartTime, startCo
 import { codexAvailable, codexResult, codexSession, cancelCodex, startCodex } from "./codex.ts"
 import { activeWorktreeOwner, claimWorktree, ensureWorktree, releaseWorktree } from "./worktree-lease.ts"
 
-import { isBridgeTier, type BridgeTier } from "./tier-policy.ts"
+import { DELEGATION, isBridgeTier, type BridgeTier } from "./tier-policy.ts"
 import { piInstalled, diagnoseGoModel } from "./optional-pi.ts"
 import { musePreflight, museVersion } from "./muse-subscription.ts"
 import { devinPreflight } from "./devin-provider.ts"
@@ -212,10 +212,22 @@ export function makeHybridBridge(api: PiAdapter, command = {
   function accessFor(s: Session): Access {
     return s.tier === "scout" ? { kind: "read-only" } : { kind: "write" }
   }
+  /** Child pins come from the bridge's own policy for each tier the root may delegate to, never from the model. */
+  function childPins(tier: BridgeTier): Partial<Record<BridgeTier, FxSelection>> {
+    const pins: Partial<Record<BridgeTier, FxSelection>> = {}
+    for (const child of DELEGATION[tier]) {
+      if (!isBridgeTier(child)) continue
+      let plan: ExecutionPlan
+      try { plan = resolvePolicy(child) } catch { continue }
+      const selection = plan.kind === "leaf" && plan.target.executor === "fx" ? plan.target.selection : plan.kind === "fx-fallback" ? plan.fx : undefined
+      if (selection) pins[child] = selection
+    }
+    return pins
+  }
   function launch(s: Session, target: ProcessTarget, text: string, resume?: string, planned_run?: PlannedRun): CommandRun {
     const request = { directory: s.cwd, logDirectory: stateDir(s.cwd), prompt: text, selection: target.selection, resume, ...(planned_run ? { planned_run } : {}) }
     switch (target.executor) {
-      case "fx": { if (!fx) throw new Error("FX adapter unavailable"); return fx.start({ ...request, selection: target.selection, access: accessFor(s) }) }
+      case "fx": { if (!fx) throw new Error("FX adapter unavailable"); return fx.start({ ...request, selection: target.selection, access: accessFor(s), delegation: { selections: childPins(s.tier) } }) }
       case "codex": return codex.start({ ...request, access: accessFor(s) })
       case "command-code": return command.start({ ...request, access: accessFor(s) })
     }
@@ -352,7 +364,8 @@ export function makeHybridBridge(api: PiAdapter, command = {
           known = { observation, blocked: { state, notice: s.fallback_blocked } }
         }
       }
-      if (["succeeded", "failed", "turn_limit", "cancelled", "canceled", "interrupted", "timed_out"].includes(state)) {
+      const childrenHold = s.execution.kind === "process" && s.execution.executor === "fx" && !fxChildren(s.execution.run).quiescent
+      if (!childrenHold && ["succeeded", "failed", "turn_limit", "cancelled", "canceled", "interrupted", "timed_out"].includes(state)) {
         const directory = stateDir(s.cwd)
         if (activeWorktreeOwner(directory, s.cwd) === s.id)
           releaseWorktree(directory, s.cwd, s.id)
@@ -372,6 +385,7 @@ export function makeHybridBridge(api: PiAdapter, command = {
       session_id: s.id, backend: backendOf(s), tier: s.tier, model: i.route.model, effort: i.route.effort,
       state, last_assistant_text, error: i.observation.error, usage: i.observation.usage,
       ...runBudget(s),
+      children_active: s.execution.kind === "process" && s.execution.executor === "fx" ? fxChildren(s.execution.run).active : [],
       changed_paths, out_of_scope_paths, head_unchanged, head_on_lane, commits_since_base,
       acceptance_claim: i.acceptance_claim, stopped_on: i.stopped_on, stop_condition_valid: i.stop_condition_valid,
       reason: i.notice === "stopped without a listed stop condition" ? i.notice : null,
@@ -622,6 +636,7 @@ export function makeHybridBridge(api: PiAdapter, command = {
           save(s)
           interrupted = runner.cancel(run, s.cwd)
           if (!interrupted) { s.cancel_requested = false; save(s) }
+          if (executor === "fx") interrupted = cancelFxChildren(run) > 0 || interrupted
         } else if (ownerMode) {
           throw new OwnerPrecheckError("not-running", "Worker run is not running")
         }

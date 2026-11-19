@@ -2,9 +2,10 @@ import test, { type TestContext } from "node:test"
 import assert from "node:assert/strict"
 import { createHash } from "node:crypto"
 import { readFileSync, writeFileSync, mkdirSync, existsSync, watch, statSync } from "node:fs"
+import { spawn } from "node:child_process"
 import { join, dirname } from "node:path"
 import { Scratch, git, unusedApi } from "./worker-fixtures.ts"
-import { makeFxAdapter, fxResult, type FxSelection } from "../src/fx.ts"
+import { makeFxAdapter, fxResult, cancelFxChildren, type FxSelection } from "../src/fx.ts"
 import { classifyJobBlock, classifyProbeResponse, pilotVerdict, renameEvidenceOk, scoutFindingOk } from "../experiment/fx/pilot.ts"
 import { makeHybridBridge } from "../src/hybrid.ts"
 import { piAdapter } from "../src/pi-adapter.ts"
@@ -488,7 +489,7 @@ test("an unavailable FX primary admits the next approved lane with a recorded re
   assert.equal(cmd.launches.length, 1)
 })
 
-function acpFixture(t: TestContext, behavior: string, wallMs = 5000) {
+function acpFixture(t: TestContext, behavior: string, wallMs = 5000, delegation?: { maxChildren: number; maxConcurrent: number }) {
   const scratch = new Scratch()
   t.after(() => scratch.close())
   const repo = scratch.repo(), binary = join(scratch.path, "fake-fx-acp")
@@ -510,6 +511,9 @@ function handle(m){
   if(m.method==='session/resume'){if(!fs.existsSync(p.join(home,'sessions/v2',m.params.sessionId)))return send({id:m.id,error:{code:-32602,message:'Session not found'}});open(m.params.sessionId);return send({id:m.id,result:{configOptions:config()}})}
   if(m.method==='session/prompt'){prompt=m.id;
     if(mode==='hold'||mode==='hold-once'&&!fs.existsSync(p.join(home,'held'))){fs.writeFileSync(p.join(home,'held'),'');return}
+    const child=JSON.stringify(m.params.prompt).includes('child of a bridge-managed worker');
+    if(mode==='child-hold'&&child)return;
+    if(mode==='child-hold'){const gate=setInterval(()=>{if(fs.existsSync(process.env.FIXTURE_GATE)){clearInterval(gate);send({method:'session/update',params:{sessionId:sid,update:{sessionUpdate:'agent_message_chunk',content:{type:'text',text:'PROOF root\\nACCEPTANCE: met'}}}});send({id:m.id,result:{stopReason:'end_turn'}})}},50);return}
     if(mode==='webfetch')return send({method:'session/update',params:{sessionId:sid,update:{sessionUpdate:'tool_call',toolCallId:'w1',name:'web_fetch',status:'pending'}}});
     if(mode==='permission')return send({id:'perm-1',method:'session/request_permission',params:{sessionId:sid,toolCall:{toolCallId:'t1'},options:[]}});
     if(mode==='steps'){fs.appendFileSync(args[args.indexOf('--log-file')+1],'step limit reached outcome_kind=step_limit\\n');return send({id:m.id,result:{stopReason:'refused'}})}
@@ -521,11 +525,12 @@ function handle(m){
 }
 `
   writeFileSync(binary, source, { mode: 0o755 })
-  const fx = makeFxAdapter({ transport: "acp", binary, binarySha256: createHash("sha256").update(source).digest("hex"), home: scratch.path, provider: "fixture", connection: {}, allowedCommands: [], wallMs })
+  const fx = makeFxAdapter({ transport: "acp", binary, binarySha256: createHash("sha256").update(source).digest("hex"), home: scratch.path, provider: "fixture", connection: {}, allowedCommands: [], wallMs, ...(delegation ? { delegation, extraEnv: { FIXTURE_GATE: join(scratch.path, "release-root") } } : {}) })
   const request = { directory: repo.cwd, logDirectory: repo.directory, prompt: "fixture task", selection, access: { kind: "write" as const } }
   mkdirSync(repo.directory, { recursive: true })
   const policy: ExecutionPlan = { kind: "leaf", target: { executor: "fx", selection } }
-  const bridge = makeHybridBridge(piAdapter(unusedApi()), undefined, undefined, () => policy, fx)
+  const resolve = (tier: string): ExecutionPlan => { if (tier === "mechanic") throw new Error("no mechanic route"); return policy }
+  const bridge = makeHybridBridge(piAdapter(unusedApi()), undefined, undefined, resolve, fx)
   const scope = { base_revision: repo.base, writable_paths: ["README"], acceptance_proof: "fixture proof", attempt_limit: 2, stop_on: "scope expansion" }
   return { scratch, repo, fx, request, bridge, scope }
 }
@@ -635,4 +640,77 @@ test("a CLI FX result that used an ungated web built-in is not accepted", async 
   const result = await ended(run)
   assert.equal(result.state, "failed")
   assert.match(JSON.stringify(result.result), /ungated built-in tool web_fetch/)
+})
+
+function childController(configPath: string, jobPath: string) {
+  const server = spawn(process.execPath, [join(import.meta.dirname, "../src/fx-children-mcp.ts"), configPath, jobPath], { stdio: ["pipe", "pipe", "inherit"] })
+  let buffer = "", id = 0
+  const pending = new Map<number, (value: Record<string, unknown>) => void>()
+  server.stdout.setEncoding("utf8")
+  server.stdout.on("data", (chunk: string) => {
+    buffer += chunk
+    let index: number
+    while ((index = buffer.indexOf("\n")) >= 0) {
+      const message = JSON.parse(buffer.slice(0, index)) as Record<string, unknown>
+      buffer = buffer.slice(index + 1)
+      pending.get(message.id as number)?.(message); pending.delete(message.id as number)
+    }
+  })
+  const rpc = (method: string, params: unknown) => new Promise<Record<string, unknown>>(resolve => { const key = ++id; pending.set(key, resolve); server.stdin.write(JSON.stringify({ jsonrpc: "2.0", id: key, method, params }) + "\n") })
+  return {
+    async tool(name: string, args: Record<string, unknown>): Promise<{ error: boolean; value: any }> {
+      const result = (await rpc("tools/call", { name, arguments: args })).result as { isError?: boolean; content: Array<{ text: string }> }
+      const text = result.content[0]!.text
+      return result.isError ? { error: true, value: text } : { error: false, value: JSON.parse(text) }
+    },
+    rpc, close: () => { server.stdin.end(); server.kill() },
+  }
+}
+
+test("controlled FX children obey the admission snapshot, replay one effect and hold the root lease until cancelled", async t => {
+  const f = acpFixture(t, "child-hold", 20000, { maxChildren: 3, maxConcurrent: 2 })
+  const admitted = await f.bridge.start(f.repo.cwd, "fixture", "worker", f.scope, "task")
+  const run = acpRun(f, admitted.session_id)
+  await ready(run.output + ".native.json")
+  const job = JSON.parse(readFileSync(run.output + ".job.json", "utf8"))
+  assert.deepEqual(job.mcp_servers.map((server: { name: string }) => server.name), ["children"])
+  const settings = JSON.parse(readFileSync(join(job.fxHome, "settings.json"), "utf8"))
+  assert.equal(settings.permission.mcp_children_spawn, "allow")
+  const config = JSON.parse(readFileSync(join(job.fxHome, "children.json"), "utf8"))
+  assert.deepEqual(Object.keys(config.selections).sort(), ["scout", "worker"])
+  const controller = childController(join(job.fxHome, "children.json"), run.output + ".job.json")
+  t.after(() => { cancelFxChildren(run); controller.close() })
+  const listed = (await controller.rpc("tools/list", {})).result as { tools: Array<{ name: string }> }
+  assert.deepEqual(listed.tools.map(tool => tool.name), ["spawn", "status", "wait", "cancel", "steer", "resume"])
+  assert.match((await controller.tool("spawn", { tier: "worker", task: "x", intent_id: "a", model: "other" })).value, /cannot set model/)
+  assert.match((await controller.tool("spawn", { tier: "worker", task: "x", intent_id: "a", cwd: "/" })).value, /cannot set cwd/)
+  assert.match((await controller.tool("spawn", { tier: "mechanic", task: "x", intent_id: "a" })).value, /cannot delegate to mechanic/)
+  assert.match((await controller.tool("spawn", { tier: "expert", task: "x", intent_id: "a" })).value, /unknown tier/)
+  const scout = await controller.tool("spawn", { tier: "scout", task: "inspect", intent_id: "scout-1" })
+  assert.equal(scout.error, false)
+  const replay = await controller.tool("spawn", { tier: "scout", task: "inspect", intent_id: "scout-1" })
+  assert.equal(replay.value.child_id, scout.value.child_id); assert.equal(replay.value.replayed, true)
+  const worker = await controller.tool("spawn", { tier: "worker", task: "edit", intent_id: "worker-1" })
+  assert.equal(worker.error, false)
+  assert.match((await controller.tool("spawn", { tier: "worker", task: "edit", intent_id: "worker-2" })).value, /concurrent child limit|another writing child/)
+  assert.match((await controller.tool("resume", { child_id: worker.value.child_id, feedback: "more" })).value, /not in a resumable terminal state \(running\)/)
+  const workerRun = (JSON.parse(readFileSync(join(job.fxHome, "children-ledger.json"), "utf8")).children as Array<{ child_id: string; run: CommandRun }>).find(child => child.child_id === worker.value.child_id)!.run
+  await ready(workerRun.output + ".native.json")
+  const steered = await controller.tool("steer", { child_id: worker.value.child_id, note: "same scope: also handle strings" })
+  assert.equal(steered.error, false, String(steered.value)); assert.equal(steered.value.steered, true); assert.equal(steered.value.state, "running"); assert.equal(steered.value.resumes, 1)
+  const ledger = JSON.parse(readFileSync(join(job.fxHome, "children-ledger.json"), "utf8"))
+  assert.equal(ledger.children.length, 2)
+  const steeredJob = JSON.parse(readFileSync(ledger.children[1].run.output + ".job.json", "utf8"))
+  assert.equal(steeredJob.resume, "acp-native"); assert.match(steeredJob.prompt, /SAME-SCOPE FOLLOW-UP: same scope: also handle strings/)
+  writeFileSync(join(f.scratch.path, "release-root"), "")
+  const holding = await acpSettled(f.bridge, f.repo.cwd, admitted.session_id)
+  assert.equal(holding.state, "succeeded")
+  assert.equal(holding.children_active.length, 2)
+  await assert.rejects(() => f.bridge.start(f.repo.cwd, "duplicate", "worker", f.scope, "task"), /active worker/)
+  assert.equal((await f.bridge.cancel(f.repo.cwd, admitted.session_id)).interrupted, true)
+  for (const child of [scout.value.child_id, worker.value.child_id])
+    assert.equal((await controller.tool("wait", { child_id: child, timeout_s: 15 })).value.state, "cancelled")
+  assert.deepEqual((await f.bridge.status(f.repo.cwd, admitted.session_id)).children_active, [])
+  const next = await f.bridge.start(f.repo.cwd, "after children", "worker", f.scope, "task")
+  assert.equal((await acpSettled(f.bridge, f.repo.cwd, next.session_id)).state, "succeeded")
 })

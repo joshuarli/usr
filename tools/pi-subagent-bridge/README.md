@@ -47,6 +47,8 @@ The FX adapter has two transports, selected explicitly through `makeFxAdapter({ 
 
 The ACP supervisor publishes the native session ID as soon as `session/new` or `session/resume` succeeds. Before prompting, it checks the effective provider, model and effort reported in `configOptions`. Cancellation, deadline and quota stops send `session/cancel`, then terminate the FX process group. A snapshot of FX's descendant tree confirms that every tool process stopped. Without that confirmation, the receipt is `unverified` and the run stays `unknown_or_interrupted`. A step-budget stop reports `turn_limit` and continues without consuming an attempt. The provider is selected in the private `settings.json`. FX 0.0.17 `acp --provider <configured name>` fails `session/new` with `-32603`.
 
+With `delegation` set, an ACP root also receives a per-root MCP controller with `spawn`, `status`, `wait`, `cancel`, `steer` and `resume`. Children are one generation deep, and their pins come from the bridge's policy snapshot at root admission. They are bounded in count and concurrency, with one writer at a time, and capped at the root's deadline. The root's lease is held until every child is verified terminal.
+
 The [FX migration campaign](../../docs/CAMPAIGN-RUNTIME-INDEPENDENCE-FX.md) owns the remaining sequence and acceptance gates. Pi remains available until required routes and lifecycle contracts have qualified replacements.
 
 - `npm run spike:fx -- --setup` installs the exact checked-in release into a scratch home under usr's `.work/`, using the existing verified installer.

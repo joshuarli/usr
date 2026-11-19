@@ -1,4 +1,4 @@
-import { spawn, execFileSync, type ChildProcess } from "node:child_process"
+import { spawn, spawnSync, execFileSync, type ChildProcess } from "node:child_process"
 import { randomUUID, createHash } from "node:crypto"
 import { mkdirSync, readFileSync, readdirSync, writeFileSync, realpathSync, openSync, readSync, closeSync, statSync, copyFileSync, chmodSync, existsSync } from "node:fs"
 import { join, relative, isAbsolute } from "node:path"
@@ -8,11 +8,21 @@ import { plannedCommand, type LaunchRequest } from "./launch.ts"
 import { isRecord } from "./scope.ts"
 import { isBannedModel, type CliPin } from "./policy.ts"
 import { deadlineTimeout } from "./steer-deadline.ts"
+import { CHILD_SERVER, CHILD_TOOLS, cancelChildRun, childConfigPath, childTerminal, childrenQuiescent, readChildLedger, type FxChildConfig, type FxChildLimits } from "./fx-children.ts"
+import type { BridgeTier } from "./tier-policy.ts"
 
 export const FX_CAPABILITIES = { steering: "interrupt-resume", resume: "bound native session and worktree", nativeNesting: "denied", readOnly: "tool permission prevention", hostContainment: false } as const
 
 export type FxSelection = CliPin & { readonly provider: string; readonly runtimeVersion: "0.0.17" }
-export type FxLaunch = Omit<LaunchRequest, "selection"> & { readonly selection: FxSelection }
+export type FxLaunch = Omit<LaunchRequest, "selection"> & {
+  readonly selection: FxSelection
+  /** Exact child pins from the root's admitted policy; only honored for an ACP adapter with delegation enabled. */
+  readonly delegation?: { readonly selections: Partial<Record<BridgeTier, FxSelection>> }
+  /** A child run never outlives its root: its wall budget is capped at this epoch-millisecond deadline. */
+  readonly deadlineAt?: number
+  /** Launch the supervisor outside the caller's process tree, so the caller's termination sweep cannot kill it. */
+  readonly orphan?: boolean
+}
 /** `cli` runs one `fx ask --json` per turn; `acp` drives `fx acp` over stdio from the supervisor. */
 export type FxTransport = "cli" | "acp"
 export type FxOptions = {
@@ -29,6 +39,8 @@ export type FxOptions = {
   authFiles?: string[]
   /** Additional non-secret environment for the qualified toolchain (e.g. CARGO_HOME). Never secrets. */
   extraEnv?: Record<string, string>
+  /** Enables controlled one-generation children for ACP roots admitted with child pins. */
+  delegation?: FxChildLimits
 }
 type Job = { transport: FxTransport; nonce: string; cwd: string; fxHome: string; selection: FxSelection; output: string; errors: string; resume?: string }
 export const FX_PILOT_MAX_STEPS = 20
@@ -97,6 +109,21 @@ export function fxSession(run: CommandRun, expected: FxSelection): string | null
 function continuation(run: CommandRun, job: Job): string | undefined {
   const id = ownSession(run, job)
   return id && (job.resume === undefined || job.resume === id) ? token(job, id) : undefined
+}
+/** Children of the root that owns this run: lease release waits until every one is verified terminal. */
+export function fxChildren(run: CommandRun): { quiescent: boolean; active: string[] } {
+  let fxHome: string
+  try { fxHome = jobFor(run).fxHome } catch { return { quiescent: true, active: [] } }
+  return childrenQuiescent(fxHome, fxResult)
+}
+/** Signal every non-terminal child of this root whose recorded process identity still matches. */
+export function cancelFxChildren(run: CommandRun): number {
+  let fxHome: string
+  try { fxHome = jobFor(run).fxHome } catch { return 0 }
+  let signaled = 0
+  for (const child of readChildLedger(fxHome).children)
+    if (child.run && !childTerminal(fxResult(child.run, child.selection).state) && cancelChildRun(child.run)) signaled++
+  return signaled
 }
 /** Budgets persisted at admission; records written before budgets were persisted report null. */
 export function fxBudget(run: CommandRun): { run_deadline_ms: number | null; run_step_limit: number | null } {
@@ -181,20 +208,21 @@ export function makeFxAdapter(options: FxOptions) {
     if (isBannedModel(selection.model) || selection.provider !== options.provider || selection.runtimeVersion !== "0.0.17") return false
     try { return createHash("sha256").update(readFileSync(options.binary)).digest("hex") === options.binarySha256 && execFileSync(options.binary, ["--version"], { env, encoding: "utf8", timeout: deadlineTimeout(5000) }).trim() === selection.runtimeVersion } catch { return false }
   }
-  function admitted(request: Omit<FxLaunch, "prompt">): { cwd: string; settings: string } {
+  function admitted(request: Omit<FxLaunch, "prompt">, delegating: boolean): { cwd: string; settings: string } {
     if (!available(request.selection)) throw new Error("Pinned FX binary/provider unavailable")
     const cwd = realpathSync(request.directory), underHome = relative(home, cwd)
     if (!underHome || underHome.startsWith("..") || isAbsolute(underHome)) throw new Error("FX qualification worktree must be beneath its private HOME")
     const readOnly = request.access.kind === "read-only"
     const connection = options.connection == null ? {} : { providers: { [options.provider]: options.connection } }
-    const settings = JSON.stringify({ auto_upgrade: false, cache_warming: false, session_titles: false, max_agent_steps: FX_PILOT_MAX_STEPS, provider: options.provider, models: { [options.provider]: request.selection.model }, ...connection, permission: { "*": "deny", read: "allow", glob: "allow", grep: "allow", edit: readOnly ? "deny" : "allow", bash: readOnly ? "deny" : Object.fromEntries(options.allowedCommands.map(command => [command, "allow"])), subagent: "deny", toolbox: "deny" }, tool_placement: Object.fromEntries(FX_UNGATED_TOOLS.map(tool => [tool, "toolbox"])), workspaces: { [cwd]: { enableAllProjectMcpServers: false } } })
+    const settings = JSON.stringify({ auto_upgrade: false, cache_warming: false, session_titles: false, max_agent_steps: FX_PILOT_MAX_STEPS, provider: options.provider, models: { [options.provider]: request.selection.model }, ...connection, permission: { "*": "deny", read: "allow", glob: "allow", grep: "allow", edit: readOnly ? "deny" : "allow", bash: readOnly ? "deny" : Object.fromEntries(options.allowedCommands.map(command => [command, "allow"])), subagent: "deny", toolbox: "deny", ...(delegating ? Object.fromEntries(CHILD_TOOLS.map(tool => [`mcp_${CHILD_SERVER}_${tool}`, "allow"])) : {}) }, tool_placement: Object.fromEntries(FX_UNGATED_TOOLS.map(tool => [tool, "toolbox"])), workspaces: { [cwd]: { enableAllProjectMcpServers: false } } })
     return { cwd, settings }
   }
   /** Validates a continuation without effects: token, worktree, pins and the saved private configuration. */
   function preflightResume(request: Omit<FxLaunch, "prompt"> & { resume: string }): { cwd: string; settings: string; fxHome: string; resume: string } {
-    const { cwd, settings } = admitted(request)
     if (!request.resume.startsWith("fx:0.0.17:")) throw new Error("Unsupported FX resume token")
     const saved: unknown = JSON.parse(Buffer.from(request.resume.slice("fx:0.0.17:".length), "base64url").toString("utf8"))
+    const savedHome = isRecord(saved) && typeof saved.fxHome === "string" && saved.fxHome.startsWith(request.logDirectory + "/") ? saved.fxHome : null
+    const { cwd, settings } = admitted(request, savedHome !== null && existsSync(childConfigPath(savedHome)))
     if (!isRecord(saved) || saved.cwd !== cwd || (!isRecord(saved.selection) || saved.selection.model !== request.selection.model || saved.selection.effort !== request.selection.effort || saved.selection.provider !== request.selection.provider || saved.selection.runtimeVersion !== request.selection.runtimeVersion) || typeof saved.id !== "string" || !SESSION_ID.test(saved.id) || typeof saved.fxHome !== "string" || !saved.fxHome.startsWith(request.logDirectory + "/")) throw new Error("FX resume identity/worktree/pin mismatch")
     let current: string
     try { current = readFileSync(join(saved.fxHome, "settings.json"), "utf8") } catch { throw new Error("FX saved configuration is missing; refusing to resume") }
@@ -203,7 +231,11 @@ export function makeFxAdapter(options: FxOptions) {
   }
   function start(request: FxLaunch): CommandRun {
     const continued = request.resume ? preflightResume({ ...request, resume: request.resume }) : null
-    const { cwd, settings } = continued ?? admitted(request)
+    const selections = request.delegation?.selections ?? {}
+    const delegating = options.transport === "acp" && options.delegation !== undefined && Object.keys(selections).length > 0
+    const { cwd, settings } = continued ?? admitted(request, delegating)
+    const admittedAt = Date.now(), runWall = request.deadlineAt === undefined ? wallMs : Math.min(wallMs, request.deadlineAt - admittedAt)
+    if (request.deadlineAt !== undefined && runWall < 1000) throw new Error("The root's remaining wall time is exhausted; no child can be admitted")
     const nonce = randomUUID(), output = request.planned_run?.output ?? join(request.logDirectory, nonce + ".fx.json"), errors = request.planned_run?.errors ?? output + ".stderr"
     const fxHome = continued?.fxHome ?? join(request.logDirectory, nonce + ".fx-home"), resume = continued?.resume
     if (!continued) {
@@ -215,17 +247,32 @@ export function makeFxAdapter(options: FxOptions) {
         copyFileSync(path, target)
         chmodSync(target, 0o600)
       }
+      if (delegating) {
+        const { delegation: _limits, ...adapter } = options
+        const config: FxChildConfig = { schema: 1, adapter, selections, limits: options.delegation!, cwd, logDirectory: request.logDirectory }
+        writeFileSync(childConfigPath(fxHome), JSON.stringify(config), { mode: 0o600 })
+      }
     }
+    const childConfig = childConfigPath(fxHome)
+    const mcpServers = options.transport === "acp" && existsSync(childConfig)
+      ? [{ name: CHILD_SERVER, command: process.execPath, args: [fileURLToPath(new URL("./fx-children-mcp.ts", import.meta.url)), childConfig, output + ".job.json"], env: [] }]
+      : []
     const job: Job = { transport: options.transport, nonce, cwd, fxHome, selection: request.selection, output, errors, ...(resume ? { resume } : {}) }
     const acpLog = output + ".acp.log"
     // FX 0.0.17 `acp --provider <configured name>` fails session/new with -32603; the private settings select the provider instead,
     // and the supervisor verifies the effective provider/model/effort from session configOptions before prompting.
-    const acp = { args: ["acp", "--model", request.selection.model, "--effort", request.selection.effort, "--log-file", acpLog], prompt: request.prompt, acp_log: acpLog, events: output + ".events.ndjson", ungated_tools: FX_UNGATED_TOOLS }
+    const acp = { args: ["acp", "--model", request.selection.model, "--effort", request.selection.effort, "--log-file", acpLog], prompt: request.prompt, acp_log: acpLog, events: output + ".events.ndjson", ungated_tools: FX_UNGATED_TOOLS, mcp_servers: mcpServers }
     const cliArgs = ["ask", "--json", "--provider", request.selection.provider, "--model", request.selection.model, "--effort", request.selection.effort, "--config", "max_agent_steps=" + FX_PILOT_MAX_STEPS, ...(resume ? ["--resume", resume] : []), "--", request.prompt]
     const jobPath = output + ".job.json"
     const transport = options.transport === "acp" ? acp : { args: cliArgs }
-    writeFileSync(jobPath, JSON.stringify({ ...job, ...transport, executable: options.binary, env: { ...env, FX_HOME: fxHome, TMPDIR: request.logDirectory }, env_files: secretEnvFiles, wallMs, maxSteps: FX_PILOT_MAX_STEPS, exhaustion: { dir: join(fxHome, "sessions/v2"), retry_after_seconds: Math.max(1, Math.floor(wallMs / 1000)) } }), { mode: 0o600 })
+    writeFileSync(jobPath, JSON.stringify({ ...job, ...transport, executable: options.binary, env: { ...env, FX_HOME: fxHome, TMPDIR: request.logDirectory }, env_files: secretEnvFiles, wallMs: runWall, deadlineAt: admittedAt + runWall, maxSteps: FX_PILOT_MAX_STEPS, exhaustion: { dir: join(fxHome, "sessions/v2"), retry_after_seconds: Math.max(1, Math.floor(runWall / 1000)) } }), { mode: 0o600 })
     const invocation = plannedCommand(process.execPath, [fileURLToPath(new URL(options.transport === "acp" ? "./fx-acp-supervisor.ts" : "./process-supervisor.ts", import.meta.url)), jobPath], request.planned_run)
+    if (request.orphan) {
+      const launched = spawnSync(process.execPath, [fileURLToPath(new URL("./fx-orphan-launcher.ts", import.meta.url)), invocation.executable, ...invocation.args], { cwd, env: { ...env, PATH: process.env.PATH }, encoding: "utf8", timeout: deadlineTimeout(10000) })
+      const pid = Number(launched.stdout.trim())
+      if (launched.status !== 0 || !Number.isSafeInteger(pid) || pid <= 0) throw new Error("FX child supervisor admission uncertain")
+      return { pid, output, errors, started_at: request.planned_run?.started_at ?? new Date().toISOString(), proc_start: processStartTime(pid) }
+    }
     const child = spawn(invocation.executable, invocation.args, { detached: true, stdio: "ignore", env: { ...env, PATH: process.env.PATH }, cwd })
     child.once("error", error => writeFileSync(errors, error.message))
     if (!child.pid) throw new Error("FX supervisor admission uncertain")
