@@ -318,7 +318,6 @@ export function renderOutputs(root: string, policy: Policy = POLICY): Output[] {
     "native-fallback": nativeFallback(policy),
   })
   document("dotfiles/base/.codex/AGENTS.md", { delegation: delegation(policy, false), "direct-models": "- " + direct })
-  document("dotfiles/base/.gemini/config/AGENTS.md", { delegation: delegation(policy, false), "direct-models": "- " + direct })
   document("dotfiles/base/.agents/instructions/lean.md", { delegation: delegation(policy, true) })
   document("tools/pi-subagent-bridge/README.md", {
     "routing-summary": summary(policy) + "\n\n" + table,
