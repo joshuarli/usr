@@ -44,6 +44,11 @@ A gate that converts a tool's exit status into success without reading its resul
 3. **Unobservable by construction:** a TTY entry point, or code for a platform the lane does not build. Exclude it narrowly, with the reason, and name where it is tested instead.
 4. **Dead:** nothing reaches the code. Hand it to `dead-code-archaeology`.
 
+A case-only path variant can resolve to the original file on a case-folded volume.
+Record that filesystem behavior and replay the identity on a supported
+case-sensitive host when one ships. [FFmpeg stage fixtures](https://github.com/laputa-systems/ffmpeg-build/pull/71) ·
+[CMake native sandbox trial](https://github.com/laputa-systems/cmake-build/actions/runs/44469636774)
+
 An **accepted risk** is observable behavior deliberately left unprotected. List it apart from equivalent mutants, with who accepted it and why. Never exclude a survivor because the test is hard to write, and never exclude a whole module to silence survivors. Survivors in glue, logging, and display text need no new test. Say so in the report.
 
 ## Fault injection
