@@ -52,13 +52,26 @@ esac
 # worktree, so a worktree started from a lane still lands beside its siblings.
 base=$(git -C "$cwd" rev-parse --verify HEAD)
 common=$(git -C "$cwd" rev-parse --path-format=absolute --git-common-dir)
-root=$(dirname "$common")
+case "$common" in
+    */.git) root=${common%/.git} ;;
+    *) printf '%s\n' 'worktree-create: requires a primary checkout with its own .git directory' >&2; exit 1 ;;
+esac
+if [ "$(git -C "$root" rev-parse --show-toplevel)" != "$root" ]; then
+    printf '%s\n' 'worktree-create: cannot identify the primary checkout' >&2
+    exit 1
+fi
+if [ -L "$root/.work" ] || [ -L "$root/.work/wt" ]; then
+    printf '%s\n' 'worktree-create: refusing symlinked .work or .work/wt directory' >&2
+    exit 1
+fi
 dir="$root/.work/wt/$name"
 
 # Ignore .work through the repo-local exclude file so no tracked file changes.
 exclude=$(git -C "$root" rev-parse --path-format=absolute --git-path info/exclude)
 mkdir -p "$(dirname "$exclude")"
-grep -qxF '/.work/' "$exclude" 2>/dev/null || printf '%s\n' '/.work/' >> "$exclude"
+if [ ! -f "$exclude" ] || [ "$(tail -n 1 "$exclude")" != '/.work/' ]; then
+    printf '\n%s\n' '/.work/' >> "$exclude"
+fi
 
 git -C "$root" worktree add --no-track -b "worktree-$name" "$dir" "$base" >&2
 printf '%s\n' "$dir"

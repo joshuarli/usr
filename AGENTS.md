@@ -20,6 +20,7 @@ Each path belongs to one sync layer (see [sync](docs/sync.md)). Do not `cat` or 
 | Markdown audit | [tools/mdtool/README.md](tools/mdtool/README.md) |
 | macOS process sandbox | [docs/sbx-spec.md](docs/sbx-spec.md) |
 | Subagent architecture | [docs/subagents.md](docs/subagents.md) |
+| Disk pressure, cleanup and worktree CoW | [docs/agent-disk-pressure.md](docs/agent-disk-pressure.md), [docs/worktree-cow.md](docs/worktree-cow.md) |
 | Runtime independence and FX migration plan | [docs/CAMPAIGN-RUNTIME-INDEPENDENCE-FX.md](docs/CAMPAIGN-RUNTIME-INDEPENDENCE-FX.md) |
 | Runtime independence and FX evidence | [core verification](docs/verification/runtime-independence.md), [CLI spike](docs/verification/runtime-independence-fx.md), [parity audit](docs/verification/fx-subagent-parity-audit-2026-11-19.md) |
 | Pi profile | [docs/pi.md](docs/pi.md) |

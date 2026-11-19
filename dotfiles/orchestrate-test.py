@@ -33,8 +33,10 @@ class OrchestrateTests(unittest.TestCase):
         contract = (ROOT / "dotfiles/base/.codex/AGENTS.md").read_text()
         for model in POLICY["antigravityDirect"]["models"]:
             self.assertIn(model, contract)
-            self.assertNotIn(model, self.text)
-        self.assertIn("Verify it with `agy models`", contract)
+            self.assertNotIn(model, {route["model"] for routes in POLICY["rootRoutes"].values() for route in routes})
+        for pin in POLICY["antigravityDirect"]["tiers"].values():
+            self.assertIn(pin["model"], self.text)
+        self.assertIn("Verify `agy models` and actual child runtime models", contract)
 
     def test_orchestrate_defers_exact_pins_to_model_check(self):
         self.assertIn("On the bridge path, call `worker_model_check` for the tier you are about to assign", self.text)

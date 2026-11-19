@@ -146,7 +146,6 @@ class SkillCampaignTests(unittest.TestCase):
             base / ".dsh" / "AGENTS.md",
             base / ".commandcode" / "AGENTS.md",
             base / ".config" / "opencode" / "AGENTS.md",
-            base / ".gemini" / "config" / "AGENTS.md",
             base / ".pi" / "agent" / "AGENTS.md",
         )
         for adapter in adapters:
@@ -154,6 +153,7 @@ class SkillCampaignTests(unittest.TestCase):
             self.assertTrue(adapter.is_symlink(), step)
             self.assertFalse(adapter.readlink().is_absolute(), step)
             self.assertEqual(canonical.resolve(), adapter.resolve(), step)
+        self.assertEqual(canonical.read_bytes(), (base / ".gemini/config/AGENTS.md").read_bytes())
         bootstrap = base / ".agents" / "instructions" / "bootstrap.md"
         for adapter in (base / ".claude" / "CLAUDE.md", base / ".codex" / "AGENTS.override.md"):
             self.assertTrue(adapter.is_symlink())

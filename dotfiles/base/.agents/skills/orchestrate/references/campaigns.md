@@ -60,6 +60,8 @@ Choose checks from the diff and the affected consumers. Import, registration, sc
 
 Close when every local deliverable's acceptance passes. **Needs environment** items stay listed for the owner and do not hold the campaign open.
 
-To close, stop lanes and run `codex-campaign-closeout.py begin` from the integration worktree. Resolve worktrees with the [general lifecycle](../SKILL.md#worktree-lifecycle). Allow only retained trees, with `codex-campaign-closeout.py allow --path <path> --reason <reason>`. If work resumes, run `codex-campaign-closeout.py cancel`.
+To close, stop lanes and run `codex-campaign-closeout.py begin --path <owned-lane>` from the integration worktree, repeating `--path` for each recorded campaign lane. An empty path list tracks nothing; it never infers ownership from all repository worktrees. Resolve named lanes with the [general lifecycle](../SKILL.md#worktree-lifecycle). Allow only retained trees, with `codex-campaign-closeout.py allow --path <path> --reason <reason>`. Retained lanes stay clean at their recorded HEAD and branch. If work resumes or the scope changes, run `codex-campaign-closeout.py cancel` before beginning again.
+
+The Stop hook may request one continuation to account for unresolved named lanes. If `stop_hook_active` is already true, it reports a nonblocking warning and preserves the marker for later resumption. A legacy marker without explicit ownership asks for review and restart with named paths; it never authorizes sweeping other worktrees. This closeout accounting is separate from opportunistic disk-pressure cleanup.
 
 To pause, use `campaign-winddown`.

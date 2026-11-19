@@ -195,9 +195,11 @@ class InstructionTests(unittest.TestCase):
 
     def test_other_harnesses_keep_the_original_normal_contract(self):
         for relative in (".commandcode/AGENTS.md", ".config/muse/AGENTS.md", ".config/opencode/AGENTS.md",
-                         ".dsh/AGENTS.md", ".fx/AGENTS.md", ".gemini/config/AGENTS.md",
+                         ".dsh/AGENTS.md", ".fx/AGENTS.md",
                          ".pi/agent/AGENTS.md"):
             self.assertEqual((BASE / relative).resolve(strict=True), NORMAL.resolve(strict=True))
+        # The policy generator owns Antigravity's regular-file projection.
+        self.assertEqual((BASE / ".gemini/config/AGENTS.md").read_bytes(), NORMAL.read_bytes())
 
 
 if __name__ == "__main__":

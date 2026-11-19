@@ -197,8 +197,11 @@ REGISTRY: tuple[Check, ...] = (
     Check("instructions", (INSTRUCTIONS,), py("dotfiles/instructions-test.py"), (*CONTRACTS, "dotfiles/base/.local/bin/agent-instructions.py", "dotfiles/instructions-test.py"), tmpdir=True),
     Check("reset-agents", (HOOKS,), ("sh", "dotfiles/reset-agents-test.sh"), ("dotfiles/base/.local/bin/reset-agents", "dotfiles/base/.local/bin/reset-agent-home", "dotfiles/reset-agents-test.sh")),
     Check("pre-push", (HOOKS,), ("sh", "pre-push-test.sh"), ("dotfiles/base/.config/git/hooks/", "dotfiles/pre-push-test.sh"), cwd="dotfiles"),
-    Check("worktree-remove", (HOOKS,), ("sh", "worktree-remove-test.sh"), ("dotfiles/base/.local/bin/worktree-remove", "dotfiles/worktree-remove-test.sh"), cwd="dotfiles"),
-    Check("worktree-retire", (HOOKS,), py("dotfiles/worktree-retire-test.py"), ("dotfiles/base/.local/bin/worktree-retire", "dotfiles/worktree-retire-test.py")),
+    Check("worktree-remove", (HOOKS,), ("sh", "worktree-remove-test.sh"), ("dotfiles/base/.local/bin/worktree-remove", "dotfiles/base/.local/bin/worktree-retire", "dotfiles/worktree-remove-test.sh"), cwd="dotfiles"),
+    Check("worktree-retire", (HOOKS,), py("dotfiles/worktree-retire-test.py"), ("dotfiles/base/.local/bin/worktree-create", "dotfiles/base/.local/bin/worktree-retire", "dotfiles/worktree-retire-test.py")),
+    Check("disk-pressure", (HOOKS,), py("dotfiles/disk-pressure-test.py"), ("dotfiles/base/.local/bin/agent-disk-pressure", "dotfiles/disk-pressure-test.py", "dotfiles/base/.codex/config.toml", "dotfiles/base/.claude/settings.json", "docs/agent-disk-pressure.md")),
+    Check("pi-disk-pressure", (HOOKS,), ("node", "dotfiles/pi-disk-pressure-test.mjs"), ("dotfiles/base/.pi/agent/extensions/disk-pressure.js", "dotfiles/pi-disk-pressure-test.mjs"), needs=("node",)),
+    Check("campaign-closeout", (HOOKS,), py("dotfiles/codex-campaign-closeout-test.py"), ("dotfiles/base/.local/bin/codex-campaign-closeout.py", "dotfiles/codex-campaign-closeout-test.py"), tmpdir=True),
     Check("zsh-shim", (ZSH,), ("sh", "zsh-shim-test.sh"), ("dotfiles/darwin/.local/bin/zsh", "dotfiles/base/.local/bin/bash", "dotfiles/base/.config/sh/config.sh", "dotfiles/zsh-shim-test.sh"), cwd="dotfiles"),
     Check("mdtool-selftest", (MDTOOL,), py("tools/mdtool/src/mdtool.py", "selftest"), ("tools/mdtool/", "dotfiles/base/.local/bin/mdtool")),
     Check("mdtool-suite", (MDTOOL,), ("sh", "tools/mdtool/tests/mdtool-test.sh"), ("tools/mdtool/src/", "tools/mdtool/tests/mdtool-test.sh", "dotfiles/base/.local/bin/mdtool")),
@@ -227,7 +230,7 @@ SUITE: tuple[str, ...] = (
     "uninstall", "kache", "installer", "ffmpeg-runtime", "bootstrap", "sync-integration", "doctor",
     "pi-git-guard", "pinact", "pinact-yaml", "pinact-lint-rules", "pinact-expressions", "pinact-security",
     "pinact-fix", "pinact-pins", "pi-profile", "policy-generated", "policy-generator", "orchestrate", "sbx",
-    "reset-agents", "pre-push", "worktree-remove", "worktree-retire",
+    "reset-agents", "pre-push", "worktree-remove", "worktree-retire", "disk-pressure", "pi-disk-pressure", "campaign-closeout",
     "zsh-shim", "mdtool-suite", "decide", "skills", "project-skills", "skills-campaign",
 )
 

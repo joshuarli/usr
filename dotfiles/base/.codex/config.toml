@@ -287,6 +287,13 @@ command = 'python3 -I -S "$HOME/.local/bin/agent-instructions.py" codex'
 timeout = 5
 additionalContextLimit = 0
 
+[[hooks.SessionStart]]
+
+[[hooks.SessionStart.hooks]]
+type = "command"
+command = 'python3 -I -S "$HOME/.local/bin/agent-disk-pressure" hook'
+timeout = 5
+
 [[hooks.SubagentStart]]
 
 [[hooks.SubagentStart.hooks]]
@@ -294,6 +301,14 @@ type = "command"
 command = 'python3 -I -S "$HOME/.local/bin/agent-instructions.py" codex'
 timeout = 5
 additionalContextLimit = 0
+
+[[hooks.PostToolUse]]
+matcher = "Bash|Edit|Write|apply_patch"
+
+[[hooks.PostToolUse.hooks]]
+type = "command"
+command = 'python3 -I -S "$HOME/.local/bin/agent-disk-pressure" hook'
+timeout = 5
 
 [[hooks.Stop]]
 
