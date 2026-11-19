@@ -27,7 +27,7 @@ test("native expert paths are first-class and Claude Code pins opus at xhigh eff
   assert.deepEqual(NATIVE_FALLBACK.claudeModels, { scout: "haiku", mechanic: "sonnet", worker: "sonnet", expert: "opus" })
   assert.deepEqual(NATIVE_FALLBACK.claudeEffort, { expert: "xhigh" })
   assert.ok(OPENCODE_NATIVE.model.endsWith("-free"))
-  assert.deepEqual(OPENCODE_NATIVE.efforts, { scout: "low", mechanic: "medium", worker: "high", expert: "max" })
+  assert.deepEqual(OPENCODE_NATIVE.efforts, { scout: "high", mechanic: "high", worker: "high", expert: "high" })
 })
 
 test("the plans are the pins the bridge admits, and the exported routes derive from them", () => {
@@ -75,6 +75,6 @@ test("Antigravity uses native-only Neon and Hydrogen tiers", () => {
   assert.equal(ANTIGRAVITY_DIRECT.tiers.expert.model, "gemini-4-neon-high")
   assert.equal(ANTIGRAVITY_DIRECT.tiers.expert.selector, "pro")
   assert.equal(isBannedModel(ANTIGRAVITY_DIRECT.manualCarbon), true)
-  assert.ok(!ANTIGRAVITY_DIRECT.models.includes(ANTIGRAVITY_DIRECT.manualCarbon))
+  assert.ok(!(ANTIGRAVITY_DIRECT.models as readonly string[]).includes(ANTIGRAVITY_DIRECT.manualCarbon))
   assert.deepEqual(ANTIGRAVITY_DIRECT.retired, ["gemini-3.8-flash", "gemini-4-argon"])
 })
