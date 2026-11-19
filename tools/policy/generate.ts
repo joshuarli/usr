@@ -116,7 +116,8 @@ function directModels(policy: Policy): string {
   const a = policy.antigravityDirect
   return `Antigravity main: ${code(a.main.model)} (${code(a.main.effort)}); direct god mode: ${code(a.god.model)} (${code(a.god.effort)}). Native \`usr-*\` subagents only: ${Object.entries(a.tiers).map(([tier,p])=>`${tier} ${code(p.name)} targets ${code(p.model)} (${code(p.effort)})`).join("; ")}. ` +
     "Never use `pi-subagent-bridge` from agy. Custom-agent `model: flash/pro` is only a tier selector, not an enforced exact model or effort pin. " +
-    `Verify \`agy models\` and actual child runtime models before using lanes; fail closed for Gemini 3.8, Argon, Carbon or mismatched tiers. Carbon (${code(a.manualCarbon)}) is manual owner-only, never an automatic fallback. Do not purchase API credits.`
+    `Allowed direct models: ${a.models.map(code).join(", ")}. ` +
+    `Verify \`agy models\` and actual child runtime models before using lanes; fail closed for ${a.retired.map(code).join(" or ")}, Carbon or mismatched tiers. Carbon (${code(a.manualCarbon)}) is manual owner-only, never an automatic fallback. Do not purchase API credits.`
 }
 
 export function replaceBlocks(text: string, blocks: Blocks, yaml = false): string {
