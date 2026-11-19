@@ -7,7 +7,7 @@ description: "Route coding subagents through native Command Code/OpenCode/Devin 
 
 <!-- policy:begin routing-intro -->
 <!-- Generated from tools/pi-subagent-bridge/src/policy.ts; run make generate. -->
-**All scout/mechanic/worker coding subagents use `pi-subagent-bridge` by default**, except top-level OpenCode, Devin and Command Code native parents described below. Bridge tiers: `scout`, `mechanic`, `worker`. Native-only tier: `expert`, which always runs as a harness-native subagent and never through the bridge. There is no `god` tier. The model families `gemini-4-argon` and `gemini-4-carbon` and `gpt-6-astra` and `gpt-6.1-astra` and `gpt-6.2-astra` are prohibited, including every effort variant.
+**All scout/mechanic/worker coding subagents use `pi-subagent-bridge` by default**, except top-level OpenCode, Devin, Command Code and Antigravity native parents described below. Bridge tiers: `scout`, `mechanic`, `worker`. Native-only tier: `expert`, which always runs as a harness-native subagent and never through the bridge. There is no `god` tier. The model families `gemini-4-argon` and `gemini-4-carbon` and `gpt-6-astra` and `gpt-6.1-astra` and `gpt-6.2-astra` are prohibited, including every effort variant.
 <!-- policy:end routing-intro -->
 
 <!-- policy:begin opencode -->
@@ -43,6 +43,20 @@ Bridge pins, fallbacks, and nesting rules do not apply on this path.
 
 Native agents have separate contexts and cannot spawn another agent. They do not provide bridge admission or Git worktree containment: the parent owns isolation, scope, review, tests and integration. Agent frontmatter pins are not hard enforcement: a per-call model override takes precedence, and unsupported effort silently reverts to model default. Check `cmd --list-models` and the `/model` effort picker on each host before trusting a lane; block it rather than silently substituting. Collect detached results with `agent_output` and run `scope-check --lane` on native writer lanes.
 <!-- policy:end command-code -->
+
+<!-- policy:begin antigravity -->
+<!-- Generated from tools/pi-subagent-bridge/src/policy.ts; run make generate. -->
+**Antigravity CLI exception:** A top-level `agy` session delegates only through native `invoke_subagent`. Never invoke the Pi bridge or use another harness as fallback. The `god` label is a direct parent-session mode, not a bridge tier. Native `usr-*` definitions live under `~/.gemini/config/agents/`.
+
+| Tier | Native agent | Target model | Target effort | CLI selector |
+| --- | --- | --- | --- | --- |
+| scout | `usr-scout` | `gemini-4-hydrogen-low` | `low` | `flash` |
+| mechanic | `usr-mechanic` | `gemini-4-hydrogen-low` | `low` | `flash` |
+| worker | `usr-worker` | `gemini-4-hydrogen-high` | `high` | `flash` |
+| expert | `usr-expert` | `gemini-4-neon-high` | `high` | `pro` |
+
+The CLI's documented agent schema accepts `model: flash/pro` selectors, not exact model IDs or effort pins. Treat these as target allocations, check actual child model and effort on first use, and block any lane resolving to Gemini 3.8, Carbon, Argon or an unexpected model. Carbon may only be selected manually by the owner, outside delegation. See `docs/antigravity-native.md`.
+<!-- policy:end antigravity -->
 
 <!-- policy:begin native-fallback -->
 <!-- Generated from tools/pi-subagent-bridge/src/policy.ts; run make generate. -->

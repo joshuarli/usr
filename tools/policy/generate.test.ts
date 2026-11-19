@@ -199,7 +199,7 @@ type MutablePolicy = {
   opencode: { model: string; efforts: Record<string, string> }
   commandNative: Record<string, { name: string; model: string; effort?: string }>
   nativeFallback: { tiers: string[]; claudeModels: Record<string, string>; claudeEffort: Record<string, string> }
-  antigravityDirect: { models: string[] }
+  antigravityDirect: { models: string[]; main: { model: string; effort: string }; god: { model: string; effort: string }; tiers: Record<string, { name: string; model: string; effort: string; selector: string }>; manualCarbon: string; retired: string[] }
   bannedModels: string[]
 }
 type Dimension = { name: string; mutate: (policy: MutablePolicy) => void; rejects?: RegExp }
@@ -256,6 +256,14 @@ const dimensions: Dimension[] = [
   { name: "antigravity direct first model", mutate: p => { p.antigravityDirect.models[0] = "fixture-direct-a" } },
   { name: "antigravity direct second model", mutate: p => { p.antigravityDirect.models[1] = "fixture-direct-b" } },
   { name: "antigravity direct list length", mutate: p => { p.antigravityDirect.models.push("fixture-direct-c") } },
+  { name: "antigravity main model", mutate: p => { p.antigravityDirect.main.model = "fixture-main-model" } },
+  { name: "antigravity god model", mutate: p => { p.antigravityDirect.god.model = "fixture-god-model" } },
+  { name: "antigravity worker model", mutate: p => { p.antigravityDirect.tiers.worker.model = "fixture-worker-model" } },
+  { name: "antigravity scout effort", mutate: p => { p.antigravityDirect.tiers.scout.effort = "medium" } },
+  { name: "antigravity native selector", mutate: p => { p.antigravityDirect.tiers.mechanic.selector = "pro" } },
+  { name: "antigravity manual Carbon", mutate: p => { p.antigravityDirect.manualCarbon = "fixture-carbon-model" } },
+  { name: "antigravity retired model", mutate: p => { p.antigravityDirect.retired.push("fixture-retired-model") } },
+  { name: "antigravity invalid selector", mutate: p => { p.antigravityDirect.tiers.worker.selector = "invalid" }, rejects: /Invalid Antigravity CLI model selector/ },
 
   { name: "banned family list", mutate: p => { p.bannedModels = ["gemini-4-argon"] } },
   { name: "banned family covering the direct Antigravity model", mutate: p => { p.bannedModels.push("gemini-4-hydrogen") }, rejects: /Prohibited model in active policy/ },

@@ -11,6 +11,12 @@ Load one user contract, not a normal contract plus model-specific corrections. N
 
 The lean version keeps owner preferences and boundaries rather than general coaching. It no longer requires loading `do` merely because a task is substantive. Requested workflows and useful task-specific skills still apply; `orchestrate` still governs every delegation. Performance, structured-data and renaming procedures are read only when relevant. The shared skill catalog and its invocation metadata have not changed, so this reduces the user contract, not all context a harness may load.
 
+## Antigravity Neon guidance
+
+Antigravity CLI retains its normal global contract and gains a small `always_on` native rule at `~/.gemini/config/rules/neon.md`. It scopes Neon to evidence-grounded tool use and bounded acceptance checks while Hydrogen implements delegated narrow slices. This is guidance, not an official model-card prompt template or a model-switching hook. The [Neon model card](https://deepmind.google/models/model-cards/gemini-4-neon/) reports a March 2026 knowledge cutoff and residual hallucination risk: validate post-cutoff facts and actual CLI models, not confidence alone.
+
+See [Antigravity native tiers](antigravity-native.md) for the native model-selection limitation and runtime checks.
+
 ## Sol 6.2 model baseline
 
 Reviewed November 17, 2026 against the [Sol 6.2 model card](https://developers.openai.com/api/docs/models/gpt-6.2-sol) and [Codex model documentation](https://learn.chatgpt.com/docs/models). The Codex default is `gpt-6.2-sol` at `medium` effort and `default` service tier. Scout, mechanic, worker, native expert, fallback, and memory assignments retain their existing roles and effort settings. Astra remains prohibited by the shared [model policy](../tools/pi-subagent-bridge/src/policy.ts), including its 6, 6.1, and 6.2 families and effort variants. The bridge rejects prohibited launches and persisted sessions; harness-native lanes follow the shared instruction contract.

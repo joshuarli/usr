@@ -88,22 +88,35 @@ function nativeFallback(policy: Policy): string {
 }
 
 function delegation(policy: Policy, lean: boolean): string {
-  const head = lean ? "- Before delegation, read `orchestrate`; use native `usr-*` agents for top-level Command Code and `pi-subagent-bridge` for other scout/mechanic/worker parents except OpenCode and Devin." :
-    "- All scout/mechanic/worker coding subagents, in every harness and skill, MUST launch through `pi-subagent-bridge` MCP tools or its CLI shim except top-level Command Code, OpenCode and Devin parents; follow `orchestrate`. Expert assignments use harness-native subagents (including Command Code `usr-expert`, OpenCode's `expert` agent, Devin's `run_subagent`, Codex's native subagents, Pi's native `expert` profile, Claude Code's " + code(policy.nativeFallback.claudeModels.expert) + " at " + code(policy.nativeFallback.claudeEffort.expert) + " effort); the bridge has no expert tier."
+  const head = lean ? "- Before delegation, read `orchestrate`; use native `usr-*` agents for top-level Command Code and `pi-subagent-bridge` for other scout/mechanic/worker parents except OpenCode, Devin and Antigravity." :
+    "- All scout/mechanic/worker coding subagents, in every harness and skill, MUST launch through `pi-subagent-bridge` MCP tools or its CLI shim except top-level Command Code, OpenCode, Devin and Antigravity parents; follow `orchestrate`. Expert assignments use harness-native subagents (including Command Code `usr-expert`, OpenCode's `expert` agent, Devin's `run_subagent`, Codex's native subagents, Pi's native `expert` profile, Claude Code's " + code(policy.nativeFallback.claudeModels.expert) + " at " + code(policy.nativeFallback.claudeEffort.expert) + " effort); the bridge has no expert tier."
   return head + " A top-level OpenCode session delegates only through OpenCode native subagents; free top-level models require free tier models. " +
     "A top-level Devin session delegates only through Devin native subagents. " +
     "A top-level Command Code session delegates only through native pinned `usr-*` subagents (HY4-medium worker is opt-in). " +
+    "A top-level Antigravity CLI session delegates only through native `usr-*` subagents; never use the Pi bridge. " +
     `No ${code("god")} tier exists. ` +
     `Never route to ${policy.bannedModels.map(code).join(" or ")}. ` +
+    "On Antigravity, Gemini 3.8 is retired and Carbon is never a fallback; a manual Carbon session requires the owner\'s explicit request. " +
     `Only ${policy.nativeFallback.tiers.join("/")} may use tier-matched native subagents after bridge quota/backend exhaustion, ` +
     "with the same scope, worktree and independent parent review. " +
     (lean ? "With verified, safely shareable evidence and meaningful tier uncertainty, consult `decide`; unavailable advice does not block." :
       "The parent scopes, verifies, reviews and integrates.")
 }
 
+function antigravity(policy: Policy): string {
+  const a = policy.antigravityDirect
+  const rows = Object.entries(a.tiers).map(([tier, pin]) =>
+    `| ${tier} | ${code(pin.name)} | ${code(pin.model)} | ${code(pin.effort)} | ${code(pin.selector)} |`).join("\n")
+  return "**Antigravity CLI exception:** A top-level `agy` session delegates only through native `invoke_subagent`. Never invoke the Pi bridge or use another harness as fallback. The `god` label is a direct parent-session mode, not a bridge tier. Native `usr-*` definitions live under `~/.gemini/config/agents/`.\n\n" +
+    "| Tier | Native agent | Target model | Target effort | CLI selector |\n| --- | --- | --- | --- | --- |\n" + rows +
+    "\n\nThe CLI's documented agent schema accepts `model: flash/pro` selectors, not exact model IDs or effort pins. Treat these as target allocations, check actual child model and effort on first use, and block any lane resolving to Gemini 3.8, Carbon, Argon or an unexpected model. Carbon may only be selected manually by the owner, outside delegation. See `docs/antigravity-native.md`."
+}
+
 function directModels(policy: Policy): string {
-  return `Antigravity main sessions replacing Gemini 3.8 Flash must explicitly select an available approved model: ${policy.antigravityDirect.models.map(code).join(" or ")}. ` +
-    "Verify it with `agy models`; never silently substitute a model or purchase API credits."
+  const a = policy.antigravityDirect
+  return `Antigravity main: ${code(a.main.model)} (${code(a.main.effort)}); direct god mode: ${code(a.god.model)} (${code(a.god.effort)}). Native \`usr-*\` subagents only: ${Object.entries(a.tiers).map(([tier,p])=>`${tier} ${code(p.name)} targets ${code(p.model)} (${code(p.effort)})`).join("; ")}. ` +
+    "Never use `pi-subagent-bridge` from agy. Custom-agent `model: flash/pro` is only a tier selector, not an enforced exact model or effort pin. " +
+    `Verify \`agy models\` and actual child runtime models before using lanes; fail closed for Gemini 3.8, Argon, Carbon or mismatched tiers. Carbon (${code(a.manualCarbon)}) is manual owner-only, never an automatic fallback. Do not purchase API credits.`
 }
 
 export function replaceBlocks(text: string, blocks: Blocks, yaml = false): string {
@@ -202,6 +215,16 @@ function validatePolicy(policy: Policy): void {
   for (const profile of profiles(policy))
     if (profile.allowed.some(name => !profileNames.has(name))) throw new Error(`Unknown descendant in ${profile.name}`)
   for (const value of policy.antigravityDirect.models) validateModel(value)
+  validateModel(policy.antigravityDirect.main.model)
+  validateModel(policy.antigravityDirect.god.model)
+  if (new Set(Object.values(policy.antigravityDirect.tiers).map(pin => pin.name)).size !== Object.keys(policy.antigravityDirect.tiers).length)
+    throw new Error("Duplicate Antigravity native agent name")
+  for (const pin of Object.values(policy.antigravityDirect.tiers)) {
+    code(pin.name); validateModel(pin.model); code(pin.effort)
+    if (!["flash", "pro"].includes(pin.selector)) throw new Error("Invalid Antigravity CLI model selector")
+  }
+  code(policy.antigravityDirect.manualCarbon)
+  for (const retired of policy.antigravityDirect.retired) code(retired)
   validateModel(policy.opencode.model)
   if (new Set(Object.values(policy.commandNative).map(pin => pin.name)).size !== Object.keys(policy.commandNative).length)
     throw new Error("Duplicate Command Code native agent name")
@@ -286,13 +309,15 @@ export function renderOutputs(root: string, policy: Policy = POLICY): Output[] {
   const table = routingTable(policy)
   const direct = directModels(policy)
   document("dotfiles/base/.agents/skills/orchestrate/SKILL.md", {
-    "routing-intro": "**All scout/mechanic/worker coding subagents use `pi-subagent-bridge` by default**, except top-level OpenCode, Devin and Command Code native parents described below. " + summary(policy),
+    "routing-intro": "**All scout/mechanic/worker coding subagents use `pi-subagent-bridge` by default**, except top-level OpenCode, Devin, Command Code and Antigravity native parents described below. " + summary(policy),
     "opencode": openCode(policy),
     "devin": devin(),
     "command-code": commandCode(policy),
+    "antigravity": antigravity(policy),
     "native-fallback": nativeFallback(policy),
   })
   document("dotfiles/base/.codex/AGENTS.md", { delegation: delegation(policy, false), "direct-models": "- " + direct })
+  document("dotfiles/base/.gemini/config/AGENTS.md", { delegation: delegation(policy, false), "direct-models": "- " + direct })
   document("dotfiles/base/.agents/instructions/lean.md", { delegation: delegation(policy, true) })
   document("tools/pi-subagent-bridge/README.md", {
     "routing-summary": summary(policy) + "\n\n" + table,
@@ -301,6 +326,12 @@ export function renderOutputs(root: string, policy: Policy = POLICY): Output[] {
   })
   document("docs/pi.md", { "routing-summary": summary(policy) })
   document("docs/agent-setup.md", { "routing-summary": summary(policy) })
+  for (const pin of Object.values(policy.antigravityDirect.tiers)) {
+    const path = `dotfiles/base/.gemini/config/agents/${pin.name}.md`
+    const previous = read(path)
+    const fields = [`model: ${pin.selector}`, "subagent: true", "mainAgent: false"]
+    emit(path, replaceBlocks(previous, { "native-agent": fields.join("\n") }, true), previous)
+  }
   for (const pin of Object.values(policy.commandNative)) {
     const path = `dotfiles/base/.commandcode/agents/${pin.name}.md`
     const previous = read(path)

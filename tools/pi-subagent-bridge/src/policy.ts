@@ -23,12 +23,19 @@ export type RootPlan = {
 }
 export type FallbackPlan = RootPlan
 
-const antigravityFamily = "gemini-4-hydrogen"
-function antigravityModel<E extends "low" | "medium" | "high" | "xhigh">(effort: E) {
-  return `${antigravityFamily}-${effort}` as const
-}
+/** Antigravity CLI native target allocation. The custom-agent schema only admits flash/pro tier hints. */
 export const ANTIGRAVITY_DIRECT = {
-  models: [antigravityModel("high"), antigravityModel("medium")],
+  models: ["gemini-4-neon-high", "gemini-4-neon-xhigh", "gemini-4-hydrogen-high", "gemini-4-hydrogen-low"],
+  main: { model: "gemini-4-neon-high", effort: "high" },
+  god: { model: "gemini-4-neon-xhigh", effort: "xhigh" },
+  tiers: {
+    scout: { name: "usr-scout", model: "gemini-4-hydrogen-low", effort: "low", selector: "flash" },
+    mechanic: { name: "usr-mechanic", model: "gemini-4-hydrogen-low", effort: "low", selector: "flash" },
+    worker: { name: "usr-worker", model: "gemini-4-hydrogen-high", effort: "high", selector: "flash" },
+    expert: { name: "usr-expert", model: "gemini-4-neon-high", effort: "high", selector: "pro" },
+  },
+  manualCarbon: "gemini-4-carbon-high",
+  retired: ["gemini-3.8-flash", "gemini-4-argon"],
 } as const
 
 const codexModels = { small: "gpt-6-luna", coding: "gpt-6.1-terra" } as const

@@ -1,7 +1,7 @@
 import test from "node:test"
 import assert from "node:assert/strict"
 import {
-  BANNED_MODELS, CODEX_TIER_MODELS, COMMAND_TIER_MODELS,
+  ANTIGRAVITY_DIRECT, BANNED_MODELS, CODEX_TIER_MODELS, COMMAND_TIER_MODELS,
   NATIVE_FALLBACK, OPENCODE_NATIVE, POLICY, ROOT_PLANS, isBannedModel, routesOf,
 } from "../src/policy.ts"
 import { GO_TIER_MODELS, PI_MODEL_ALLOWLIST, TIER_TOOLS, isTier, BRIDGE_TIERS } from "../src/tier-policy.ts"
@@ -62,4 +62,19 @@ test("projection contains each native model once without widening read-only tool
   for (const tool of ["bash", "edit", "write"]) assert.equal((TIER_TOOLS.scout as readonly string[]).includes(tool), false)
   assert.deepEqual(JSON.parse(JSON.stringify(POLICY)), POLICY)
   assert.deepEqual(Object.keys(POLICY.rootRoutes), POLICY.tiers)
+})
+
+test("Antigravity uses native-only Neon and Hydrogen tiers", () => {
+  assert.deepEqual(ANTIGRAVITY_DIRECT.main, { model: "gemini-4-neon-high", effort: "high" })
+  assert.deepEqual(ANTIGRAVITY_DIRECT.god, { model: "gemini-4-neon-xhigh", effort: "xhigh" })
+  assert.deepEqual(Object.keys(ANTIGRAVITY_DIRECT.tiers), ["scout", "mechanic", "worker", "expert"])
+  for (const tier of ["scout", "mechanic", "worker"] as const) {
+    assert.match(ANTIGRAVITY_DIRECT.tiers[tier].model, /^gemini-4-hydrogen-/)
+    assert.equal(ANTIGRAVITY_DIRECT.tiers[tier].selector, "flash")
+  }
+  assert.equal(ANTIGRAVITY_DIRECT.tiers.expert.model, "gemini-4-neon-high")
+  assert.equal(ANTIGRAVITY_DIRECT.tiers.expert.selector, "pro")
+  assert.equal(isBannedModel(ANTIGRAVITY_DIRECT.manualCarbon), true)
+  assert.ok(!ANTIGRAVITY_DIRECT.models.includes(ANTIGRAVITY_DIRECT.manualCarbon))
+  assert.deepEqual(ANTIGRAVITY_DIRECT.retired, ["gemini-3.8-flash", "gemini-4-argon"])
 })

@@ -12,6 +12,7 @@ const NOTICE = `<!-- Generated from ${SOURCE}; run make subagent-visualization. 
 
 function markdown(): string {
   const opencode = POLICY.opencode
+  const agy = POLICY.antigravityDirect
   const expertPi = POLICY.nativePi.goModels.expert
   const expertClaude = `\`${POLICY.nativeFallback.claudeModels.expert}\`, \`${POLICY.nativeFallback.claudeEffort.expert}\` effort`
   const quota = POLICY.nativeFallback.tiers.map(tier => `\`${tier}\` \`${POLICY.nativeFallback.claudeModels[tier as "scout"]}\``).join(" · ")
@@ -31,6 +32,7 @@ function markdown(): string {
     "",
     '  tier -->|expert| harness{"Harness of the parent session?"}',
     '  harness -->|OpenCode top-level| oc_exp["OpenCode native expert agent<br/>' + opencode.model + "<br/>effort " + opencode.efforts.expert + '"]',
+    '  harness -->|Antigravity| agy_exp["Antigravity native expert<br/>' + agy.tiers.expert.name + "<br/>" + agy.tiers.expert.model + '"]',
     '  harness -->|Command Code| cmd_exp["Command Code native expert<br/>' + POLICY.commandNative.expert.name + "<br/>" + POLICY.commandNative.expert.model + ", " + POLICY.commandNative.expert.effort + '"]',
     '  harness -->|Devin top-level| dv_exp["Devin native run_subagent<br/>subagent_general or subagent_explore<br/>no per-tier pin"]',
     '  harness -->|Codex| cx_exp["Codex native subagent<br/>session-config model, no per-tier pin"]',
@@ -38,9 +40,10 @@ function markdown(): string {
     '  harness -->|Claude Code| cc_exp["Claude Code native subagent<br/>' + POLICY.nativeFallback.claudeModels.expert + ", " + POLICY.nativeFallback.claudeEffort.expert + ' effort"]',
     '  harness -->|any other harness| other["No defined lane in this contract<br/>report to the owner before delegating"]',
     "",
-    '  tier -->|scout / mechanic / worker| cwd{"Top-level OpenCode, Devin or Command Code session?"}',
+    '  tier -->|scout / mechanic / worker| cwd{"Top-level OpenCode, Devin, Command Code or Antigravity session?"}',
     '  cwd -->|OpenCode| oc["OpenCode native tier agent<br/>scout ' + opencode.efforts.scout + ' · mechanic ' + opencode.efforts.mechanic + ' · worker ' + opencode.efforts.worker + '<br/>' + opencode.model + '"]',
     '  cwd -->|Devin| dv["Devin native run_subagent<br/>subagent_explore (read-only) · subagent_general (changes)"]',
+    '  cwd -->|Antigravity| agy["Antigravity native usr-* agents<br/>Hydrogen scout/mechanic/worker<br/>verify actual model and effort"]',
     '  cwd -->|Command Code| cmd["Command Code native usr-* agents<br/>scout Inkling 2 Small Free · mechanic HY4 Flash<br/>worker DeepSeek V4.1 Flash · expert HY4<br/>HY4-medium worker only explicit pilot"]',
     '  cwd -->|otherwise| bridge["pi-subagent-bridge<br/>worker_model_check → worker_start"]',
     "",
@@ -58,10 +61,10 @@ function markdown(): string {
     "",
     "Expert is native everywhere; the bridge is reserved for `scout`/`mechanic`/`worker` in harnesses without a top-level native exception.",
     "",
-    "| Assignment | OpenCode (top-level) | Devin (top-level) | Command Code (top-level) | Codex | Pi | Claude Code |",
-    "| --- | --- | --- | --- | --- | --- | --- |",
-    `| expert | native \`expert\` agent (${opencodeTier("expert")}) | \`run_subagent\`, unpinned | \`${POLICY.commandNative.expert.name}\` (\`${POLICY.commandNative.expert.model}\`, \`${POLICY.commandNative.expert.effort}\`) | native subagent, unpinned | native \`expert\` profile (\`${expertPi.providerID}/${expertPi.id}\`, \`${expertPi.variant}\`) | native subagent (${expertClaude}) |`,
-    `| quota exhaustion (scout/mechanic/worker) | never uses the bridge | never uses the bridge | never uses the bridge; do not silently switch native models | not defined; report rather than substitute | not defined; report rather than substitute | native subagents: ${quota}, same brief, worktree and scope |`,
+    "| Assignment | OpenCode (top-level) | Devin (top-level) | Command Code (top-level) | Codex | Pi | Claude Code | Antigravity CLI |",
+    "| --- | --- | --- | --- | --- | --- | --- | --- |",
+    `| expert | native \`expert\` agent (${opencodeTier("expert")}) | \`run_subagent\`, unpinned | \`${POLICY.commandNative.expert.name}\` (\`${POLICY.commandNative.expert.model}\`, \`${POLICY.commandNative.expert.effort}\`) | native subagent, unpinned | native \`expert\` profile (\`${expertPi.providerID}/${expertPi.id}\`, \`${expertPi.variant}\`) | native subagent (${expertClaude}) | native \`${agy.tiers.expert.name}\` (target \`${agy.tiers.expert.model}\`) |`,
+    `| quota exhaustion (scout/mechanic/worker) | never uses the bridge | never uses the bridge | never uses the bridge; do not silently switch native models | not defined; report rather than substitute | not defined; report rather than substitute | native subagents: ${quota}, same brief, worktree and scope | never uses bridge; block mismatched model |`,
     "",
     "Codex, Pi and Claude Code route `scout`/`mechanic`/`worker` through the bridge; the admitted routes are:",
     "",
@@ -74,6 +77,7 @@ function markdown(): string {
     "- The bridge admits `scout`, `mechanic`, `worker` only. `worker_model_check`, `worker_start`, resume, steer and the MCP schemas reject `expert`.",
     "- Expert is harness-native everywhere; nothing routes to the bridge. Expert is terminal by lane: use it for exceptional architectural decisions and adversarial review, never as a size-based upgrade.",
     "- Top-level OpenCode, Devin and Command Code sessions never use the bridge, at any tier or as a fallback. Command Code uses native `usr-*` agents; HY4-medium worker is an explicit pilot, not a default. When the OpenCode top-level model is free, every tier runs a free model (its configured tier agents use `opencode/inkling-2-small-free`).",
+    "- Top-level Antigravity CLI sessions use native usr-* subagents only. Its flash/pro model selectors do not enforce exact model IDs or efforts: verify or block the lane. God is a direct main-session mode.",
     "- Claude Code, Codex and Pi sessions use the bridge for `scout`/`mechanic`/`worker`; the bridge owns provider fallback (Codex → Command Code leaf → ordered Pi), only before edits, only along admitted routes.",
     "- Command Code native children cannot spawn another subagent. Native frontmatter pins and parent scoping are instructions, not bridge-enforced admission; model overrides and unsupported effort can bypass intended settings.",
     "- An admitted session keeps its recorded model and route. A task failure, rejected acceptance check or scope change is not a provider failure and never authorizes a replacement worker.",

@@ -26,8 +26,8 @@ make subagent-visualization
 ```
 
 `generate` renders checked-in policy tables, bounded instruction blocks, native
-Pi profile fields, Pi subagent settings, OpenCode tier models and Command Code
-native agent model/effort pins.
+Pi profile fields, Pi subagent settings, OpenCode tier models, Command Code native agent model/effort pins, and
+Antigravity native agent tier selectors plus synchronized global instructions.
 `policy.generated.json` is the same deterministic export for Python consumers.
 `policy` prints that JSON without reading credentials or probing providers.
 Live availability belongs to `worker_model_check`.
