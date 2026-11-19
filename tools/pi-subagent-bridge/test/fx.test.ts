@@ -156,7 +156,7 @@ const fs=require('node:fs'),p=require('node:path');
 if(process.argv.includes('--version')){console.log('0.0.17');process.exit(0)}
 const id='native-fixture',dir=p.join(process.env.FX_HOME,'sessions/v2',id);
 fs.mkdirSync(p.join(process.env.FX_HOME,'sessions/v2/.tmp'),{recursive:true});fs.writeFileSync(p.join(process.env.FX_HOME,'sessions/v2/index.jsonl'),'');fs.mkdirSync(dir,{recursive:true});fs.writeFileSync(p.join(dir,'log.jsonl'),JSON.stringify({v:1,kind:'session_created',id,workspace:process.cwd(),role:'root'})+'\\n');
-fs.writeFileSync(p.join(process.env.FX_HOME,'probe.json'),JSON.stringify({path:process.env.PATH,secret:process.env.PILOT_TEST_SECRET??null}));
+fs.writeFileSync(p.join(process.env.FX_HOME,'probe.json'),JSON.stringify({path:process.env.PATH,secret:process.env.PILOT_TEST_SECRET??null,scoped:process.env.USR_SCOPED_WORKER??null}));
 console.log(JSON.stringify({exit_code:0,model:'fixture-model',session_id:id,final_output:'PROOF fixture\\nACCEPTANCE: met',usage:{input_tokens:1,output_tokens:1}}));
 `
   writeFileSync(binary, source, { mode: 0o755 })
@@ -202,6 +202,14 @@ test("FX pathEnv provisions the child toolchain PATH", async t => {
   assert.equal(probe.secret, null)
 })
 
+test("FX workers carry the scoped-worker marker so coordinator-only hooks stay suppressed", async t => {
+  const f = envProbeFixture(t)
+  const run = f.fx.start(f.request)
+  assert.equal((await ended(run)).state, "succeeded")
+  const job = JSON.parse(readFileSync(run.output + ".job.json", "utf8"))
+  assert.equal(JSON.parse(readFileSync(join(job.fxHome, "probe.json"), "utf8")).scoped, "1")
+})
+
 test("FX reserved env names are refused for secrets and extra environment", t => {
   const scratch = new Scratch()
   t.after(() => scratch.close())
@@ -209,7 +217,7 @@ test("FX reserved env names are refused for secrets and extra environment", t =>
   writeFileSync(binary, "#!/bin/true\n", { mode: 0o755 })
   const sha = createHash("sha256").update(readFileSync(binary)).digest("hex")
   const base = { binary, binarySha256: sha, home: scratch.path, provider: "fixture", connection: {}, allowedCommands: [] }
-  for (const name of ["FX_PROVIDER", "FX_PERMISSION_MODE", "LD_PRELOAD", "DYLD_INSERT_LIBRARIES", "GIT_DIR", "BASH_ENV", "PYTHONPATH", "NODE_OPTIONS", "HOME", "lowercase"]) {
+  for (const name of ["FX_PROVIDER", "FX_PERMISSION_MODE", "LD_PRELOAD", "DYLD_INSERT_LIBRARIES", "GIT_DIR", "BASH_ENV", "PYTHONPATH", "NODE_OPTIONS", "HOME", "USR_SCOPED_WORKER", "lowercase"]) {
     assert.throws(() => makeFxAdapter({ ...base, secretEnvFiles: { [name]: "/tmp/x" } }), /Invalid FX secret env/, name)
     assert.throws(() => makeFxAdapter({ ...base, extraEnv: { [name]: "x" } }), /Invalid FX extra env/, name)
   }

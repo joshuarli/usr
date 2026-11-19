@@ -30,7 +30,7 @@ export type FxOptions = {
 type Job = { nonce: string; cwd: string; fxHome: string; selection: FxSelection; output: string; errors: string; resume?: string }
 const children = new Map<number, { child: ChildProcess; run: CommandRun }>()
 const RESERVED_ENV_PREFIX = /^(?:FX_|LD_|DYLD_|GIT_)/
-const RESERVED_ENV_NAMES = new Set(["HOME", "PATH", "SHELL", "TMPDIR", "BASH_ENV", "ENV", "ZDOTDIR", "NODE_OPTIONS", "PYTHONPATH", "PYTHONSTARTUP", "PYTHONHOME", "PERL5OPT", "RUBYOPT"])
+const RESERVED_ENV_NAMES = new Set(["HOME", "PATH", "SHELL", "TMPDIR", "BASH_ENV", "ENV", "ZDOTDIR", "NODE_OPTIONS", "PYTHONPATH", "PYTHONSTARTUP", "PYTHONHOME", "PERL5OPT", "RUBYOPT", "USR_SCOPED_WORKER"])
 function invalidEnvName(name: string): boolean {
   return !/^[A-Z_][A-Z0-9_]*$/.test(name) || RESERVED_ENV_PREFIX.test(name) || RESERVED_ENV_NAMES.has(name)
 }
@@ -97,7 +97,7 @@ export function makeFxAdapter(options: FxOptions) {
   for (const name of Object.keys(options.extraEnv ?? {})) {
     if (invalidEnvName(name)) throw new Error("Invalid FX extra env name: " + name)
   }
-  const env: NodeJS.ProcessEnv = { HOME: home, PATH: pathEnv, SHELL: "/bin/sh", FX_AUTO_UPGRADE: "0", FX_DISABLE_KEYCHAIN: "1", FX_HERDR: "0", FX_SOUND: "off", FX_MAX_AGENT_STEPS: "20", ...options.extraEnv }
+  const env: NodeJS.ProcessEnv = { HOME: home, PATH: pathEnv, SHELL: "/bin/sh", FX_AUTO_UPGRADE: "0", FX_DISABLE_KEYCHAIN: "1", FX_HERDR: "0", FX_SOUND: "off", FX_MAX_AGENT_STEPS: "20", USR_SCOPED_WORKER: "1", ...options.extraEnv }
   for (const name of Object.keys(secretEnvFiles)) {
     if (name in env || name === "FX_HOME" || name === "TMPDIR") throw new Error("FX secret env name collides with the qualified environment: " + name)
   }
