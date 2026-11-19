@@ -1,210 +1,184 @@
-# Runtime-independent worker bridge, then an FX spike
+# Runtime-independent worker bridge and FX migration
 
 ## Status
 
-- **Goal:** make usr's worker orchestration independent of Pi, then establish whether a pinned FX runtime can replace a useful execution lane without weakening its contracts.
-- **State:** FX spike implemented and locally qualified on macOS ARM64; the live pilot path is implemented and was executed against real accounts. Verdict: **limited-go for deterministic qualification only**. Quota-failover parity is restored (`1eb28ec`): the experimental path admits FX first, then the approved Codex/Command Code/Pi ladder, and a live run proved recognized exhaustion surfaces in seconds and continues on Codex with green parent checks. Live FX model usefulness and Pi-route replacement remain unproven behind account access. No production promotion, Pi removal or remote update.
-- **Accepted implementation:** runtime independence through `2025e04`; FX CLI/bridge qualification `91642ad`; cancellation identity guard `6dd9583`; unavailable-control guard `c6f94ad`; qualification evidence through `d986a7f`; credential-safe live provisioning `c19b2f3`; opt-in live pilot runner `cdda03b`; pilot bounds/contract fixes `12df815`; qualification-correctness repair `4019568`; FX quota-failover parity `1eb28ec`.
-- **Evidence:** pinned real FX 0.0.17 and matching source; real tools and exact-session continuation; hostile read-only/fanout/MCP probes; interruption before response, during a tool and after a write; shared owner correction, steering, replay and interruption; unchanged production policy JSON; live pilot reached the real OpenCode Go endpoint through the bridge with credentials confined to 0600 secret files. See [spike verification](verification/runtime-independence-fx.md).
-- **Compatibility:** production routes and schema-2 writes remain unchanged. Experimental leaf and fx-fallback records use schema 3 with explicit version-1/2 readers. No production npm dependency was added.
-- **External gates:** live FX inference is parked on account access: no FX-owned Codex login (`fx login codex` handoff printed by `--live codex`) and an exhausted OpenCode Go monthly quota (provider reports reset in ~14 days; the incumbent Pi CLI fails identically). Orchestration failover through the approved ladder is already proven live and reported separately. Native musl hosts, real agentctl/Intercom peers, production resource/task quality and one qualified Pi-dependent route remain unqualified.
-- **Next:** rerun `npm run spike:fx -- --live codex` after the printed login, or `npm run spike:fx -- --live opencode-go` after the quota reset, then qualify one existing Pi-dependent route through FX. No SDK rewrite or rollout follows from the current evidence.
+**Decision, November 19, 2026:** qualify FX's pinned native ACP interface inside the existing bridge as the next step toward replacing Pi headless workers. The current FX experiment does **not** satisfy worker parity. Keep Pi available until each required route and lifecycle contract has a qualified replacement.
 
-## Charter
+- **Completed foundation:** runtime independence, optional Pi loading, core-only installation, shared state/owner/lease machinery, and the isolated `fx ask --json` experiment. Preserve the [runtime-independence evidence](verification/runtime-independence.md) and [original CLI spike evidence](verification/runtime-independence-fx.md); do not restart those campaigns.
+- **Historical qualification:** native macOS ARM64 deterministic tools, successful continuation, owner controls, isolation probes and quota failover through the approved ladder. A Codex fallback success is not FX inference. No successful live FX task is established by the recorded evidence.
+- **Fresh gaps:** timeout/cancellation can leave a valid FX session that the bridge refuses to resume; deadline telemetry reports `null` despite an enforced limit. The pilot's 15-minute/20-step bounds do not establish parity with Pi's four-hour worker deadline. See the [dated parity audit](verification/fx-subagent-parity-audit-2026-11-19.md).
+- **Next implementation slice:** reproduce and repair recovery/budget contracts on supported Node, then prove one ACP leaf worker through admission, control and recovery. Account access blocks live inference proof, not those local repairs.
+- **Current boundary:** FX remains experimental. Production routes, public names, ordinary schema-2 writes, experimental schema-3 readers/writes, installer defaults and provider entitlements are unchanged.
 
-The order is binding: **runtime independence -> existing-backend parity -> no-Pi installation/execution proof -> FX protocol pilot -> FX integration and qualification**. A generic interface or a renamed directory is not runtime independence. FX is a test of the boundary, not the new foundation of usr.
+This is the authoritative remaining execution plan. The dated audit holds the comparison, pinned references and diagnostic evidence; earlier verification documents hold historical results.
 
-This document's creation authorizes no implementation. On a separate launch, work in `joshuarli/usr`, make focused verified commits, and follow the launch's explicit push grant. Without one, keep implementation commits local; do not infer permission to publish, deploy, alter the real home directory or modify other repositories. The planning request authorized committing the campaign only. Later owner launches authorized runtime independence and then this isolated FX spike. Neither launch grants production promotion or a push.
+## Charter and working rules
 
-Use the existing [campaign mechanics](../dotfiles/base/.agents/skills/orchestrate/references/campaigns.md) and [worktree lifecycle](../dotfiles/base/.agents/skills/orchestrate/SKILL.md#worktree-lifecycle). One writer owns shared bridge, policy, state and installer changes. Do not delegate through the modified bridge while its admission/control path is unqualified. Use a separate known-good installed generation or do the bootstrap directly. Scratch homes, sessions, fixture repositories and worktrees live under `.work/`, never the real home or `/tmp`.
+The owner requested an audit and replacement plan, then explicitly authorized integrating and committing that documentation directly to `usr`. This revision records that plan; runtime implementation and production promotion remain future work under their respective launch scope. The earlier CLI-only spike boundary is superseded for planning by the ACP sequence below.
 
-After each accepted slice, perform the parent steering checkpoint: identify the product improvement, its evidence, the next blocked invariant and the smallest useful next slice. At most two materially different repair attempts per failing slice before parking it with the cause and retry condition. Never spin on an unchanged failure. An environment blocker parks only its dependent proof; a broken foundational contract blocks dependent implementation. No formatters, CI changes, new daemon, cloud deployment, dashboard redesign or unrelated cleanup.
+Use the existing [campaign mechanics](../dotfiles/base/.agents/skills/orchestrate/references/campaigns.md) and [worktree lifecycle](../dotfiles/base/.agents/skills/orchestrate/SKILL.md#worktree-lifecycle). One writer owns shared bridge, policy, state and installer changes. Do not delegate through a modified admission/control path until qualified; use a known-good generation or bootstrap directly. Scratch homes, sessions and fixture repositories live under `.work/`, never the real home.
+
+After each accepted slice, record the product improvement, evidence, remaining blocker and smallest useful next slice. At most two materially different repair attempts precede parking an unchanged failure with its cause and retry condition. An environment blocker parks only its dependent proof; an observed foundational defect blocks dependent implementation. Reuse evidence while its inputs remain valid. Keep Git as the change log and update Status instead of appending checkpoint narratives.
 
 ## Binding decisions
 
-### Owner-decided
+1. **Keep the shared bridge.** Retain admission, immutable route snapshots, leases, attempts, scope checks, acceptance-claim parsing, observation, owner journals and failover. The parent independently executes or verifies acceptance proof. Adapters own native execution, decoding, session identity and control; the bridge must not become a model loop.
+2. **Preserve current policy.** Resolve `ROOT_PLANS` at admission and retain exact routes/pins in saved state. Only scout, mechanic and worker enter the bridge. Experts are native; top-level Antigravity, Command Code, OpenCode and Devin use native children. Claude Code, Codex and Pi parents use the bridge for lower tiers. Earlier campaign instructions about exclusive bridge experts and an Antigravity bridge adapter are obsolete. The [generated architecture](subagents.md) and typed policy are authoritative.
+3. **Preserve external compatibility.** Keep `pi-subagent-bridge`, its MCP registration, `worker_*`, `.work/worker-bridge/`, owner v1, job IDs and receipts. An eventual `fx-subagent-bridge` alias/rename is a separate migration, not a second service or state store.
+4. **Extend a small typed boundary.** Separate runtime, provider, model/effort, session and run. Add only the asynchronous admission, events and controls ACP needs. Use explicit wiring and discriminated capabilities, not a universal SDK wrapper or plugin framework. Unsupported operations fail before effects.
+5. **Separate outcome and continuation identity.** Preserve a validated session after verified timeout/cancellation/failure without claiming success. Unknown termination, changed pins/worktrees or corrupt state block continuation and replay. Legacy readers do not invent missing budgets/identity or convert Pi sessions into FX sessions.
+6. **Use native ACP first.** Keep the CLI pilot as a comparison fixture while qualifying ACP's native coding tools. Unrestricted FX fanout stays denied. Controlled children require the parent-bound controller and group-lifetime gates in Phase 4.
+7. **Keep selection experimental.** Use explicit typed policy injection and private fixture state. Installing FX cannot reroute production; do not expose runtime/model overrides on public `worker_start`. Promotion is a distinct evidence-backed decision.
+8. **Keep Pi and companions intact.** Core execution, inspection and installation must work without Pi imports, binaries or credentials. Optional Pi routes and historical readers remain supported. Intercom stays coordinator-only; preserve worker environment scrubbing and companion files. Worker retirement and whole-distribution removal are separate milestones.
+9. **Preserve account semantics.** No paid-provider substitution, premium-tier change, credential scraping or client impersonation. Matching endpoints/model labels do not prove entitlement. Missing credentials/quota are blocked proof, not permission to buy Gateway access.
+10. **Pin executable inputs.** Continue with FX 0.0.17 and verified artifact digests unless a recorded defect requires one explicit replacement release and requalification. Never follow `latest` or development HEAD. Disable upgrades only in private experiment configuration. Optional research MCP uses a pinned closure, with no runtime npm/npx resolution.
 
-1. Runtime independence comes first; FX is a subsequent spike, not an immediate Pi replacement.
-2. The work belongs in usr. The later owner launches authorize executing runtime independence and the isolated FX spike.
+A demonstrated ACP limitation permits one bounded investigation of pinned libfx with an executable reproduction. The SDK supplies durable engines and controls, but its native backend requires host-provided coding tools; host callbacks do not automatically equip descendants, and published Linux native addons require glibc. Native-musl CLI proof is not SDK/WASM proof. Do not add Vercel infrastructure, a general coding-tool rewrite, a persistent daemon or two production transports without an accepted concrete need.
 
-### Prescribed
+## Baseline and ownership
 
-1. **Keep the orchestrator.** Retain scoped admission, exact route snapshots, worktree leases, attempts/continuations, ownership, acceptance checks, campaign observation and MCP/CLI in usr. Adapters own runtime-specific execution, native IDs, event decoding, provider preflight and continuation semantics. Do not reimplement a model loop in the bridge.
-2. **Preserve defaults.** Read `ROOT_PLANS` at execution start; retain its exact model/provider/effort pins, route order, terminal expert behavior and OpenCode exception. Do not copy a historical routing table into new code. A missing optional adapter is observable unavailability, not permission to change the approved plan.
-3. **Preserve external names for this campaign.** Keep `pi-subagent-bridge`, its MCP registration, `worker_*`, `.work/worker-bridge/`, owner protocol v1, job IDs and existing command receipts compatible. Internals can become neutral in place. A cosmetic public rename or state-directory move is a separate migration, not an independence gate.
-4. **Use a small typed boundary.** Separate executor/runtime, provider, model/effort, session identity and run identity. Use a closed discriminated union plus explicit adapter wiring, not a dynamically loaded plugin marketplace, service locator or universal SDK wrapper. Validate untrusted adapter data once; do not export `unknown`-shaped OpenCode responses as the domain model.
-5. **Declare differences rather than flattening them.** Capabilities distinguish live steering, interrupt-and-resume steering and unsupported steering; resumption requirements; native nesting; and tool-level read-only controls versus after-the-fact Git checks. An unsupported operation must fail before effects. Never label a restart as live steering or Git checks as an OS sandbox.
-6. **Pi remains a supported optional adapter.** Keep its native nesting ceilings, provider extensions, offline behavior and historical-session readers. Shared policy may describe Pi routes as data; core execution, inspection, installation and core tests must not load Pi packages or acquire Pi credentials to run another adapter.
-7. **Intercom stays separate.** Preserve coordinator-only messaging, companion installations and worker environment scrubbing. Do not delete pi-build or its Intercom artifacts. Removing the entire Pi distribution requires a later packaging migration; running the worker bridge without Pi must not silently uninstall unrelated companions.
-8. **FX starts as a CLI leaf.** Prefer a pinned `fx ask --json` subprocess adapter in a parent-owned worktree. Disable native fanout through a proven capability/tool boundary, not just a prompt. The first spike does not port Pi nesting or claim its parity.
-9. **No production promotion.** FX is selected only in a checked-in experimental qualification entrypoint using explicit typed policy injection and private fixture state. Installing FX alone must never alter production routing. Do not add an arbitrary runtime/model override to `worker_start`.
-10. **No paid-provider substitution.** Existing approved subscription/account routes may be exercised only under the later execution grant. Do not purchase credits, add Gateway billing, turn on premium speed tiers, scrape unrelated credentials or impersonate official clients. Endpoint compatibility does not prove subscription entitlement.
+The audit inspected `usr` at `5657b60dc57c2d0e8acd1a50ff99fe8c1d55faaf`. Documentation integration refreshed to `41c91c0fff525226407c7f809015f6a29fc0154f`; intervening commits changed only skill/test guidance, leaving the audited bridge inputs unchanged. Refresh relevant inputs at the next launch.
 
-### Delegated within bounds
+| Input | Audited version / conclusion |
+| --- | --- |
+| Selected pi-build | `d2f544fdd3ecc54c3809b02cd4f2fd998a2576d7`, headless-usr |
+| Latest pi-build inspected | `235d3be03fc03dec6f217a3d9a2ff71a6f200c98`; unchanged upstream snapshots/headless transformation, mainly packaging/release/test changes |
+| Pi and extensions | Pi 1.5.0; pi-subagents 0.87.0; Muse 0.1.0; Devin 0.4.2 |
+| FX release | 0.0.17, source `d1d4a883382daf8f2e7447dc361978312cf403d2`; newer development code is not released behavior |
+| Proposed research dependency | pi-web-access 0.48.0, source `438e58be6307efb7cd539af3806757abe303aa0c`; standalone MCP needs no Pi runtime |
 
-Choose internal module names and the minimum adapter operations from existing callers. Keep admission and state transitions under one owner; keep CLI/MCP consumers on one implementation. Preserve the serialized schema where practical. A necessary schema revision needs explicit legacy decoders and fixtures, not a bulk migration or reinterpretation using today's policy. Resume tokens are opaque, runtime-tagged and bound to the recorded worktree; they are not interchangeable session IDs.
+No release-pin update follows merely from a newer pi-build commit. The [audit baseline](verification/fx-subagent-parity-audit-2026-11-19.md#2-audited-baselines) gives pinned references and the full capability comparison.
 
-Start the FX pilot against documented `0.0.17`, but verify the release, binary version, platform artifact and source before use. If it cannot be obtained, record one exact replacement release and requalify its contracts; never follow `latest` or `dev` during the experiment. Use existing installation/pinning machinery rather than creating fx-build. Disable automatic upgrades only inside the experiment's private configuration.
+| Owned surface | Responsibility |
+| --- | --- |
+| [FX adapter](../tools/pi-subagent-bridge/src/fx.ts), [process supervisor](../tools/pi-subagent-bridge/src/process-supervisor.ts) | Recover native identity independently of final JSON; support bidirectional ACP under owned-process supervision |
+| [Lifecycle](../tools/pi-subagent-bridge/src/hybrid.ts), [session state](../tools/pi-subagent-bridge/src/session.ts), [owner controls](../tools/pi-subagent-bridge/src/owner.ts) | Async admission, actual budgets, correlated receipts and restart reconciliation |
+| [Tier policy](../tools/pi-subagent-bridge/src/tier-policy.ts), [route policy](../tools/pi-subagent-bridge/src/policy.ts), [lease](../tools/pi-subagent-bridge/src/worktree-lease.ts) | Exact authority, controlled descendants, group quiescence before lease release |
+| [Pi port](../tools/pi-subagent-bridge/src/pi-port.ts), [native delegation](../tools/pi-subagent-bridge/src/native-delegation.ts), [nested guard](../tools/pi-subagent-bridge/src/nested-guard.ts) | Behavioral oracles for continuation, controls and consumed nesting semantics |
+| [FX runner](../tools/pi-subagent-bridge/experiment/fx/spike.mjs), [live pilot](../tools/pi-subagent-bridge/experiment/fx/live-pilot.mjs), [scripts](../tools/pi-subagent-bridge/package.json) | Real-binary fixtures, exact live-route comparisons and bounded measurement |
+| [Installation](sync.md), [Pi integration](pi.md), [Intercom](intercom-tailnet.md) | Core-only install, pinned optional closures and later companion migration |
 
-A CLI protocol gap permits one bounded investigation of the pinned libfx API, with one executable minimal reproduction of the missing capability. It does not authorize replacing the bridge with libfx, adding Vercel infrastructure, or building a new coding-tool suite. If resolving the gap requires those, finish with no-go and the concrete blocker. No speculative second adapter before an observed CLI limitation.
+Fresh audit tests: 24 FX fixtures passed and both recovery gaps reproduced, using Node 24.22.3 below the declared Node 26 minimum. These are diagnostics, not supported-toolchain acceptance. The no-Pi fixture stopped at owner-socket `listen EPERM`. A checksum-verified Linux x86-64 FX binary initialized ACP and rejected unsupported effort, then returned `-32603 Failed to create session`; the cause is unresolved. Neither result establishes ACP lifecycle or native-Alpine qualification.
 
-## Baseline and source map
+## Remaining sequence
 
-At the survey revision, `package.json` declares four production dependencies: Pi coding-agent, pi-subagents, yaml and pi-muse-subscription. `dev-install.sh` combines production and development dependencies, so even developer installation currently pulls the Pi set. `tools/sync/pi-worker.py` links the bridge to the installed Pi closure. These are independent coupling points; lazy-importing one SDK is insufficient.
+Phase 0 precedes Phase 1. Phases 2–4 need the accepted ACP lifecycle, but unavailable live access in Phase 2 need not block deterministic research/child work. Independent platform/provider investigation may proceed without concurrent writers on shared files. A route cannot be promoted before its required gates pass.
 
-| Existing surface | Verified coupling / responsibility | Treatment |
-| --- | --- | --- |
-| `tools/pi-subagent-bridge/src/bridge.ts` | `OpenCodePort`, `ModelRef`, response unboxing and ownership checks | Extract neutral contracts; keep backend wire decoding in the adapter. |
-| `src/server.ts`, `src/cli.ts` under that directory | `connect()` and inspection composition construct `piPort()` | Select/load only the adapter needed; preserve public dispatch. |
-| `src/hybrid.ts`, `src/policy.ts`, `src/session.ts` | Root plans, Pi/process branches, transitions and admitted snapshots | Reuse state machine and policy; separate backend-specific operations without changing semantics. |
-| `src/pi-port.ts`, `src/sdk-worker.ts`, `src/native-delegation.ts`, `src/nested-guard.ts` | Pi SDK host, native RPC, detached children and nesting restrictions | Keep behind the Pi boundary, with provider extensions and guards. |
-| `src/codex.ts`, `src/command.ts`, `src/antigravity.ts`, `src/launch.ts` | Existing subprocess executors and launch selection | Adapt these first; do not rewrite their proven protocol handling. |
-| `src/inspect.ts`, `src/owner.ts`, `src/worktree-lease.ts`, `src/worker-env.ts` | Observation, owner receipts, leases and coordinator credential exclusion | Preserve behavior and verify through real public entrypoints. |
-| `tools/sync/pi-worker.py`, `tools/pi/test_sync_bridge_offline.py`, `tools/pi/test_offline.py` | Pi closure installation and offline consumer checks | Separate core install/development dependencies from optional runtime qualification. |
-| `tools/policy/generate.ts`, `dotfiles/orchestrate-test.py` | Generated policy and harness contract checks | Keep one source of truth; regenerate, never hand-edit projections. |
-| `docs/intercom-tailnet.md`, `docs/pi.md` | Coordinator packaging and operator semantics | Preserve; document independence without claiming Intercom has migrated. |
+The scripts `test:core`, `test:no-pi`, `test:runtime-contract`, `test:fx`, `spike:fx` and `bench:runtime` already exist. Extend them rather than reimplementing completed scaffolding. Run package commands from `tools/pi-subagent-bridge`. ACP/child files and modes below are proposed; document their runnable commands with their implementation.
 
-Paths beginning `src/` above are relative to `tools/pi-subagent-bridge/`. Recheck symbols and callers at HEAD; this map is not a mandate to retain obsolete code. Use `git grep` to locate all imports, installer prerequisites and agentctl-facing protocol consumers before moving a boundary.
+### Phase 0 — Repair recovery and budgets
 
-**Measured execution baseline:** none in this planning session. No fixture suite, live provider, musl binary or FX worker was executed. Startup/RSS and loop timings are unknown. RI-0 must establish them on the executor host; source inspection is not a passing runtime gate. Consult [development checks](development.md) for supported Node/tooling and expected skips. Do not carry earlier campaigns' reported failures forward without reproducing them.
+**Prerequisite:** supported Node/development tooling; owner-RPC cases additionally require Unix sockets. Unavailable sockets park that proof, not the direct lifecycle/supervisor repairs. **Owns:** FX/lifecycle/session fixtures and associated fixes.
 
-## Sequence
+Reproduce deadline and cancellation through the real shared lifecycle and supervisor with deterministic executables. Each leaves valid native identity, yet current resume refuses it. Preserve a validated continuation token independently of successful output after verified termination. Cover nonzero failure, corrupt/missing identity, changed scope/pins and unknown termination; retain attempts, steer budgets and no-replay behavior.
 
-All items below run serially because they share contracts or depend on acceptance. Each item owns its named surfaces plus directly affected tests. Split an item into smaller end-to-end commits when necessary; do not interleave writers in the same state/adapter/installer files.
+Persist/report effective wall and step limits at admission and observation. Distinguish timeout, step exhaustion/incomplete, cancellation, quota, task failure and unknown termination. Keep 15-minute/20-step pilot defaults separate from the admitted production budget. Missing legacy fields stay unknown.
 
-The new `test:runtime-contract`, `test:no-pi`, `test:fx`, `spike:fx` and `bench:runtime` package scripts below are **deliverables to implement**, not existing commands. Define them in `tools/pi-subagent-bridge/package.json`, document their exact behavior, and keep fixture commands offline by default. They must run actual bridge entrypoints and owned child processes where lifecycle behavior is at issue, not only assert exported types or grep source text.
+**Exit evidence:** regressions fail before the fix and pass afterward on supported Node; `npm run test:fx` and targeted session cases pass; production policy output is unchanged. Run affected owner cases where sockets are available and record unavailable proof separately. Land fixes and regressions together. Reverify affected independence contracts rather than restarting completed work.
 
-### RI-0 — Ground and one discriminating test (S)
+### Phase 1 — One ACP worker through recovery
 
-**Prerequisite:** none. **Owns:** baseline evidence in this document; the smallest new contract fixture under the bridge's existing `test/` directory.
+**Prerequisite:** Phase 0; resolve or reproduce the released-binary session-creation failure on a supported host. **Owns:** proposed ACP adapter, runtime-control boundary, process supervisor and experiment fixtures.
 
-Record the execution revision, clean/dirty state, supported toolchain, available platform and whether optional runtimes are installed. Time the narrow baseline bridge tests and policy-generation check, recording exit codes and skips separately. Reproduce known red before assigning it to this work. Use a disposable checkout for tests that manipulate the runtime symlink; do not run home sync.
+Run one FX process per worker over stdio ACP. The synchronous FX start interface and final-JSON supervisor cannot support this unchanged. Add async session admission, correlated events, prompt/cancel/load/resume and negotiated steering while retaining shared state, leases and owner receipts. Persist native identity as soon as admission is proven; never use newest-session or `last` discovery.
 
-Build one substantive failing test: with Pi packages unavailable and Pi paths/credentials trapped, start a non-Pi worker through the public bridge in a clean linked fixture worktree, observe its result, resume it and exercise owner control. The executor may be a deterministic fake CLI initially; the bridge, persistence, leases and IPC must be real. A missing installed CLI is a separate unavailable route, not permission to skip the case. Start with this pilot, not a general evaluator project.
+Use private HOME/configuration, fixed cwd and explicit MCP/tool grants. Validate saved provider/model/effort and controls on every continuation; saved settings can differ from launch overrides. Where possible, advertise only the admitted effort in route-specific metadata, and test retry request bodies. Hooks are observation, not enforcement. Disable helper model work or account for its route and usage.
 
-**Proof:** record baseline `(cd tools/pi-subagent-bridge && npm test)` and `node tools/policy/generate.ts --check`; run the new focused boundary test and record its specific failure. A failing test may exist on the work branch but must land together with its fix in RI-1. No fake-CLI result is described as live provider proof.
+Client-supplied MCP does not by itself exclude approved project MCP merging. Prove that ambient/project settings cannot widen access; stdio server commands use absolute managed paths. Do not enable full-access to suppress permission prompts: allow required operations explicitly and surface unexpected permission/input requests as blocked.
 
-### RI-1 — Neutral boundary with a non-Pi vertical slice (M)
+Preserve pending/delivered/dropped steering states; protocol acceptance is not model absorption. Replay cannot duplicate delivery. Verify cancellation and owned tool-process termination before continuation or lease release.
 
-**Prerequisite:** RI-0. **Owns:** bridge contracts, composition roots, one existing subprocess adapter and its tests.
+**Exit evidence:** a real pinned binary with a deterministic local provider completes edits, exact-session correction, cancel/resume, timeout/resume, failed-tool recovery and steering during a tool. Hostile read-only calls, changed pins, ambiguous termination and replay have discriminating outcomes. Extend `test:fx`, the FX runtime-contract selection and local spike runner. An unresolved session-creation error prevents accepting this slice.
 
-Route the Codex path through the small typed boundary. Make the RI-0 test pass from MCP/CLI admission through persisted inspection and a controlled continuation, including meaningful failure behavior. Domain types must not import Pi SDK types. Load optional adapters on selection, not simply when the server starts or a campaign is listed. Inject dependencies using explicit constructors/factories already justified by tests; do not introduce global mutable runtime selection.
+### Phase 2 — First live Pi-dependent replacement
 
-**Proof:** `(cd tools/pi-subagent-bridge && npm run test:runtime-contract -- --adapter codex)` passes; targeted server/CLI/owner tests pass. Deliberately break the adapter result/session association once and confirm the test rejects it, then restore the implementation. This gate must prove an observable contract, not merely instantiate an interface.
+**Prerequisite:** Phase 1 and authorized OpenCode Go access. **Owns:** live profile and paired evidence.
 
-### RI-2 — Existing-adapter and durable-state parity (M)
+Start with `opencode-go/deepseek-v4.1-flash` at high effort. Compare Pi and FX through the same bridge, exact route, instructions and tool permissions: investigation, one-file repair, multi-file change and mandatory correction. Cap the batch at six new admissions and two corrections, with explicit wall/step bounds. Exercise pre-edit quota and post-edit failure separately.
 
-**Prerequisite:** RI-1. **Owns:** remaining adapters, policy/session/inspection/owner integration and associated fixtures.
+Earlier Go runs proved auth, the session header and quota handling, not inference. The reported reset in roughly 14 days was historical; recheck account access once on the execution host. Park unavailable proof without repeated paid retries. The Codex profile may prove other lifecycle behavior but cannot discharge this Pi-dependent gate.
 
-Move Command Code, Antigravity and Pi behind the same boundary without merging their native semantics. Remove provider-shaped response interpretation from the shared lifecycle path. Preserve current production plan output, exclusive expert routing, scope/attempt/continuation/steer budgets and allowed Pi nesting. Keep direct OpenCode harness routing outside this bridge.
+**Exit evidence:** actual FX inference and same-session correction produce useful work with independent parent checks. Exact model/provider/effort is supported by transport fixtures and available runtime evidence. Separate requested and completing backends; Codex fallback proves orchestration continuity only. Partial edits or uncertain termination never authorize another-model replay.
 
-Golden fixtures cover supported historical session versions and plans, including interrupted transitions, retired pins and unresolved legacy destinations. They must stay readable or fail with the existing actionable reconciliation boundary, never be silently rerouted. Missing Pi must not crash observation of other jobs or discard Pi records. Preserve known on-disk evidence; report genuinely uninspectable live adapter state as unknown, not succeeded or failed.
+### Phase 3 — Independent research tools
 
-**Proof:** `npm run test:runtime-contract` and `npm test` in the bridge directory; `node tools/policy/generate.ts --check`, `node --test tools/policy/generate.test.ts`, and `python3 -I dotfiles/orchestrate-test.py` from the repository root. Capture production-policy JSON before and after and require semantic equality. Run the real pinned Pi offline protocol checks on an available supported runtime; inability to run them is an explicit compatibility gap, not a passing Pi gate.
+**Prerequisite:** Phase 1 for worker integration; packaging inspection can begin earlier. **Owns:** optional pinned MCP closure, explicit tool policy and evidence persistence.
 
-### RI-3 — Prove runtime independence, including installation (M)
+Configured scoped Pi workers lack pi-web-access, so this is an explicit addition. Package standalone `pi-web-access-mcp` 0.48.0 through the existing managed dependency mechanism. Grant only `web_search`, `fetch_content`, `get_search_content` and `source_check` to approved roles; no Pi SDK, ambient extensions or runtime package download.
 
-**Prerequisite:** RI-2. **Owns:** bridge dependency/build wiring, sync bridge registration/install path, documentation and install tests.
+Use worker-private configuration/cache and separate search credentials. Standalone mode lacks Pi-login authentication and several Pi UI/generated-content features; recent-result memory disappears at process exit. Persist URLs, passages, retrieval times, errors and citations, or report expired handles explicitly. Coding subscriptions do not automatically entitle search; FX's Gateway/Exa built-in search does not establish search on custom subscription lanes.
 
-A core-only install/development path must work without pi-build artifacts. Separate optional Pi SDK/extension dependencies and typechecking from core dependencies; keep Pi qualification available as a separate explicit suite. Existing full installations and the selected Pi release must remain intact. Do not use npm at production runtime or introduce an unpinned download to replace the existing closure. Reuse the repository's reviewed dependency mechanism for anything the neutral core genuinely needs.
+**Exit evidence:** offline tests prove dependency isolation, grants, bounded output, cancellation and restart behavior. An authorized live search/fetch/citation task with usable resumed evidence establishes provider usefulness. Missing access is explicit and cannot silently select another billable model or expose Intercom.
 
-In a disposable checkout and scratch home, physically omit Pi packages, binaries, runtime symlinks, `~/.pi`, provider caches and credentials. Trap attempts to resolve/import Pi packages, spawn Pi/npm/npx during runtime, fetch Pi releases or read Pi credentials. Exercise core installation and the real MCP/CLI paths: policy, model check, start/status/resume/steer/cancel, inspect/watch/campaign and owner RPC against deterministic non-Pi executors. Probe approved optional routes without discovering unrelated credentials or starting them. Preserve foreign MCP registrations and existing companion files.
+### Phase 4 — Controlled child workers
 
-**Proof:** `(cd tools/pi-subagent-bridge && npm run test:no-pi)` passes with zero trapped accesses and zero skipped core cases. Run affected scratch-home sync/registration tests listed in development.md. Reinstall the Pi adapter in a separate fixture and pass its contract/offline qualification. **Milestone A:** all available existing-backend contract gates pass and core operation is demonstrably Pi-free. Do not implement the FX adapter before this milestone. Unavailable host/account/Pi-runtime proof goes to Needs environment: it prevents a full-parity or production-readiness claim, but does not block the isolated FX experiment after the local gates pass. An observed regression is not an environment exemption.
+**Prerequisite:** Phase 1 and root recovery/owner controls. **Owns:** minimal child controller, per-parent MCP, durable group accounting and lease changes.
 
-### FX-0 — Pin and test the real CLI protocol (S/M)
+Replace only the consumed pi-subagents contract: async spawn/status/wait/result, errors/usage, steer/cancel/resume and one nested generation. UI, missions, schedules, memory and generic workflows are outside this use case.
 
-**Prerequisite:** Milestone A. **Owns:** experimental runner, pinned FX fixture setup and protocol evidence; no production routing changes.
+Derive parent identity, cwd, scope, provider policy and depth from trusted admission state. Do not expose unrestricted public `worker_start` to the model. Children use the immutable parent policy and equal-or-weaker typed lattice, including provider exceptions. Reject stronger tiers, alternate providers/models, new workspaces, broader tools/extensions and grandchildren before launch. Bound concurrency, inherited remaining time and work.
 
-Read the candidate binary's help, matching source and current primary docs. Verify provider/model/effort selection, saved session identity, noninteractive permissions, tool/profile controls, cancellation and exit/result shape. Establish private configuration and state directories using supported mechanisms, not guessed environment variables. No package may auto-update or inherit an unrelated coordinator MCP configuration.
+Keep children under the root lease with deliberate write coordination. Current release observes root termination; extend it to require every descendant capable of writing to be stopped. Persist child/run IDs and deduplicated spawn/control intents. Unknown spawn cannot authorize duplication. Root cancellation propagates to children and owned tools with verified termination; retained sessions support deliberate correction.
 
-Use the actual pinned binary with a loopback-only deterministic provider fixture where the supported custom connection permits it. Make it read a fixture file, change one allowed file, invoke a passing check and continue the same saved session. Fake stdout transcripts alone do not qualify the real CLI. Fix the fixture at the protocol boundary if it exposes a real integration mismatch; do not invent successful provider/tool events.
+**Exit evidence:** a useful parent/child task passes independent combined-diff checks. Authority overrides fail before launch. Root completion/crash/cancel cannot release a writing group; restart/replay have one effect; no descendant escapes scope/accounting. These are authority and lifecycle controls, not an OS sandbox.
 
-**Proof:** `(cd tools/pi-subagent-bridge && npm run spike:fx -- --local-protocol)` produces observed binary identity, arguments/settings with secrets removed, session/run correlation, tool results and exit evidence. A protocol failure has an executable reproduction. The binary passing `--version` or producing assistant text is insufficient. Record leaf/read-only/steering capability results before proceeding.
+### Phase 5 — Remaining routes, platforms and long sessions
 
-### FX-1 — Add the opt-in FX executor (M)
+**Prerequisite:** accepted lifecycle plus each route's required capabilities. **Owns:** transport tests, platform pins/install and context-pressure qualification.
 
-**Prerequisite:** FX-0's required protocol capabilities proven. **Owns:** FX adapter, adapter registration/typed selection, experiment runner and FX contract fixtures.
+Qualify Contributor Spark scout/medium and mechanic/high separately from DeepSeek. Muse requires authenticated SDK/`muse serve` subscription transport, parked tool calls, context/prefix handling, fork/continuation and cancellation. Devin SWE-2 Flash medium requires CLI auth/catalog, variant mapping, reasoning replay and tool-result/error semantics. Native CLI/ACP custom protocols and headers do not automatically replace either adapter. Extract necessary transport behavior or qualify a native executor; retain Pi until an equivalent passes or the owner explicitly retires that route.
 
-Use the same scope, lease, command-dispatch, owner and observation machinery as existing executors. The experimental runner injects an explicit FX-only route for the chosen test tier; it must not consult a mutable production default or add FX to `ROOT_PLANS`. The public worker request schema stays unchanged. A small registry/selection-union addition is expected; a new orchestration state machine or FX branches throughout campaign/owner code means the runtime boundary failed and must be repaired first.
+Qualify macOS ARM64, Linux x86-64 musl and Linux ARM64 musl with verified artifacts. Version output/ACP handshake on this audit host does not prove a native Alpine lifecycle. Test long context/compaction, restoration, auth refresh, research restart and descendant cleanup.
 
-Record process identity before trusting termination. Persist admission intent before dispatch and the bound native session identity as soon as supported evidence establishes it. Never use `--resume last`, choose the newest ambient session or scrape a TUI. If identity cannot be recovered unambiguously after a crash, mark the run unknown and retain its lease; do not start a duplicate or synthesize a result.
+**Exit evidence:** every retained Pi-dependent route has a useful equivalent at its exact effort; each claimed platform passes lifecycle/install gates. A clean installation runs the required matrix with Pi imports/spawns/credentials trapped. Skipped core cases are not no-Pi proof. External consumers require their own available authorized environments.
 
-Use bounded process supervision, bounded log/result sizes and actual exit evidence. Qualifier jobs have a 15-minute wall limit and a 20-model-step limit where the pinned runtime supports it; a shell-command timeout is not a whole-run budget. Stop owned processes on exceeded budgets, preserve evidence and distinguish interruption from successful completion. If needed, implement the deadline in the existing subprocess supervisor, not by relying on an invented FX flag.
+### Phase 6 — Measure, decide and retire dependencies
 
-Same-session correction and interrupt/resume steering require a proven terminal prior run and the bound session ID. If only that steering mode works, expose it honestly. Live steering is not mandatory for a limited-go CLI result; unsafe or ambiguous resume is a blocker. Test all required restrictions against project configuration overrides and hostile instructions rather than trusting the profile name.
+**Prerequisite:** required route/capability/platform cells for the intended rollout. **Owns:** matched measurement, promotion proposal, rollback and eventual packaging changes.
 
-**Proof:** `(cd tools/pi-subagent-bridge && npm run test:fx)` plus `npm run test:runtime-contract -- --adapter fx`; rerun `npm run test:no-pi`. The real-binary local protocol pilot must now run through the experimental entrypoint and shared bridge, not around it.
+Measure accepted tasks through the same bridge with matched model/effort/tools and interleaved runs. Record cold/warm overhead, accepted-task time, full process-tree peak memory, installed bytes, usage, failure rates and recovery. Include Node, tools and research/child sidecars. Unknown usage stays unknown. A native binary size versus a compressed Pi archive proves no resource advantage.
 
-### FX-2 — Qualify realistic behavior and resource cost (M)
+Recommend one-route-at-a-time promotion with rollback to the retained adapter. Remove Pi execution dependencies only when required lanes are replaced or explicitly retired. Migrate Intercom/other distribution consumers separately before uninstalling the distribution. Historical Pi sessions remain inspectable under their original identity.
 
-**Prerequisite:** FX-1. **Owns:** executable qualification corpus and one concise result document, proposed `docs/verification/runtime-independence-fx.md`.
-
-Run the acceptance matrix below. Add two small, reproducible end-to-end workloads in disposable fixture repositories: a read-only scout that locates a real behavioral issue with file/line evidence, and a one-file bug fix with a failing-then-passing acceptance test and same-session correction. Require independent parent verification of the diff and test output. Do not benchmark only greetings, `--help` or empty sessions.
-
-Where a permitted account is already available, compare the incumbent and FX using the same supported exact model/provider/effort, instructions, tools needed and workload. Do not equate matching model labels across different endpoints with equal billing or entitlement. Cap the live batch at six new admitted jobs and two same-scope corrections total; each is bounded as above. No automatic retries for missing quota/credentials, and no fallback into metered Gateway. Missing access parks live proof while deterministic work continues.
-
-Measure cold/warm launch overhead, idle and peak RSS, installed dependency footprint, end-to-end accepted-task duration, reported tokens/usage and recovery results. Measure harness overhead separately with deterministic local provider responses. Run timing checks only around a passing `perf-gate-ready`/`perf-gate-ready -1` window; interleave baseline/candidate runs, report medians and spread, and discard contaminated timing runs. Missing usage is unknown, not zero. No speedup claim from binary size or different models. Optimization follows parity and is limited to regressions caused by this work.
-
-**Proof:** `npm run spike:fx -- --local` is credential-free and repeatable; `npm run spike:fx -- --live` requires explicit opt-in and prints its bounded scope before starting. `npm run bench:runtime` produces comparable measurements or an explicit busy-host deferral. Run these from the bridge directory. Live, macOS and musl results are reported separately.
-
-### CLOSE — Review and stop (S)
-
-**Prerequisite:** all unblocked slices accepted; blocked proof classified. **Owns:** narrow cleanup, final evidence and this Status block.
-
-Run the focused ultrareview of changed boundaries; fix P1/P2 defects introduced by this work. Delete superseded internal glue only after caller and parity proof, not useful optional adapters. Rerun the full bridge suite, runtime-contract/no-Pi/FX fixtures, policy generation and affected installer checks at this final milestone. Do not run unrelated repository-wide suites.
-
-Close with accepted commit IDs, exact commands/results/skips, supported capabilities, provider/account compatibility, measured costs, missing environment proof and one verdict below. Keep Git as the change log; rewrite Status instead of appending checkpoint narratives. Stop without removing Pi, promoting FX or starting an SDK rewrite.
+**Exit evidence:** the intended no-Pi setup is useful, recoverable and compatible with real consumers; measured benefit justifies maintenance. Promotion/removal follow an accepted decision, not a handshake or executable rename.
 
 ## Acceptance matrix
 
-Each row must have at least one behaviorally discriminating fixture. Existing tests should be extended instead of duplicated. Production invariants do not become optional merely because FX lacks a feature.
+Extend existing behavior tests. Separate source support, fake-process proof, real-binary deterministic proof and live intended-provider proof.
 
-| Contract | Required evidence / rejection behavior |
+| Contract | Required evidence |
 | --- | --- |
-| Admission and terminal evidence | Admitted is not complete; a live process remains running despite an early receipt; exit zero without acceptable final proof is incomplete. Malformed, truncated, oversized or mismatched results never become success. |
-| Ownership and replay | A stale owner generation/run target is rejected. Repeating a command ID causes no second effect. Crash after intent but before receipt stays uncertain; no blind replay, backend switch or cancellation of a reused PID. |
-| Concurrency and leases | Two concurrent starts for one worktree admit at most one. Unknown or possibly writing runs retain protection. No released lease while an owned child can still mutate the worktree. Cancellation acknowledgement alone proves nothing. |
-| Scope and verification | Clean linked worktree and exact base HEAD required. Detect tracked, untracked, deleted, out-of-scope and HEAD-changing edits. Preserve existing ignored-file/host-access limitations rather than calling them containment. Parent independently verifies acceptance. |
-| Saved state | Legacy records retain admitted pins, budgets and identity. Current policy changes cannot reroute them. Unknown adapter versions or missing native identity fail explicitly without rewriting history. |
-| Continuation and steering | Same session, unchanged scope and correct budget accounting; supported live versus interrupt/resume behavior distinguished. No overlapping continuation, `last` shortcut or scope expansion. Unsupported operations fail before effects. |
-| Fallback | Only the existing approved pre-edit, unambiguously terminated provider-unavailability cases switch routes. Task failure, partial edits, uncertain admission or missing receipts do not. Expert remains exclusive. |
-| Observation | Inspect/watch/campaign and owner read methods neither start providers nor mutate job/lease state; missing optional adapters do not prevent other jobs being inspected. Preserve the existing explicit status-advancement boundary. |
-| Runtime independence | Real core installation, startup, public dispatch and non-Pi lifecycle pass with zero Pi package/credential/runtime access; optional Pi qualification still works when installed. No new production npm/network dependency. |
-| FX isolation | Exact provider/model/effort and saved identity established; project config cannot widen tools/routes. Native fanout, bridge recursion and coordinator Intercom capabilities are disabled. No auto-upgrade or ambient MCP inheritance. |
-| Read-only capability | Intentionally attempt file edits, shell escape paths and alternate write tools in the disposable scout fixture. Record prevention versus post-run detection accurately. FX cannot be admitted to a tier whose required control it cannot enforce. |
-| Interruption and retry | Stop before first provider response, during a tool write and after a write before result persistence. Bound retries/wall time, establish child termination and retain ambiguous state without duplicate paid work. |
-| Consumer compatibility | Existing CLI/MCP schemas and owner v1 client fixtures remain compatible. Agentctl job/control receipts are unchanged; a real agentctl integration test is separate proof, not inferred from compilation. |
-| Installation and platform | Scratch-home install is repeatable; foreign registrations/companions survive; exact pins and rollback work. macOS ARM64 and each Linux musl architecture have distinct real-binary results. A glibc or WASM success is not native-musl proof. |
+| Admission/completion | Admitted is not complete; early output cannot hide a live process. Malformed, oversized, truncated or mismatched output never becomes success. |
+| Ownership/replay | Reject stale generations/targets. Command IDs have one effect. Crash between intent and receipt stays uncertain; never cancel a reused PID. |
+| Leases/descendants | Concurrent roots admit at most one writer per worktree. Unknown/writing descendants retain protection after root completion. Cancellation acknowledgement is insufficient. |
+| Scope/acceptance | Preserve clean linked-worktree/base-HEAD checks; detect tracked, untracked, deleted, out-of-scope and HEAD-changing effects. Parent proof is independent; Git checks are not containment. |
+| State/budgets | Legacy sessions stay readable; new records persist exact pins and effective bounds. Missing data stays unknown. No silent route/runtime conversion. |
+| Continuation/steering | Exact session/worktree/pins, no overlapping turns or scope expansion, preserved attempt/steer accounting and truthful delivery states. |
+| Failover | Only approved pre-edit provider-unavailability with verified termination advances along the admitted snapshot; task failure, partial writes and uncertainty do not. |
+| Observation | Inspection/watch/campaign and owner reads do not start providers or mutate leases. Missing adapters do not break other history; retain explicit status advancement. |
+| Independence | Core installation/public dispatch/non-Pi lifecycle use no Pi. Optional Pi qualification remains usable. Optional MCP closures are pinned without runtime dependency resolution. |
+| FX isolation | Verify effective model/provider/effort, retries, saved settings and MCP/tool grants. No ambient widening, coordinator credentials or unrestricted fanout. |
+| Read-only work | Attempt alternate writes/shell escapes in disposable fixtures. Distinguish prevention from detection; admit a tier only when required controls hold. |
+| Interruption | Stop before response, during a write and after a write before persistence. Preserve identity and partial effects without duplicate work. |
+| Consumers/platforms | Preserve CLI/MCP/owner v1 receipts, foreign registrations and companions. Agentctl/Intercom and each native platform have distinct evidence. |
 
-## Needs environment
+## Blocked proof and retry conditions
 
-Record unavailable proofs here during execution with their exact rerun command and prerequisite. Initially all execution results are pending, not failures.
+| Gate | Current evidence / retry condition |
+| --- | --- |
+| Supported contracts | Audit used Node 24; rerun affected fixtures on Node 26 with development tools. Reproduce the no-Pi owner case where Unix sockets are permitted. |
+| ACP execution | Release 0.0.17 initializes ACP but session creation returned `-32603`. Preserve a minimal reproduction and resolve the cause before claiming lifecycle support. |
+| Live account/model | Historical Go quota and absent FX-owned Codex login blocked inference. Recheck the selected authorized account once; use the printed login handoff if needed, never unrelated client credentials. |
+| Native platforms | Retain historical macOS CLI evidence; new ACP and each Linux musl architecture need native execution/install proof. |
+| External consumers | Agentctl/Intercom peers were not exercised in this audit. Preserve local receipt/environment-scrubbing fixtures; integration needs the relevant checkout/authorized host. |
+| Provider retirement | Go Spark, Muse and Devin equivalents remain unqualified. DeepSeek/Codex success cannot clear them. |
 
-- **Supported Node/development tooling and pinned Pi runtime:** run RI-0 through RI-3 plus the offline tests from development.md on a disposable checkout. A suite skipping SDK cases because Node/runtime is missing does not prove adapter parity.
-- **Real FX binary and local protocol support:** `npm run spike:fx -- --local-protocol`. If the pinned binary cannot express a locked-down local provider/tool setup, retain the reproduction and classify the capability gap; fake executables do not clear it.
-- **Existing authorized account:** executed once via `npm run spike:fx -- --live opencode-go` (report `.work/tmp/fx-live.json`). FX reached the real provider but retried `429 GoUsageLimitError` until each 15-minute deadline; the incumbent Pi CLI on the same account failed in ~1 s with the identical quota error (monthly limit, provider-stated reset ~14 days). Rerun `npm run spike:fx -- --live opencode-go` after the reset. For the subscription route, run the printed `FX_HOME=<profile> fx login codex` handoff, then `npm run spike:fx -- --live codex`. Do not prompt for, print, copy into evidence or commit credentials. Absent auth/entitlement is a parked live gate, not authorization to change providers.
-- **Native hosts:** run the fixture and real-binary qualification commands on macOS ARM64, Linux x86-64 musl and Linux ARM64 musl when available. Do not broaden to emulation or glibc-only shipping. Unavailable Linux proof need not prevent a macOS-only spike verdict; it blocks fleet-wide replacement claims.
-- **Agentctl and Intercom peers:** run existing integration/companion tests when their checkouts and authorized hosts are available. Do not mutate those repositories or real tailnet infrastructure under this campaign. Preserve worker credential-scrubbing tests locally regardless.
+Update a gate with exact revision, command, result and remaining limit. Do not repeat unchanged failures or broaden unrelated suites. Follow [development checks](development.md) and the affected contract tests.
 
-## Verdict and execution boundary
+## Verdict and stop conditions
 
-**Runtime-independence success:** the core works without Pi, existing adapters preserve their tested contracts and production routing, and the shared bridge does not acquire FX coupling. This is valuable even if FX is rejected.
+**Current verdict: limited-go for the next bounded experiment; no Pi replacement claim.** Runtime independence and historical CLI qualification retain value. ACP is the recommended next transport, with a real session-creation blocker still to resolve.
 
-**FX go:** the pinned candidate passes required lifecycle/isolation/control and intended-tier workloads on the reported platform and authorized provider. It is a recommendation for a separately approved rollout, not a rollout itself.
+A **go** recommendation requires lifecycle, isolation, exact-route task quality and platform evidence for its scope. A **limited-go** names excluded routes/capabilities/platforms. A **no-go** records the concrete defect or unacceptable implementation cost and preserves the neutral core and reproduction. Stop expanding the project merely to make FX win.
 
-**FX limited-go:** useful, verified capabilities have explicit limits, such as macOS only, worker only, no native nesting, interrupt/resume instead of live steering, or deterministic transport proof without live account qualification. Name which production use remains prohibited. In particular, fixture-only proof is not unattended production readiness.
-
-**FX no-go:** an observed protocol, scope, provider-entitlement, identity, recovery or platform gap prevents safe intended use within this spike's bounds. Preserve the independent core, tests and minimal reproduction; do not invent parity or keep expanding the project until FX wins.
-
-No change to production route selection, model entitlement, fallback economics, owner authorization, Intercom enrollment or native Pi nesting is granted. No Pi uninstall, pi-build archival/deletion, companion repackaging, session deletion, broad renaming, new service/queue, Vercel deployment or SDK/tool-suite rewrite. Newly necessary effects outside this boundary are parked, not silently performed. The eventual removal of Pi, including its packaging tie to Intercom, requires a separate accepted decision and migration.
-
-## Primary references and version-sensitive pitfalls
-
-Recheck these against the pinned binary/source at FX-0:
-
-- [FX noninteractive execution](https://fx.sh/docs/using-fx/fx-ask): JSON is a final object, not an event stream; interrupted requests can exit without that result. The documented shell timeout does not bound a complete agent job, and transient retries can continue indefinitely. Use exact session IDs for continuation. Main-agent usage does not cover every helper/subagent cost.
-- [FX stability](https://fx.sh/docs/stability): the 0.0.x CLI, saved formats and library API are experimental; automatic upgrades and permissive default tools require deliberate isolation.
-- [FX subagents](https://fx.sh/docs/capabilities/subagents): native agents share the workspace. Their existence does not supply usr's cross-harness ownership, admission or scoped tier policy.
-- [libfx overview](https://fx.sh/docs/lib) and [API](https://fx.sh/docs/lib/api): the documented guide currently targets 0.0.17. The host supplies tools. Verify actual session/engine methods; do not assume a `session.resume()` method or a public Pi-equivalent subagent RPC. Durable checkpoint recovery is not proof that external filesystem effects execute exactly once.
-- [Current bridge contract](../tools/pi-subagent-bridge/README.md), [Pi integration](pi.md), [Intercom boundary](intercom-tailnet.md) and [development checks](development.md) are the behavior baseline, reconciled with source at execution HEAD.
+Provider economics, native harness policy, Intercom enrollment and real-home configuration remain outside this documentation change. Whole-distribution removal, broad renaming and deployment are distinct migrations. Use the [dated audit](verification/fx-subagent-parity-audit-2026-11-19.md), [bridge contract](../tools/pi-subagent-bridge/README.md) and pinned source when upstream behavior is uncertain.

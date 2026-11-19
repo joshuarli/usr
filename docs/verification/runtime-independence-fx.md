@@ -1,5 +1,7 @@
 # FX 0.0.17 spike
 
+This document records the original CLI spike and its historical qualification. The [November 19 parity audit](fx-subagent-parity-audit-2026-11-19.md) adds later source and diagnostic findings; the [FX migration campaign](../CAMPAIGN-RUNTIME-INDEPENDENCE-FX.md) owns the next recovery/ACP/replacement work. Quota reset intervals and host paths below describe those earlier runs, not current account availability.
+
 ## Verdict
 
 **Limited-go for deterministic local qualification on native macOS ARM64.** The real CLI works through the shared bridge, including scope checks, leases, continuation and owner control. The opt-in live pilot is implemented and was executed against a real provider account; quota-failover parity is restored — the experimental path admits FX first and then the same approved Codex/Command Code/Pi ladder as production plans, and a live run proved FX exhaustion surfaces in seconds and continues on Codex with green parent checks. Live FX model usefulness, intended-model quality and native Linux remain unqualified. Production promotion is prohibited.
@@ -112,4 +114,4 @@ Timing values and sample ranges are recorded in the benchmark artifact with `sou
 - **External consumers:** real agentctl and Intercom peer integrations were not exercised. Owner v1 fixtures and coordinator credential exclusion passed locally.
 - **Production decision:** no production lane is approved by this result. A rollout requires live intended-tier acceptance, resource qualification and a separate owner decision.
 
-The spike stops here. Pi remains available, the production routes remain unchanged, and no SDK rewrite or rollout follows from this verdict.
+The original CLI spike stopped at this boundary. Its evidence does not authorize production promotion or Pi removal. The revised [campaign](../CAMPAIGN-RUNTIME-INDEPENDENCE-FX.md) continues with recovery fixes and ACP qualification; it preserves these results without treating planned capabilities as implemented.

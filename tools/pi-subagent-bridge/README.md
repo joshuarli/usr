@@ -1,6 +1,6 @@
 # pi-subagent-bridge
 
-One shared delegation bridge for coding harnesses except top-level Command Code, OpenCode and Devin. Parents own scoping, worktrees, verification, integration and cleanup. The MCP and CLI expose the same durable session state.
+One shared delegation bridge for coding harnesses except top-level Antigravity, Command Code, OpenCode and Devin. Parents own scoping, worktrees, verification, integration and cleanup. The MCP and CLI expose the same durable session state.
 
 <!-- policy:begin routing-summary -->
 <!-- Generated from tools/pi-subagent-bridge/src/policy.ts; run make generate. -->
@@ -13,7 +13,7 @@ Bridge tiers: `scout`, `mechanic`, `worker`. Native-only tier: `expert`, which a
 | worker | Codex `gpt-6.1-terra` (`high`) | Command Code `deepseek/deepseek-v4.1-flash` (`high`); Pi `muse-sdk/muse-spark-1.3` (`xhigh`); Pi `opencode-go/deepseek-v4.1-flash` (`high`); Pi `devin/swe-2-flash` (`medium`) |
 <!-- policy:end routing-summary -->
 
-Expert assignments never enter the bridge. Command Code, OpenCode and Devin top-level sessions delegate only through native subagents; Codex uses its configured native subagents (no per-tier pin); Claude Code pins `opus` at `xhigh` effort for expert work; Pi launches its native `expert` profile. `scope-check CWD SCOPE_JSON_FILE [BRANCH] --register TITLE` records a native lane, and `scope-check --lane ID` from its repository records its latest Git scope check. `campaign list` includes these lanes. `scope-check` applies the bridge's Git scope check to such a native lane (see `pi-subagent-bridge scope-check -h`). See [orchestrate](../../dotfiles/base/.agents/skills/orchestrate/SKILL.md).
+Expert assignments never enter the bridge. Antigravity, Command Code, OpenCode and Devin top-level sessions delegate only through native subagents; Codex uses its configured native subagents (no per-tier pin); Claude Code pins `opus` at `xhigh` effort for expert work; Pi launches its native `expert` profile. `scope-check CWD SCOPE_JSON_FILE [BRANCH] --register TITLE` records a native lane, and `scope-check --lane ID` from its repository records its latest Git scope check. `campaign list` includes these lanes. `scope-check` applies the bridge's Git scope check to such a native lane (see `pi-subagent-bridge scope-check -h`). See [orchestrate](../../dotfiles/base/.agents/skills/orchestrate/SKILL.md).
 
 ## Setup
 
@@ -43,7 +43,9 @@ Fake executors prove bridge lifecycle behavior, not live provider entitlement. T
 
 ## FX qualification experiment
 
-FX is available only through `experiment/fx/spike.mjs`. Installing it does not change production routes or add a runtime selector to `worker_start`. The current pin supports native macOS ARM64 only. Read the [spike result](../../docs/verification/runtime-independence-fx.md) before using it.
+The current `fx ask --json` adapter is available only through `experiment/fx/spike.mjs`. Installing it does not change production routes or add a runtime selector to `worker_start`. The experiment installer currently pins only native macOS ARM64. Read the [original spike result](../../docs/verification/runtime-independence-fx.md) before using it.
+
+The [November 19 parity audit](../../docs/verification/fx-subagent-parity-audit-2026-11-19.md) found recovery/deadline gaps and unqualified provider, nesting and platform behavior. It recommends native FX over ACP inside this bridge, with standalone research MCP and constrained children. These are planned capabilities; the released-binary ACP probe did not complete session creation. The [FX migration campaign](../../docs/CAMPAIGN-RUNTIME-INDEPENDENCE-FX.md) owns the remaining sequence and acceptance gates. Pi remains available until required routes and lifecycle contracts have qualified replacements.
 
 From this directory:
 
@@ -52,7 +54,7 @@ From this directory:
 - `npm run spike:fx -- --local` also runs the real binary through shared bridge admission, owner control and parent-verified acceptance tests. No account credentials are required.
 - `npm run test:fx` checks experiment types and offline supervisor/state fixtures. It does not download a binary or contact a provider.
 - `npm run test:runtime-contract -- --adapter fx` adds saved-state, owner and no-Pi contracts.
-- `npm run spike:fx -- --live` prints its bounded scope and returns unavailable for the unqualified account route. It never substitutes Gateway billing or copies another client's credentials.
+- `npm run spike:fx -- --live [codex|opencode-go]` runs the bounded opt-in account pilot when its prerequisites are available. `--live codex` requires an FX-owned login and prints a handoff if absent; Go uses the intended OpenCode auth export with private secret files. Go quota exhaustion can advance through the approved fallback ladder. A fallback completion is recorded separately and does not qualify FX inference. See the [live pilot contract](../../docs/verification/runtime-independence-fx.md#live-pilot). The pilot never substitutes Gateway billing or scrapes unrelated credentials.
 - `npm run bench:runtime` interleaves five adapter/bridge samples for the same local workload. Failed load gates discard timing samples and return exit 75. Native RSS samples and binary size are separate from live task performance.
 
 Ordinary sessions retain schema-2 writes. Experimental leaf sessions use schema 3; versions 1 and 2 remain readable. FX resume tokens are runtime-tagged and bound to the original worktree, native session, model/provider/effort and private connection/control settings.
