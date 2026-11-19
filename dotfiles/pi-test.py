@@ -79,6 +79,7 @@ class PiTests(unittest.TestCase):
         else:
             self.assertTrue(Path(broker["brokerArgs"][-1]).is_file())
         before = meta.read_bytes()
+        self.env["SYNC_VERBOSE"] = "1"
         again = self.sync_tools()
         self.assertIn("pi is current", again.stdout)
         self.assertEqual(meta.read_bytes(), before)
