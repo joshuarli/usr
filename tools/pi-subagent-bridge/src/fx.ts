@@ -28,6 +28,8 @@ export type FxTransport = "cli" | "acp"
 export type FxOptions = {
   transport: FxTransport
   binary: string; binarySha256: string; home: string; provider: string
+  /** Absolute login shell for FX's shell tool; FX 0.0.17 cannot snapshot busybox ash, so Alpine needs bash. */
+  shell: string
   /** Custom connection settings; omit for FX built-in providers (gateway, codex, grok). */
   connection?: object | null
   allowedCommands: string[]; wallMs?: number
@@ -189,6 +191,7 @@ export function makeFxAdapter(options: FxOptions) {
   if (options.transport !== "cli" && options.transport !== "acp") throw new Error("Unknown FX transport")
   const home = realpathSync(options.home), wallMs = options.wallMs ?? 900000
   if (!isAbsolute(options.binary) || !Number.isSafeInteger(wallMs) || wallMs < 1 || wallMs > 900000) throw new Error("Invalid FX qualification configuration")
+  if (!isAbsolute(options.shell)) throw new Error("FX shell must be an absolute path")
   const pathEnv = options.pathEnv ?? "/usr/bin:/bin"
   if (!pathEnv.split(":").every(part => isAbsolute(part))) throw new Error("FX PATH entries must be absolute")
   const secretEnvFiles = options.secretEnvFiles ?? {}
@@ -200,7 +203,7 @@ export function makeFxAdapter(options: FxOptions) {
   for (const name of Object.keys(options.extraEnv ?? {})) {
     if (invalidEnvName(name)) throw new Error("Invalid FX extra env name: " + name)
   }
-  const env: NodeJS.ProcessEnv = { HOME: home, PATH: pathEnv, SHELL: "/bin/sh", FX_AUTO_UPGRADE: "0", FX_DISABLE_KEYCHAIN: "1", FX_HERDR: "0", FX_SOUND: "off", FX_MAX_AGENT_STEPS: String(FX_PILOT_MAX_STEPS), USR_SCOPED_WORKER: "1", ...options.extraEnv }
+  const env: NodeJS.ProcessEnv = { HOME: home, PATH: pathEnv, SHELL: options.shell, FX_AUTO_UPGRADE: "0", FX_DISABLE_KEYCHAIN: "1", FX_HERDR: "0", FX_SOUND: "off", FX_MAX_AGENT_STEPS: String(FX_PILOT_MAX_STEPS), USR_SCOPED_WORKER: "1", ...options.extraEnv }
   for (const name of Object.keys(secretEnvFiles)) {
     if (name in env || name === "FX_HOME" || name === "TMPDIR") throw new Error("FX secret env name collides with the qualified environment: " + name)
   }

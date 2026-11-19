@@ -2,7 +2,24 @@
   "version": "0.0.17",
   "tag": "v0.0.17",
   "source_revision": "d1d4a883382daf8f2e7447dc361978312cf403d2",
-  "asset": "fx-macos-aarch64.tar.gz",
-  "binary_sha256": "e840e7884b5c6a5c40d584770fd1b9dcee78fd5683994d85e32cf7f151959b4e",
-  "sha256": "5cacb5b3624a79db8fd4e31dcbc59d6a933d7e5ed4c397776d95df6b618296a9"
+  "targets": {
+    "darwin-arm64": {
+      "asset": "fx-macos-aarch64.tar.gz",
+      "sha256": "5cacb5b3624a79db8fd4e31dcbc59d6a933d7e5ed4c397776d95df6b618296a9",
+      "binary_sha256": "e840e7884b5c6a5c40d584770fd1b9dcee78fd5683994d85e32cf7f151959b4e",
+      "shell": "/bin/sh"
+    },
+    "linux-arm64": {
+      "asset": "fx-linux-aarch64.tar.gz",
+      "sha256": "b4633b8987ec43f1b9454e4629f3b5a4f1e086aae36b84ae4fefeacd6a53761f",
+      "binary_sha256": "87d65a1b0d14d3243d8360608d8bb3f4aa2cced37f66aeae924845978b927e5e",
+      "shell": "/bin/bash"
+    },
+    "linux-x64": {
+      "asset": "fx-linux-x86_64.tar.gz",
+      "sha256": "78c155d59fa59e42fd56d93037fd75041868c9c67865e8c7f0ca6dcdfac23e75",
+      "binary_sha256": "2cf4be240b42826d01c055913638bb879d1bb48afd80b7f3a3f21b15b2701296",
+      "shell": "/bin/bash"
+    }
+  }
 }

@@ -40,7 +40,21 @@
   - **Steering:** steering a child requires a bound native session.
 - **Phase 4 evidence:** `npm run spike:fx -- --local-acp` includes a real-binary root worker that spawns a scout child, then a writing worker child, and waits for each. An authority override is refused there. The root reruns the check, and the combined diff is in scope with both child receipts verified. `npm run test:fx` drives the real controller against a fake ACP runtime. It covers argument and tier refusals, intent replay, writer exclusion, the lease held after root success, steer/resume, and root cancellation reaching every child.
 - **Phase 4 limits:** children share the root's worktree, and coordination is limited to one writer at a time. There is no OS containment. A root crash before its controller records an intent leaves nothing to reconcile; a crash after it leaves an `uncertain` entry, which keeps the lease until manual reconciliation.
-- **Next implementation slice:** Phase 3 research tools (packaging needs a pi-build closure release). Phase 2 waits for the quota reset.
+- **Phase 5 platforms, November 19, 2026:** `npm run spike:fx -- --local-acp` passes against the pinned FX 0.0.17 binary with a loopback provider on three platforms. The run includes the children scenario.
+  - **macOS ARM64:** native.
+  - **Linux ARM64 musl:** native. Alpine 3.22 in an OrbStack container on Apple Silicon, run with `experiment/fx/linux.sh arm64`.
+  - **Linux x86-64 musl:** emulated by the container runtime, run with `experiment/fx/linux.sh amd64`. That proves musl compatibility, not native x86-64 execution.
+  - **Pins:** `experiment/fx/pin.json` is now per target, with archive and binary digests for the statically linked Linux assets. Node.js 26.13.1 comes from the checksum-pinned mirror artifact named in `tools/sync/installer.py`. Alpine also needs `libgcc`, `libstdc++`, `libatomic` (x86-64) and `bash`.
+- **FX 0.0.17 shell defect on Alpine:** with busybox `ash` as `SHELL`, FX's shell tool fails every command with `shell snapshot unavailable (the login shell exited before reporting its state)`. With `bash` the same pilot passes. The qualified shell is pinned per target, and `makeFxAdapter` now requires an absolute `shell`.
+- **Phase 5 long sessions (probed):** with a 4,500-token context window, FX compacted repeatedly and the prompt still reached `end_turn`. Compaction notes are written by extra calls to the admitted model and provider, so there is no route escape. Whether those calls are included in reported usage is unverified.
+- **Phase 5 routes, parked:**
+  - **Contributor Spark** (scout/medium, mechanic/high) is served by OpenCode Go. It waits for the same quota reset as Phase 2.
+  - **Muse** speaks MSP and also serves ACP (`muse acp`). Its route is therefore not an FX provider configuration. Replacing it would mean either extracting the subscription transport or adding a Muse-native ACP executor, which reuses the ACP supervisor but needs a separate design decision plus an authenticated subscription and live quota.
+  - **Devin SWE-2 Flash** likewise needs its own CLI authentication and a qualified executor.
+  - Pi stays the executor for these routes.
+- **Phase 3 research tools, parked:** this is an addition, not Pi parity: scoped Pi workers have no research tools today. It needs `pi-web-access` 0.48.0 in a pinned closure, through a pi-build release, plus separate search-provider credentials. The npm tarball's `gitHead` is `896d75bec55e316726db287a870eb166c4e3f40c`, not the `438e58be…` recorded above, so re-verify the source revision when packaging. The grant shape is already proven (see Phase 3 grant shape).
+- **Phase 6, not started:** matched measurement needs live inference on the intended routes, blocked as in Phase 2. Promotion and retirement are owner decisions. The current verdict stays limited-go: FX over ACP is qualified deterministically for leaf workers and one-generation children on three platforms. It has no live-inference proof and no Spark, Muse or Devin replacement.
+- **Next:** after the Go quota reset, run `npm run spike:fx -- --live opencode-go` for Phase 2, then the Spark cells. Decide whether to pursue Muse and Devin native ACP executors, or to keep Pi for those routes.
 - **Current boundary:** FX remains experimental. Production routes, public names, ordinary schema-2 writes, experimental schema-3 readers/writes, installer defaults and provider entitlements are unchanged.
 
 This is the authoritative remaining execution plan. The dated audit holds the comparison, pinned references and diagnostic evidence; earlier verification documents hold historical results.
@@ -202,7 +216,7 @@ Extend existing behavior tests. Separate source support, fake-process proof, rea
 | Supported contracts | Audit used Node 24; rerun affected fixtures on Node 26 with development tools. Reproduce the no-Pi owner case where Unix sockets are permitted. |
 | ACP execution | Resolved on macOS ARM64: `-32603` comes from the `--provider` override; select the provider through private settings. Linux ACP still needs native execution proof. |
 | Live account/model | Rechecked November 19, 2026: Go returned 429 `GoUsageLimitError` (monthly, about 10 days to reset); no FX-owned Codex login. Retry after the reset; use the printed login handoff, never unrelated client credentials. |
-| Native platforms | Retain historical macOS CLI evidence; new ACP and each Linux musl architecture need native execution/install proof. |
+| Native platforms | ACP pilot passes natively on macOS ARM64 and Linux ARM64 musl (container), and on Linux x86-64 musl under emulation; native x86-64 hardware and a full Alpine install via the provisioner remain unproven. |
 | External consumers | Agentctl/Intercom peers were not exercised in this audit. Preserve local receipt/environment-scrubbing fixtures; integration needs the relevant checkout/authorized host. |
 | Provider retirement | Go Spark, Muse and Devin equivalents remain unqualified. DeepSeek/Codex success cannot clear them. |
 

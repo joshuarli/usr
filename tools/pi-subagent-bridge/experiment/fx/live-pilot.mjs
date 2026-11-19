@@ -13,15 +13,16 @@ import { ownerJobs, ownerResume } from '../../src/owner-client.ts'
 import { codexAvailable } from '../../src/codex.ts'
 import { CODEX_TIER_MODELS, ROOT_PLANS } from '../../src/policy.ts'
 import { workerEnvironment } from '../../src/worker-env.ts'
+import { FX_TARGET, requirePin } from './pin.mjs'
 import { classifyJobBlock, classifyProbeResponse, pilotVerdict, renameEvidenceOk, scoutFindingOk } from './pilot.ts'
 
 const root = fileURLToPath(new URL('../../../../', import.meta.url))
-const pin = JSON.parse(readFileSync(new URL('./pin.json', import.meta.url), 'utf8'))
+const pin = requirePin()
 const LIVE_TRANSPORT = 'acp'
 const BOUNDS = { max_new_jobs: 6, max_continuations: 1, wall_ms_per_job: 900000, max_model_steps: 20 }
 const LIVE_BASE = join(root, '.work/tmp/fx-live')
 const LOGIN_HOME = join(LIVE_BASE, 'fx-profile')
-const FX_BINARY = join(root, '.work/tmp/fx-spike/installed-home/.local/bin/fx')
+const FX_BINARY = join(root, '.work/tmp/fx-spike', FX_TARGET, 'installed-home/.local/bin/fx')
 
 const fxPin = (model, effort, provider) => ({ model, effort, provider, runtimeVersion: '0.0.17' })
 
@@ -472,7 +473,7 @@ export async function livePilot(binary, scratch, requested) {
     mkdirSync(home, { recursive: true })
     const base = provisionRepo(repo)
     const fx = makeFxAdapter({
-      transport: LIVE_TRANSPORT, binary, binarySha256: pin.binary_sha256, home, provider: profile.provider, connection: profile.connection,
+      transport: LIVE_TRANSPORT, shell: pin.shell, binary, binarySha256: pin.binary_sha256, home, provider: profile.provider, connection: profile.connection,
       allowedCommands: ['python3', 'python3 *', 'node', 'node *', 'cargo', 'cargo *', 'git status*', 'git diff*', 'git log*', 'git show*'],
       wallMs: BOUNDS.wall_ms_per_job, pathEnv: toolchainPath(),
       secretEnvFiles: auth.secretEnvFiles ?? {},

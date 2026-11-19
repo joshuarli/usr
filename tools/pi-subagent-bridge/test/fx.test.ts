@@ -35,7 +35,7 @@ if(['exhaust','quotafail','smallretry'].includes(mode))setTimeout(()=>{
 if(['hold','oversized','early-json','exhaust','quotafail','smallretry'].includes(mode))setInterval(()=>{},1000);
 `
   writeFileSync(binary, source, { mode: 0o755 })
-  const fx = makeFxAdapter({ transport: "cli", binary, binarySha256: createHash("sha256").update(source).digest("hex"), home: scratch.path, provider: "fixture", connection: {}, allowedCommands: [], wallMs })
+  const fx = makeFxAdapter({ transport: "cli", shell: "/bin/sh", binary, binarySha256: createHash("sha256").update(source).digest("hex"), home: scratch.path, provider: "fixture", connection: {}, allowedCommands: [], wallMs })
   const request = { directory: repo.cwd, logDirectory: repo.directory, prompt: "fixture task", selection, access: { kind: "write" as const } }
   mkdirSync(repo.directory, { recursive: true })
   return { repo, fx, request }
@@ -213,7 +213,7 @@ fs.writeFileSync(p.join(process.env.FX_HOME,'probe.json'),JSON.stringify({path:p
 console.log(JSON.stringify({exit_code:0,model:'fixture-model',session_id:id,final_output:'PROOF fixture\\nACCEPTANCE: met',usage:{input_tokens:1,output_tokens:1}}));
 `
   writeFileSync(binary, source, { mode: 0o755 })
-  const fx = makeFxAdapter({ transport: "cli", binary, binarySha256: createHash("sha256").update(source).digest("hex"), home: scratch.path, provider: "fixture", connection: {}, allowedCommands: [], wallMs: 5000, ...configure?.(scratch) })
+  const fx = makeFxAdapter({ transport: "cli", shell: "/bin/sh", binary, binarySha256: createHash("sha256").update(source).digest("hex"), home: scratch.path, provider: "fixture", connection: {}, allowedCommands: [], wallMs: 5000, ...configure?.(scratch) })
   const request = { directory: repo.cwd, logDirectory: repo.directory, prompt: "fixture task", selection, access: { kind: "write" as const } }
   mkdirSync(repo.directory, { recursive: true })
   return { scratch, repo, fx, request }
@@ -269,7 +269,7 @@ test("FX reserved env names are refused for secrets and extra environment", t =>
   const binary = join(scratch.path, "fake-fx")
   writeFileSync(binary, "#!/bin/true\n", { mode: 0o755 })
   const sha = createHash("sha256").update(readFileSync(binary)).digest("hex")
-  const base = { transport: "cli" as const, binary, binarySha256: sha, home: scratch.path, provider: "fixture", connection: {}, allowedCommands: [] }
+  const base = { transport: "cli" as const, shell: "/bin/sh", binary, binarySha256: sha, home: scratch.path, provider: "fixture", connection: {}, allowedCommands: [] }
   for (const name of ["FX_PROVIDER", "FX_PERMISSION_MODE", "LD_PRELOAD", "DYLD_INSERT_LIBRARIES", "GIT_DIR", "BASH_ENV", "PYTHONPATH", "NODE_OPTIONS", "HOME", "USR_SCOPED_WORKER", "lowercase"]) {
     assert.throws(() => makeFxAdapter({ ...base, secretEnvFiles: { [name]: "/tmp/x" } }), /Invalid FX secret env/, name)
     assert.throws(() => makeFxAdapter({ ...base, extraEnv: { [name]: "x" } }), /Invalid FX extra env/, name)
@@ -525,7 +525,7 @@ function handle(m){
 }
 `
   writeFileSync(binary, source, { mode: 0o755 })
-  const fx = makeFxAdapter({ transport: "acp", binary, binarySha256: createHash("sha256").update(source).digest("hex"), home: scratch.path, provider: "fixture", connection: {}, allowedCommands: [], wallMs, ...(delegation ? { delegation, extraEnv: { FIXTURE_GATE: join(scratch.path, "release-root") } } : {}) })
+  const fx = makeFxAdapter({ transport: "acp", shell: "/bin/sh", binary, binarySha256: createHash("sha256").update(source).digest("hex"), home: scratch.path, provider: "fixture", connection: {}, allowedCommands: [], wallMs, ...(delegation ? { delegation, extraEnv: { FIXTURE_GATE: join(scratch.path, "release-root") } } : {}) })
   const request = { directory: repo.cwd, logDirectory: repo.directory, prompt: "fixture task", selection, access: { kind: "write" as const } }
   mkdirSync(repo.directory, { recursive: true })
   const policy: ExecutionPlan = { kind: "leaf", target: { executor: "fx", selection } }

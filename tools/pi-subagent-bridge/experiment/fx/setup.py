@@ -11,8 +11,11 @@ sys.path.insert(0, str(ROOT / "tools/sync"))
 sys.path.insert(0, str(ROOT))
 from tools.sync.installer import Installer  # noqa: E402
 
-PIN = json.loads(Path(__file__).with_name("pin.json").read_text())
-BASE = "https://github.com/vercel-labs/fx/releases/download/" + PIN["tag"] + "/"
+RELEASE = json.loads(Path(__file__).with_name("pin.json").read_text())
+TARGETS = {("darwin", "arm64"): "darwin-arm64", ("linux", "aarch64"): "linux-arm64", ("linux", "x86_64"): "linux-x64"}
+TARGET = TARGETS.get((sys.platform, platform.machine().lower()))
+PIN = {"tag": RELEASE["tag"], **RELEASE["targets"][TARGET]} if TARGET in RELEASE["targets"] else None
+BASE = "https://github.com/vercel-labs/fx/releases/download/" + RELEASE["tag"] + "/"
 
 
 class PinnedFxInstaller(Installer):
@@ -33,8 +36,8 @@ class PinnedFxInstaller(Installer):
 def main():
     if len(sys.argv) != 2:
         raise ValueError("usage: setup.py SCRATCH_HOME")
-    if sys.platform != "darwin" or platform.machine().lower() != "arm64":
-        raise ValueError("This experiment pin supports native macOS ARM64 only")
+    if PIN is None:
+        raise ValueError(f"No pinned FX artifact for {sys.platform}/{platform.machine()}")
     home = Path(sys.argv[1]).resolve()
     if not home.is_relative_to(ROOT / ".work"):
         raise ValueError("FX experiment installation must be under usr/.work/")

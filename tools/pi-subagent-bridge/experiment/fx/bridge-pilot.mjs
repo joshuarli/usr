@@ -4,6 +4,7 @@ import { execFileSync, spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { qualificationBridge } from './bridge.ts'
+import { requirePin } from './pin.mjs'
 import { makeFxAdapter } from '../../src/fx.ts'
 import { dispatch } from '../../src/server.ts'
 import { OwnerManager } from '../../src/owner.ts'
@@ -39,7 +40,7 @@ export async function bridgePilot(binary, scratch, options = {}) {
   })
   await new Promise(r => server.listen(0, '127.0.0.1', r))
   const connection = { protocol: 'openai-chat-completions', base_url: `http://127.0.0.1:${server.address().port}/v1`, auth: { type: 'none' }, model_metadata: { 'fixture-model': { context_window: 32768, max_output_tokens: 2048, supports_tool_use: true, reasoning_efforts: { high: { reasoning_effort: 'high' } } } } }
-  const fx = makeFxAdapter({ transport, binary, binarySha256: JSON.parse(readFileSync(new URL('./pin.json', import.meta.url), 'utf8')).binary_sha256, home, provider: 'fixture', connection, allowedCommands: ['python3 check.py numbers', 'python3 check.py strings'], wallMs: 15000 })
+  const fx = makeFxAdapter({ transport, shell: requirePin().shell, binary, binarySha256: requirePin().binary_sha256, home, provider: 'fixture', connection, allowedCommands: ['python3 check.py numbers', 'python3 check.py strings'], wallMs: 15000 })
   const bridge = qualificationBridge(fx), owner = new OwnerManager(bridge), ids = []
   await owner.ensureRepo(repo)
   const base = git('rev-parse', 'HEAD'), scope = { base_revision: base, writable_paths: ['arithmetic.py'], acceptance_proof: 'python3 check.py numbers exits zero; correction also passes python3 check.py strings', attempt_limit: 2, stop_on: 'scope expansion, unavailable proof or dependencies' }
@@ -100,7 +101,7 @@ export async function bridgePilot(binary, scratch, options = {}) {
         { call: ['shell', { action: 'run', command: 'python3 check.py numbers' }] },
       ][tools] ?? { final: 'PROOF: scout located arithmetic.py:2; worker child fixed it; root reran python3 check.py numbers, exit 0' }
     }
-    const parentFx = makeFxAdapter({ transport, binary, binarySha256: JSON.parse(readFileSync(new URL('./pin.json', import.meta.url), 'utf8')).binary_sha256, home, provider: 'fixture', connection, allowedCommands: ['python3 check.py numbers'], wallMs: 60000, delegation: { maxChildren: 3, maxConcurrent: 2 } })
+    const parentFx = makeFxAdapter({ transport, shell: requirePin().shell, binary, binarySha256: requirePin().binary_sha256, home, provider: 'fixture', connection, allowedCommands: ['python3 check.py numbers'], wallMs: 60000, delegation: { maxChildren: 3, maxConcurrent: 2 } })
     const parentBridge = qualificationBridge(parentFx)
     try {
       const root = await admit('Coordinate a scout child and a worker child to fix arithmetic.add; rerun the check yourself.', 'worker', scope, parentBridge)
@@ -127,7 +128,7 @@ export async function bridgePilot(binary, scratch, options = {}) {
     const out = {}
     // Wall deadline during a held provider turn, then same-session resume.
     reset(); requests = []; calls = [['read_file', { path: 'arithmetic.py' }]]; holdAt = 2
-    const shortFx = makeFxAdapter({ transport, binary, binarySha256: JSON.parse(readFileSync(new URL('./pin.json', import.meta.url), 'utf8')).binary_sha256, home, provider: 'fixture', connection, allowedCommands: ['python3 check.py numbers', 'python3 check.py strings', 'python3 slow.py'], wallMs: 3000 })
+    const shortFx = makeFxAdapter({ transport, shell: requirePin().shell, binary, binarySha256: requirePin().binary_sha256, home, provider: 'fixture', connection, allowedCommands: ['python3 check.py numbers', 'python3 check.py strings', 'python3 slow.py'], wallMs: 3000 })
     const shortBridge = qualificationBridge(shortFx)
     const timed = await admit('deadline fixture', 'worker', scope, shortBridge)
     const timedOut = await settled(timed.session_id, shortBridge)
