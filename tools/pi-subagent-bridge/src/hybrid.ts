@@ -1,4 +1,4 @@
-import { fxResult, type FxAdapter } from "./fx.ts"
+import { fxBudget, fxResult, type FxAdapter } from "./fx.ts"
 import type { PiAdapter } from "./pi-adapter.ts"
 import { randomUUID } from "node:crypto"
 import { execFileSync } from "node:child_process"
@@ -36,8 +36,9 @@ function scopeFor(value: unknown, tier: RoutedTier, cwd: string, checkHead = tru
   return parseScope(value, tier, checkHead ? git(cwd, "rev-parse", "HEAD") : undefined)
 }
 /** The effective wall-clock budget: explicit for Pi, unbounded elsewhere. */
-function runDeadlineMs(s: Session): number | null {
-  return targetOf(s).executor === "pi" ? PI_RUN_DEADLINE_MS : null
+function runBudget(s: Session): { run_deadline_ms: number | null; run_step_limit: number | null } {
+  if (s.execution.kind === "process" && s.execution.executor === "fx") return fxBudget(s.execution.run)
+  return { run_deadline_ms: targetOf(s).executor === "pi" ? PI_RUN_DEADLINE_MS : null, run_step_limit: null }
 }
 /** The command that blocks until the session's executor finishes; run it as a background task. */
 function watchCommand(s: Session): string {
@@ -370,7 +371,7 @@ export function makeHybridBridge(api: PiAdapter, command = {
     return {
       session_id: s.id, backend: backendOf(s), tier: s.tier, model: i.route.model, effort: i.route.effort,
       state, last_assistant_text, error: i.observation.error, usage: i.observation.usage,
-      run_deadline_ms: runDeadlineMs(s),
+      ...runBudget(s),
       changed_paths, out_of_scope_paths, head_unchanged, head_on_lane, commits_since_base,
       acceptance_claim: i.acceptance_claim, stopped_on: i.stopped_on, stop_condition_valid: i.stop_condition_valid,
       reason: i.notice === "stopped without a listed stop condition" ? i.notice : null,
@@ -387,7 +388,7 @@ export function makeHybridBridge(api: PiAdapter, command = {
   function admission(s: Session) {
     return {
       session_id: s.id, backend: backendOf(s), status: "admitted", watch: watchCommand(s),
-      run_deadline_ms: runDeadlineMs(s),
+      ...runBudget(s),
       fallback_reason: s.fallback_reason ?? null,
       fallback_notice: s.fallback_reason ? fallbackNotice(s) : null,
     }

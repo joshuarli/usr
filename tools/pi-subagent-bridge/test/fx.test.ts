@@ -21,7 +21,7 @@ const fs=require('node:fs'),p=require('node:path');
 if(process.argv.includes('--version')){console.log('0.0.17');process.exit(0)}
 const args=process.argv.slice(2),id='native-fixture',dir=p.join(process.env.FX_HOME,'sessions/v2',id);
 fs.mkdirSync(p.join(process.env.FX_HOME,'sessions/v2/.tmp'),{recursive:true});fs.writeFileSync(p.join(process.env.FX_HOME,'sessions/v2/index.jsonl'),'');fs.mkdirSync(dir,{recursive:true});fs.writeFileSync(p.join(dir,'log.jsonl'),JSON.stringify({v:1,kind:'session_created',id,workspace:process.cwd(),role:'root'})+'\\n');
-const mode=${JSON.stringify(behavior)};
+const mode=${JSON.stringify(behavior)}==='hold-once'&&args.includes('--resume')?'success':${JSON.stringify(behavior)}==='hold-once'?'hold':${JSON.stringify(behavior)};
 if(mode==='oversized')process.stdout.write('x'.repeat(1100000));
 else if(mode==='malformed')process.stdout.write('{\"exit_code\":');
 else if(!['hold','exhaust','quotafail','smallretry'].includes(mode))console.log(JSON.stringify({exit_code:0,model:'fixture-model',session_id:mode==='mismatch'?'foreign-session':id,final_output:mode==='empty'?'':'PROOF fixture\\nACCEPTANCE: met',usage:{input_tokens:1,output_tokens:1}}));
@@ -73,7 +73,7 @@ for (const behavior of ["hold", "oversized", "early-json"] as const) {
   test(`FX ${behavior} cannot turn an unfinished run into success`, async t => {
     const f = fixture(t, behavior, behavior === "oversized" ? 5000 : behavior === "early-json" ? 1000 : 200), run = f.fx.start(f.request)
     const result = await ended(run)
-    assert.equal(result.state, "failed")
+    assert.equal(result.state, behavior === "oversized" ? "failed" : "timed_out")
     const receipt = JSON.parse(readReceipt(run)!)
     assert.equal(receipt.reason, behavior === "oversized" ? "oversized" : "deadline")
     assert.ok(Buffer.byteLength(receipt.stdout) <= 1_048_576)
@@ -109,7 +109,59 @@ test("FX cancellation rejects stale process identity and mismatched run ownershi
   assert.equal(f.fx.cancel({ ...run, proc_start: "stale-process" }), false)
   assert.equal(f.fx.cancel({ ...run, output: run.output + ".foreign" }), false)
   assert.equal(f.fx.cancel(run), true)
-  assert.equal((await ended(run)).state, "interrupted")
+  assert.equal((await ended(run)).state, "cancelled")
+})
+
+const recoveryScope = (f: ReturnType<typeof fixture>) => ({ base_revision: f.repo.base, writable_paths: ["README"], acceptance_proof: "fixture proof", attempt_limit: 2, stop_on: "scope expansion" })
+async function settledStatus(bridge: ReturnType<typeof makeHybridBridge>, cwd: string, id: string) {
+  const deadline = Date.now() + 10000
+  while (Date.now() < deadline) {
+    const status = await bridge.status(cwd, id)
+    if (status.state !== "running") return status
+    await new Promise<void>(resolve => setTimeout(resolve, 50))
+  }
+  throw new Error("FX worker did not settle")
+}
+function currentRun(f: ReturnType<typeof fixture>, id: string): CommandRun {
+  const session = decodeSession(JSON.parse(readFileSync(join(f.repo.directory, id + ".json"), "utf8")), f.repo.cwd, id)
+  if (session.execution.kind !== "process") throw new Error("missing process")
+  return session.execution.run
+}
+
+test("an FX run stopped at its wall deadline reports timed_out with its budget and resumes the same native session", async t => {
+  const f = fixture(t, "hold-once", 1000), policy: ExecutionPlan = { kind: "leaf", target: { executor: "fx", selection } }
+  const bridge = makeHybridBridge(piAdapter(unusedApi()), undefined, undefined, () => policy, f.fx)
+  const admitted = await bridge.start(f.repo.cwd, "fixture", "worker", recoveryScope(f), "task")
+  assert.equal(admitted.run_deadline_ms, 1000)
+  assert.equal(admitted.run_step_limit, 20)
+  const stopped = await settledStatus(bridge, f.repo.cwd, admitted.session_id)
+  assert.equal(stopped.state, "timed_out")
+  assert.equal(stopped.run_deadline_ms, 1000)
+  assert.equal(stopped.run_step_limit, 20)
+  assert.equal((await bridge.resume(f.repo.cwd, admitted.session_id, "continue")).status, "admitted")
+  const job = JSON.parse(readFileSync(currentRun(f, admitted.session_id).output + ".job.json", "utf8"))
+  assert.deepEqual(job.args.slice(job.args.indexOf("--resume"), job.args.indexOf("--resume") + 2), ["--resume", "native-fixture"])
+  assert.equal((await settledStatus(bridge, f.repo.cwd, admitted.session_id)).state, "succeeded")
+})
+
+test("a verified FX cancellation resumes the same native session without replaying the attempt budget", async t => {
+  const f = fixture(t, "hold-once"), policy: ExecutionPlan = { kind: "leaf", target: { executor: "fx", selection } }
+  const bridge = makeHybridBridge(piAdapter(unusedApi()), undefined, undefined, () => policy, f.fx)
+  const admitted = await bridge.start(f.repo.cwd, "fixture", "worker", recoveryScope(f), "task")
+  await ready(currentRun(f, admitted.session_id).output + ".native.json")
+  assert.equal((await bridge.cancel(f.repo.cwd, admitted.session_id)).interrupted, true)
+  assert.equal((await settledStatus(bridge, f.repo.cwd, admitted.session_id)).state, "cancelled")
+  assert.equal((await bridge.resume(f.repo.cwd, admitted.session_id, "continue")).status, "admitted")
+  assert.equal((await settledStatus(bridge, f.repo.cwd, admitted.session_id)).state, "succeeded")
+  await assert.rejects(() => bridge.resume(f.repo.cwd, admitted.session_id, "again"), /attempt limit/)
+})
+
+test("an FX run without a verified termination receipt cannot be resumed", async t => {
+  const f = fixture(t, "mismatch"), policy: ExecutionPlan = { kind: "leaf", target: { executor: "fx", selection } }
+  const bridge = makeHybridBridge(piAdapter(unusedApi()), undefined, undefined, () => policy, f.fx)
+  const admitted = await bridge.start(f.repo.cwd, "fixture", "worker", recoveryScope(f), "task")
+  await ended(currentRun(f, admitted.session_id))
+  await assert.rejects(() => bridge.resume(f.repo.cwd, admitted.session_id, "continue"), /not known complete/)
 })
 
 async function ready(path: string): Promise<void> {
@@ -314,7 +366,7 @@ test("FX provider exhaustion surfaces promptly as a quota-classified failure", a
 test("a provider retry hint inside the job bound does not count as exhaustion", async t => {
   const f = fixture(t, "smallretry", 6000), run = f.fx.start(f.request)
   const result = await ended(run)
-  assert.equal(result.state, "failed")
+  assert.equal(result.state, "timed_out")
   assert.equal(JSON.parse(readReceipt(run)!).reason, "deadline")
 })
 

@@ -28,6 +28,7 @@ export type FxOptions = {
   extraEnv?: Record<string, string>
 }
 type Job = { nonce: string; cwd: string; fxHome: string; selection: FxSelection; output: string; errors: string; resume?: string }
+export const FX_PILOT_MAX_STEPS = 20
 const children = new Map<number, { child: ChildProcess; run: CommandRun }>()
 const RESERVED_ENV_PREFIX = /^(?:FX_|LD_|DYLD_|GIT_)/
 const RESERVED_ENV_NAMES = new Set(["HOME", "PATH", "SHELL", "TMPDIR", "BASH_ENV", "ENV", "ZDOTDIR", "NODE_OPTIONS", "PYTHONPATH", "PYTHONSTARTUP", "PYTHONHOME", "PERL5OPT", "RUBYOPT", "USR_SCOPED_WORKER"])
@@ -67,15 +68,34 @@ export function fxSession(run: CommandRun, expected: FxSelection): string | null
   if (!sameSelection(job.selection, expected)) throw new Error("FX admitted pin mismatch")
   return id ? token(job, id) : null
 }
+function continuation(job: Job): string | undefined {
+  const id = nativeSession(job)
+  return id && (job.resume === undefined || job.resume === id) ? token(job, id) : undefined
+}
+/** Budgets persisted at admission; records written before budgets were persisted report null. */
+export function fxBudget(run: CommandRun): { run_deadline_ms: number | null; run_step_limit: number | null } {
+  const limit = (value: unknown) => Number.isSafeInteger(value) && (value as number) > 0 ? value as number : null
+  try {
+    const value = read(run.output + ".job.json")
+    return isRecord(value) ? { run_deadline_ms: limit(value.wallMs), run_step_limit: limit(value.maxSteps) } : { run_deadline_ms: null, run_step_limit: null }
+  } catch { return { run_deadline_ms: null, run_step_limit: null } }
+}
 export function fxResult(run: CommandRun, expected: FxSelection) {
   if (workerAlive(run, false)) return { state: "running", result: null, stderr: null }
   try {
     const job = jobFor(run), receipt = read(run.output)
     if (!sameSelection(job.selection, expected)) throw new Error("FX admitted pin mismatch")
     if (!isRecord(receipt) || receipt.schema !== 1 || receipt.nonce !== job.nonce || receipt.supervisor_pid !== run.pid || typeof receipt.stdout !== "string" || typeof receipt.stderr !== "string") throw new Error("Invalid FX termination receipt")
-    if (receipt.reason === "cancelled") return { state: "interrupted", result: null, stderr: receipt.stderr }
-    if (receipt.reason === "exhausted") return { state: "failed", result: { subtype: "error" as const, error: "provider quota exhaustion: FX reported a quota failure or a retry delay beyond this job's bound; terminated early", finalText: "" }, stderr: receipt.stderr }
-    if (receipt.reason !== "exit" || receipt.signal !== null || receipt.code !== 0) return { state: "failed", result: { subtype: "error" as const, error: `${String(receipt.reason)}: FX exited ${String(receipt.code)} with signal ${String(receipt.signal)}`, finalText: "" }, stderr: receipt.stderr }
+    const stderr = receipt.stderr
+    const stopped = (state: "cancelled" | "timed_out" | "failed", error: string) => {
+      const sessionId = continuation(job)
+      const result: CommandResult = { subtype: "error", error, finalText: "", ...(sessionId ? { sessionId } : {}) }
+      return { state, result, stderr }
+    }
+    if (receipt.reason === "cancelled") return stopped("cancelled", "FX run cancelled; supervisor verified termination")
+    if (receipt.reason === "deadline") return stopped("timed_out", `FX run reached its ${String(fxBudget(run).run_deadline_ms)} ms wall deadline and was stopped`)
+    if (receipt.reason === "exhausted") return stopped("failed", "provider quota exhaustion: FX reported a quota failure or a retry delay beyond this job's bound; terminated early")
+    if (receipt.reason !== "exit" || receipt.signal !== null || receipt.code !== 0) return stopped("failed", `${String(receipt.reason)}: FX exited ${String(receipt.code)} with signal ${String(receipt.signal)}`)
     const value: unknown = JSON.parse(receipt.stdout)
     const id = nativeSession(job)
     if (!isRecord(value) || value.exit_code !== receipt.code || value.model !== job.selection.model || !id || value.session_id !== id || (job.resume !== undefined && job.resume !== id) || typeof value.final_output !== "string" || !value.final_output.trim()) throw new Error("FX result/native session mismatch or missing final response")
@@ -97,7 +117,7 @@ export function makeFxAdapter(options: FxOptions) {
   for (const name of Object.keys(options.extraEnv ?? {})) {
     if (invalidEnvName(name)) throw new Error("Invalid FX extra env name: " + name)
   }
-  const env: NodeJS.ProcessEnv = { HOME: home, PATH: pathEnv, SHELL: "/bin/sh", FX_AUTO_UPGRADE: "0", FX_DISABLE_KEYCHAIN: "1", FX_HERDR: "0", FX_SOUND: "off", FX_MAX_AGENT_STEPS: "20", USR_SCOPED_WORKER: "1", ...options.extraEnv }
+  const env: NodeJS.ProcessEnv = { HOME: home, PATH: pathEnv, SHELL: "/bin/sh", FX_AUTO_UPGRADE: "0", FX_DISABLE_KEYCHAIN: "1", FX_HERDR: "0", FX_SOUND: "off", FX_MAX_AGENT_STEPS: String(FX_PILOT_MAX_STEPS), USR_SCOPED_WORKER: "1", ...options.extraEnv }
   for (const name of Object.keys(secretEnvFiles)) {
     if (name in env || name === "FX_HOME" || name === "TMPDIR") throw new Error("FX secret env name collides with the qualified environment: " + name)
   }
@@ -119,7 +139,7 @@ export function makeFxAdapter(options: FxOptions) {
     } else mkdirSync(fxHome, { mode: 0o700 })
     const readOnly = request.access.kind === "read-only"
     const connection = options.connection == null ? {} : { providers: { [options.provider]: options.connection } }
-    const settings = JSON.stringify({ auto_upgrade: false, cache_warming: false, session_titles: false, max_agent_steps: 20, provider: options.provider, models: { [options.provider]: request.selection.model }, ...connection, permission: { "*": "deny", read: "allow", glob: "allow", grep: "allow", edit: readOnly ? "deny" : "allow", bash: readOnly ? "deny" : Object.fromEntries(options.allowedCommands.map(command => [command, "allow"])), subagent: "deny", toolbox: "deny" }, workspaces: { [cwd]: { enableAllProjectMcpServers: false } } })
+    const settings = JSON.stringify({ auto_upgrade: false, cache_warming: false, session_titles: false, max_agent_steps: FX_PILOT_MAX_STEPS, provider: options.provider, models: { [options.provider]: request.selection.model }, ...connection, permission: { "*": "deny", read: "allow", glob: "allow", grep: "allow", edit: readOnly ? "deny" : "allow", bash: readOnly ? "deny" : Object.fromEntries(options.allowedCommands.map(command => [command, "allow"])), subagent: "deny", toolbox: "deny" }, workspaces: { [cwd]: { enableAllProjectMcpServers: false } } })
     if (resume) {
       if (readFileSync(join(fxHome, "settings.json"), "utf8") !== settings) throw new Error("FX saved connection/control configuration changed; refusing to resume")
     } else {
@@ -132,9 +152,9 @@ export function makeFxAdapter(options: FxOptions) {
       }
     }
     const job: Job = { nonce, cwd, fxHome, selection: request.selection, output, errors, ...(resume ? { resume } : {}) }
-    const args = ["ask", "--json", "--provider", request.selection.provider, "--model", request.selection.model, "--effort", request.selection.effort, "--config", "max_agent_steps=20", ...(resume ? ["--resume", resume] : []), "--", request.prompt]
+    const args = ["ask", "--json", "--provider", request.selection.provider, "--model", request.selection.model, "--effort", request.selection.effort, "--config", "max_agent_steps=" + FX_PILOT_MAX_STEPS, ...(resume ? ["--resume", resume] : []), "--", request.prompt]
     const jobPath = output + ".job.json"
-    writeFileSync(jobPath, JSON.stringify({ ...job, executable: options.binary, args, env: { ...env, FX_HOME: fxHome, TMPDIR: request.logDirectory }, env_files: secretEnvFiles, wallMs, exhaustion: { dir: join(fxHome, "sessions/v2"), retry_after_seconds: Math.max(1, Math.floor(wallMs / 1000)) } }), { mode: 0o600 })
+    writeFileSync(jobPath, JSON.stringify({ ...job, executable: options.binary, args, env: { ...env, FX_HOME: fxHome, TMPDIR: request.logDirectory }, env_files: secretEnvFiles, wallMs, maxSteps: FX_PILOT_MAX_STEPS, exhaustion: { dir: join(fxHome, "sessions/v2"), retry_after_seconds: Math.max(1, Math.floor(wallMs / 1000)) } }), { mode: 0o600 })
     const invocation = plannedCommand(process.execPath, [fileURLToPath(new URL("./process-supervisor.ts", import.meta.url)), jobPath], request.planned_run)
     const child = spawn(invocation.executable, invocation.args, { detached: true, stdio: "ignore", env: { ...env, PATH: process.env.PATH }, cwd })
     child.once("error", error => writeFileSync(errors, error.message))
