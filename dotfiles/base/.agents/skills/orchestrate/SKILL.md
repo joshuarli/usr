@@ -12,7 +12,7 @@ description: "Route coding subagents through native Command Code/OpenCode/Devin 
 
 <!-- policy:begin opencode -->
 <!-- Generated from tools/pi-subagent-bridge/src/policy.ts; run make generate. -->
-**OpenCode exception:** A top-level OpenCode session never uses `pi-subagent-bridge`, at any tier or as a fallback. Delegate only through its configured native agents or built-in `general`/`explore`. When the top-level model is free, every tier must run a free model. The configured tier agents use `opencode/inkling-2-small-free` regardless of the top-level model:
+**OpenCode exception:** A top-level OpenCode session never uses `pi-subagent-bridge`, at any tier or as a fallback. Delegate only through its configured native agents or built-in `general`/`explore`. When the top-level model is free, every tier must run a free model. The configured tier agents use `opencode/tidepool-alpha-free` regardless of the top-level model:
 
 | Tier | Effort |
 | --- | --- |

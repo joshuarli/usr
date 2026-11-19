@@ -202,7 +202,7 @@
     ]
   },
   "opencode": {
-    "model": "opencode/inkling-2-small-free",
+    "model": "opencode/tidepool-alpha-free",
     "efforts": {
       "scout": "low",
       "mechanic": "medium",
