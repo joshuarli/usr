@@ -88,8 +88,8 @@ export function routesOf(plan: RootPlan): readonly [Route, ...Route[]] {
 }
 
 export const OPENCODE_NATIVE = {
-  model: "opencode/tidepool-alpha-free",
-  efforts: { scout: "low", mechanic: "medium", worker: "high", expert: "max" },
+  model: "opencode/hy4-flash-free",
+  efforts: { scout: "high", mechanic: "high", worker: "high", expert: "high" },
 } as const satisfies { model: string; efforts: Record<Tier, Effort> }
 export const NATIVE_FALLBACK = {
   tiers: ["scout", "mechanic", "worker"],

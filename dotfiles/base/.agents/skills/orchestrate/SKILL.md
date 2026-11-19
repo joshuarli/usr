@@ -12,14 +12,14 @@ description: "Route coding subagents through native Command Code/OpenCode/Devin 
 
 <!-- policy:begin opencode -->
 <!-- Generated from tools/pi-subagent-bridge/src/policy.ts; run make generate. -->
-**OpenCode exception:** A top-level OpenCode session never uses `pi-subagent-bridge`, at any tier or as a fallback. Delegate only through its configured native agents or built-in `general`/`explore`. When the top-level model is free, every tier must run a free model. The configured tier agents use `opencode/tidepool-alpha-free` regardless of the top-level model:
+**OpenCode exception:** A top-level OpenCode session never uses `pi-subagent-bridge`, at any tier or as a fallback. Delegate only through its configured native agents or built-in `general`/`explore`. When the top-level model is free, every tier must run a free model. The configured tier agents use `opencode/hy4-flash-free` regardless of the top-level model:
 
 | Tier | Effort |
 | --- | --- |
-| scout (read-only: no `shell`, no `edit`) | low |
-| mechanic | medium |
+| scout (read-only: no `shell`, no `edit`) | high |
+| mechanic | high |
 | worker | high |
-| expert | max |
+| expert | high |
 
 Bridge pins, fallbacks, and nesting rules do not apply on this path.
 <!-- policy:end opencode -->

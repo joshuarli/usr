@@ -202,12 +202,12 @@
     ]
   },
   "opencode": {
-    "model": "opencode/tidepool-alpha-free",
+    "model": "opencode/hy4-flash-free",
     "efforts": {
-      "scout": "low",
-      "mechanic": "medium",
+      "scout": "high",
+      "mechanic": "high",
       "worker": "high",
-      "expert": "max"
+      "expert": "high"
     }
   },
   "commandNative": {

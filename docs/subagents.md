@@ -10,7 +10,7 @@ flowchart TD
   start["Parent agent wants a coding subagent"] --> tier{"Which tier?"}
 
   tier -->|expert| harness{"Harness of the parent session?"}
-  harness -->|OpenCode top-level| oc_exp["OpenCode native expert agent<br/>opencode/tidepool-alpha-free<br/>effort max"]
+  harness -->|OpenCode top-level| oc_exp["OpenCode native expert agent<br/>opencode/hy4-flash-free<br/>effort high"]
   harness -->|Antigravity| agy_exp["Antigravity native expert<br/>usr-expert<br/>gemini-4-neon-high"]
   harness -->|Command Code| cmd_exp["Command Code native expert<br/>usr-expert<br/>tencent/hy4, high"]
   harness -->|Devin top-level| dv_exp["Devin native run_subagent<br/>subagent_general or subagent_explore<br/>no per-tier pin"]
@@ -20,7 +20,7 @@ flowchart TD
   harness -->|any other harness| other["No defined lane in this contract<br/>report to the owner before delegating"]
 
   tier -->|scout / mechanic / worker| cwd{"Top-level OpenCode, Devin, Command Code or Antigravity session?"}
-  cwd -->|OpenCode| oc["OpenCode native tier agent<br/>scout low · mechanic medium · worker high<br/>opencode/tidepool-alpha-free"]
+  cwd -->|OpenCode| oc["OpenCode native tier agent<br/>scout high · mechanic high · worker high<br/>opencode/hy4-flash-free"]
   cwd -->|Devin| dv["Devin native run_subagent<br/>subagent_explore (read-only) · subagent_general (changes)"]
   cwd -->|Antigravity| agy["Antigravity native usr-* agents<br/>Hydrogen scout/mechanic/worker<br/>verify actual model and effort"]
   cwd -->|Command Code| cmd["Command Code native usr-* agents<br/>scout Inkling 2 Small Free · mechanic HY4 Flash<br/>worker DeepSeek V4.1 Flash · expert HY4<br/>HY4-medium worker only explicit pilot"]
@@ -42,7 +42,7 @@ Expert is native everywhere; the bridge is reserved for `scout`/`mechanic`/`work
 
 | Assignment | OpenCode (top-level) | Devin (top-level) | Command Code (top-level) | Codex | Pi | Claude Code | Antigravity CLI |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| expert | native `expert` agent (`opencode/tidepool-alpha-free#max`) | `run_subagent`, unpinned | `usr-expert` (`tencent/hy4`, `high`) | native subagent, unpinned | native `expert` profile (`opencode-go/deepseek-v4.1-flash`, `max`) | native subagent (`opus`, `xhigh` effort) | native `usr-expert` (target `gemini-4-neon-high`) |
+| expert | native `expert` agent (`opencode/hy4-flash-free#high`) | `run_subagent`, unpinned | `usr-expert` (`tencent/hy4`, `high`) | native subagent, unpinned | native `expert` profile (`opencode-go/deepseek-v4.1-flash`, `max`) | native subagent (`opus`, `xhigh` effort) | native `usr-expert` (target `gemini-4-neon-high`) |
 | quota exhaustion (scout/mechanic/worker) | never uses the bridge | never uses the bridge | never uses the bridge; do not silently switch native models | not defined; report rather than substitute | not defined; report rather than substitute | native subagents: `scout` `haiku` · `mechanic` `sonnet` · `worker` `sonnet`, same brief, worktree and scope | never uses bridge; block mismatched model |
 
 Codex, Pi and Claude Code route `scout`/`mechanic`/`worker` through the bridge; the admitted routes are:
@@ -59,7 +59,7 @@ Codex, Pi and Claude Code route `scout`/`mechanic`/`worker` through the bridge; 
 
 - The bridge admits `scout`, `mechanic`, `worker` only. `worker_model_check`, `worker_start`, resume, steer and the MCP schemas reject `expert`.
 - Expert is harness-native everywhere; nothing routes to the bridge. Expert is terminal by lane: use it for exceptional architectural decisions and adversarial review, never as a size-based upgrade.
-- Top-level OpenCode, Devin and Command Code sessions never use the bridge, at any tier or as a fallback. Command Code uses native `usr-*` agents; HY4-medium worker is an explicit pilot, not a default. When the OpenCode top-level model is free, every tier runs a free model (its configured tier agents use `opencode/tidepool-alpha-free`).
+- Top-level OpenCode, Devin and Command Code sessions never use the bridge, at any tier or as a fallback. Command Code uses native `usr-*` agents; HY4-medium worker is an explicit pilot, not a default. When the OpenCode top-level model is free, every tier runs a free model (its configured tier agents use `opencode/hy4-flash-free`).
 - Top-level Antigravity CLI sessions use native usr-* subagents only. Its flash/pro model selectors do not enforce exact model IDs or efforts: verify or block the lane. God is a direct main-session mode.
 - Claude Code, Codex and Pi sessions use the bridge for `scout`/`mechanic`/`worker`; the bridge owns provider fallback (Codex → Command Code leaf → ordered Pi), only before edits, only along admitted routes.
 - Command Code native children cannot spawn another subagent. Native frontmatter pins and parent scoping are instructions, not bridge-enforced admission; model overrides and unsupported effort can bypass intended settings.

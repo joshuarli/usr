@@ -205,6 +205,7 @@ type MutablePolicy = {
 type Dimension = { name: string; mutate: (policy: MutablePolicy) => void; rejects?: RegExp }
 
 const FIXTURE_MODEL = "fixture-model"
+const otherEffort = (value: string) => (["low", "medium", "high", "xhigh", "max"] as const).find(effort => effort !== value)!
 const dimensions: Dimension[] = [
   { name: "codex scout model", mutate: p => { p.rootRoutes.scout[0].model = FIXTURE_MODEL } },
   { name: "codex scout effort", mutate: p => { p.rootRoutes.scout[0].effort = "xhigh" } },
@@ -241,10 +242,10 @@ const dimensions: Dimension[] = [
   { name: "command native HY4 pilot effort", mutate: p => { p.commandNative.pilot.effort = "high" } },
   { name: "command native banned model", mutate: p => { p.commandNative.worker.model = "gemini-4-argon-high" }, rejects: /Prohibited model in active policy/ },
   { name: "opencode model", mutate: p => { p.opencode.model = "opencode/fixture-free" } },
-  { name: "opencode scout effort", mutate: p => { p.opencode.efforts.scout = "high" } },
-  { name: "opencode mechanic effort", mutate: p => { p.opencode.efforts.mechanic = "high" } },
-  { name: "opencode worker effort", mutate: p => { p.opencode.efforts.worker = "low" } },
-  { name: "opencode expert effort", mutate: p => { p.opencode.efforts.expert = "low" } },
+  { name: "opencode scout effort", mutate: p => { p.opencode.efforts.scout = otherEffort(p.opencode.efforts.scout) } },
+  { name: "opencode mechanic effort", mutate: p => { p.opencode.efforts.mechanic = otherEffort(p.opencode.efforts.mechanic) } },
+  { name: "opencode worker effort", mutate: p => { p.opencode.efforts.worker = otherEffort(p.opencode.efforts.worker) } },
+  { name: "opencode expert effort", mutate: p => { p.opencode.efforts.expert = otherEffort(p.opencode.efforts.expert) } },
 
   { name: "native fallback tiers", mutate: p => { p.nativeFallback.tiers = ["scout", "mechanic"] } },
   { name: "native fallback scout Claude model", mutate: p => { p.nativeFallback.claudeModels.scout = "opus" } },
