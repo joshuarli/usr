@@ -5,10 +5,10 @@ import { exhaustionWatcher, secretEnvironment, writeReceipt, type ExhaustionWatc
 type AcpJob = {
   nonce: string; executable: string; args: string[]; cwd: string; env: NodeJS.ProcessEnv; env_files?: Record<string, string>
   wallMs: number; output: string; errors: string; prompt: string; resume?: string; acp_log: string; events: string
-  selection: { provider: string; model: string; effort: string }; exhaustion?: ExhaustionWatch
+  selection: { provider: string; model: string; effort: string }; exhaustion?: ExhaustionWatch; ungated_tools: string[]
 }
 type Reason = "end_turn" | "step_limit" | "refused" | "max_tokens" | "max_turn_requests" | "cancelled" | "deadline" | "exhausted"
-  | "permission" | "pin_mismatch" | "protocol" | "crash" | "spawn" | "supervision"
+  | "permission" | "policy" | "pin_mismatch" | "protocol" | "crash" | "spawn" | "supervision"
 
 const job = JSON.parse(readFileSync(process.argv[2]!, "utf8")) as AcpJob
 const MAX_LINE = 8_388_608, MAX_FINAL = 1_048_576, MAX_EVENTS = 16_777_216, MAX_STDERR = 65_536
@@ -16,10 +16,11 @@ const CANCEL_WAIT_MS = 5000, EXIT_WAIT_MS = 2000
 const errorFd = openSync(job.errors, "wx", 0o600)
 let reason: Reason | null = null, stopReason: string | null = null, sessionId: string | null = null
 let finalText = "", usage: unknown = null, stderr = "", eventBytes = 0, permissionRequests = 0, finished = false
+let policyViolation: string | null = null
 
 function receipt(termination: "verified" | "unverified", childPid: number | null) {
   writeReceipt(job.output, { schema: 2, transport: "acp", nonce: job.nonce, supervisor_pid: process.pid, child_pid: childPid, session_id: sessionId,
-    reason, stop_reason: stopReason, final_text: finalText, usage, termination, permission_requests: permissionRequests, stderr: stderr.slice(-4096) })
+    reason, stop_reason: stopReason, final_text: finalText, usage, termination, permission_requests: permissionRequests, policy_violation: policyViolation, stderr: stderr.slice(-4096) })
 }
 
 let env: NodeJS.ProcessEnv
@@ -86,7 +87,10 @@ function handle(message: Record<string, unknown>): void {
   const update = params?.update
   if (!update) return
   record(update)
-  if (update.sessionUpdate === "tool_call") finalText = ""
+  if (update.sessionUpdate === "tool_call") {
+    finalText = ""
+    if (typeof update.name === "string" && job.ungated_tools.includes(update.name)) { policyViolation = update.name; void stop("policy") }
+  }
   else if (update.sessionUpdate === "agent_message_chunk") {
     const content = update.content as { type?: string; text?: unknown } | undefined
     if (content?.type === "text" && typeof content.text === "string" && finalText.length + content.text.length <= MAX_FINAL) finalText += content.text

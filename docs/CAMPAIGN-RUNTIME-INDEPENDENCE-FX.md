@@ -23,6 +23,12 @@
   - Steering remains interrupt-resume. The negotiated `_meta.fx.steer` live steering is not used, so delivery states are the bridge's existing pending/completed/failed.
   - A process that detaches and reparents after the descendant snapshot is not detected. This is lifecycle control, not an OS sandbox.
   - ACP is not wired into production routing.
+- **FX 0.0.17 egress defect:** the built-in `web_fetch` cannot be prevented, so the bridge only detects it.
+  - **Not prevented by permissions or mode:** it fetches public URLs under `"*": "deny"`, in both `auto` and `ask` modes, and without a client permission request. `web_fetch` rules match only exact canonical domains, so no rule denies every domain.
+  - **Not prevented by hiding:** `tool_placement` removes it from the offered tools, yet a direct call still runs, and so does a call through the denied `toolbox`. FX refuses an ungranted MCP tool the same way, but not this built-in.
+  - **Mitigation:** both web built-ins are hidden through `tool_placement`. The ACP supervisor stops a run on any `web_fetch`/`web_search` call, and the CLI transport rejects a result that used one. The fetch may already have happened.
+  - **Consequence:** read-only FX tiers have a detected public-URL egress channel, not a prevented one. Reproduction: settings `{"permission": {"*": "deny"}}`, then a provider response calling `web_fetch` with `{"url": "https://example.com/"}`.
+- **Phase 3 grant shape (probed):** client-supplied ACP MCP servers expose tools as `mcp_<server>_<tool>`. A per-tool `permission` allow offers and runs only that tool. An ungranted tool from the same server is refused before it reaches the server.
 - **Next implementation slice:** Phase 2 live DeepSeek through ACP, with an account-access check first. Phases 3 and 4 can proceed deterministically in parallel.
 - **Current boundary:** FX remains experimental. Production routes, public names, ordinary schema-2 writes, experimental schema-3 readers/writes, installer defaults and provider entitlements are unchanged.
 

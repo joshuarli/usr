@@ -32,6 +32,11 @@ export type FxOptions = {
 }
 type Job = { transport: FxTransport; nonce: string; cwd: string; fxHome: string; selection: FxSelection; output: string; errors: string; resume?: string }
 export const FX_PILOT_MAX_STEPS = 20
+/**
+ * FX 0.0.17 built-ins that no permission rule, mode or tool placement prevents: web_fetch rules match only exact
+ * domains and a direct or toolbox call still executes when the tool is hidden. Workers stop when one is attempted.
+ */
+export const FX_UNGATED_TOOLS = ["web_fetch", "web_search"] as const
 const children = new Map<number, { child: ChildProcess; run: CommandRun }>()
 const RESERVED_ENV_PREFIX = /^(?:FX_|LD_|DYLD_|GIT_)/
 const RESERVED_ENV_NAMES = new Set(["HOME", "PATH", "SHELL", "TMPDIR", "BASH_ENV", "ENV", "ZDOTDIR", "NODE_OPTIONS", "PYTHONPATH", "PYTHONSTARTUP", "PYTHONHOME", "PERL5OPT", "RUBYOPT", "USR_SCOPED_WORKER"])
@@ -119,6 +124,8 @@ export function fxResult(run: CommandRun, expected: FxSelection): Status {
     if (receipt.reason === "exhausted") return stopped("failed", "provider quota exhaustion: FX reported a quota failure or a retry delay beyond this job's bound; terminated early")
     if (receipt.reason !== "exit" || receipt.signal !== null || receipt.code !== 0) return stopped("failed", `${String(receipt.reason)}: FX exited ${String(receipt.code)} with signal ${String(receipt.signal)}`)
     const value: unknown = JSON.parse(receipt.stdout)
+    const ungated = isRecord(value) && Array.isArray(value.tool_calls) ? value.tool_calls.find(call => isRecord(call) && (FX_UNGATED_TOOLS as readonly unknown[]).includes(call.name)) : undefined
+    if (isRecord(ungated)) return stopped("failed", `FX used the ungated built-in tool ${String(ungated.name)}; it cannot be prevented, so the run is not accepted`)
     const id = nativeSession(job)
     if (!isRecord(value) || value.exit_code !== receipt.code || value.model !== job.selection.model || !id || value.session_id !== id || (job.resume !== undefined && job.resume !== id) || typeof value.final_output !== "string" || !value.final_output.trim()) throw new Error("FX result/native session mismatch or missing final response")
     const result: CommandResult = { subtype: "success", sessionId: token(job, id), finalText: value.final_output, usage: value.usage }
@@ -146,6 +153,7 @@ function acpResult(run: CommandRun, job: Job, receipt: unknown): Status {
     case "deadline": return stopped("timed_out", `FX run reached its ${String(fxBudget(run).run_deadline_ms)} ms wall deadline and was stopped`)
     case "exhausted": return stopped("failed", "provider quota exhaustion: FX reported a quota failure or a retry delay beyond this job's bound; terminated early")
     case "permission": return stopped("failed", "FX requested interactive permission; the request was denied and the run stopped as blocked")
+    case "policy": return stopped("failed", `FX attempted the ungated built-in tool ${String(receipt.policy_violation)}; the run was stopped. This is detection, not prevention: the call may already have executed`)
     case "pin_mismatch": return stopped("failed", "FX effective provider/model/effort differed from the admitted pins; stopped before prompting")
     default: return stopped("failed", `${receipt.reason}: FX ACP run ended without completing (stop reason ${String(receipt.stop_reason)})`)
   }
@@ -179,7 +187,7 @@ export function makeFxAdapter(options: FxOptions) {
     if (!underHome || underHome.startsWith("..") || isAbsolute(underHome)) throw new Error("FX qualification worktree must be beneath its private HOME")
     const readOnly = request.access.kind === "read-only"
     const connection = options.connection == null ? {} : { providers: { [options.provider]: options.connection } }
-    const settings = JSON.stringify({ auto_upgrade: false, cache_warming: false, session_titles: false, max_agent_steps: FX_PILOT_MAX_STEPS, provider: options.provider, models: { [options.provider]: request.selection.model }, ...connection, permission: { "*": "deny", read: "allow", glob: "allow", grep: "allow", edit: readOnly ? "deny" : "allow", bash: readOnly ? "deny" : Object.fromEntries(options.allowedCommands.map(command => [command, "allow"])), subagent: "deny", toolbox: "deny" }, workspaces: { [cwd]: { enableAllProjectMcpServers: false } } })
+    const settings = JSON.stringify({ auto_upgrade: false, cache_warming: false, session_titles: false, max_agent_steps: FX_PILOT_MAX_STEPS, provider: options.provider, models: { [options.provider]: request.selection.model }, ...connection, permission: { "*": "deny", read: "allow", glob: "allow", grep: "allow", edit: readOnly ? "deny" : "allow", bash: readOnly ? "deny" : Object.fromEntries(options.allowedCommands.map(command => [command, "allow"])), subagent: "deny", toolbox: "deny" }, tool_placement: Object.fromEntries(FX_UNGATED_TOOLS.map(tool => [tool, "toolbox"])), workspaces: { [cwd]: { enableAllProjectMcpServers: false } } })
     return { cwd, settings }
   }
   /** Validates a continuation without effects: token, worktree, pins and the saved private configuration. */
@@ -212,7 +220,7 @@ export function makeFxAdapter(options: FxOptions) {
     const acpLog = output + ".acp.log"
     // FX 0.0.17 `acp --provider <configured name>` fails session/new with -32603; the private settings select the provider instead,
     // and the supervisor verifies the effective provider/model/effort from session configOptions before prompting.
-    const acp = { args: ["acp", "--model", request.selection.model, "--effort", request.selection.effort, "--log-file", acpLog], prompt: request.prompt, acp_log: acpLog, events: output + ".events.ndjson" }
+    const acp = { args: ["acp", "--model", request.selection.model, "--effort", request.selection.effort, "--log-file", acpLog], prompt: request.prompt, acp_log: acpLog, events: output + ".events.ndjson", ungated_tools: FX_UNGATED_TOOLS }
     const cliArgs = ["ask", "--json", "--provider", request.selection.provider, "--model", request.selection.model, "--effort", request.selection.effort, "--config", "max_agent_steps=" + FX_PILOT_MAX_STEPS, ...(resume ? ["--resume", resume] : []), "--", request.prompt]
     const jobPath = output + ".job.json"
     const transport = options.transport === "acp" ? acp : { args: cliArgs }

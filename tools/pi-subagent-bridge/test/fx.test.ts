@@ -24,7 +24,7 @@ fs.mkdirSync(p.join(process.env.FX_HOME,'sessions/v2/.tmp'),{recursive:true});fs
 const mode=${JSON.stringify(behavior)}==='hold-once'&&args.includes('--resume')?'success':${JSON.stringify(behavior)}==='hold-once'?'hold':${JSON.stringify(behavior)};
 if(mode==='oversized')process.stdout.write('x'.repeat(1100000));
 else if(mode==='malformed')process.stdout.write('{\"exit_code\":');
-else if(!['hold','exhaust','quotafail','smallretry'].includes(mode))console.log(JSON.stringify({exit_code:0,model:'fixture-model',session_id:mode==='mismatch'?'foreign-session':id,final_output:mode==='empty'?'':'PROOF fixture\\nACCEPTANCE: met',usage:{input_tokens:1,output_tokens:1}}));
+else if(!['hold','exhaust','quotafail','smallretry'].includes(mode))console.log(JSON.stringify({exit_code:0,model:'fixture-model',session_id:mode==='mismatch'?'foreign-session':id,final_output:mode==='empty'?'':'PROOF fixture\\nACCEPTANCE: met',usage:{input_tokens:1,output_tokens:1},tool_calls:mode==='webfetch'?[{name:'web_fetch',status:'success'}]:[]}));
 if(['exhaust','quotafail','smallretry'].includes(mode))setTimeout(()=>{
   const rec=mode==='exhaust'?{v:1,seq:2,ts:Date.now(),kind:'item',turn:1,type:'model_call',data:{outcome:'failed',failure:'rate_limited',retry_after_s:999999}}
     :mode==='quotafail'?{v:1,seq:2,ts:Date.now(),kind:'item',turn:1,type:'model_call',data:{outcome:'failed',failure:'quota'}}
@@ -510,6 +510,7 @@ function handle(m){
   if(m.method==='session/resume'){if(!fs.existsSync(p.join(home,'sessions/v2',m.params.sessionId)))return send({id:m.id,error:{code:-32602,message:'Session not found'}});open(m.params.sessionId);return send({id:m.id,result:{configOptions:config()}})}
   if(m.method==='session/prompt'){prompt=m.id;
     if(mode==='hold'||mode==='hold-once'&&!fs.existsSync(p.join(home,'held'))){fs.writeFileSync(p.join(home,'held'),'');return}
+    if(mode==='webfetch')return send({method:'session/update',params:{sessionId:sid,update:{sessionUpdate:'tool_call',toolCallId:'w1',name:'web_fetch',status:'pending'}}});
     if(mode==='permission')return send({id:'perm-1',method:'session/request_permission',params:{sessionId:sid,toolCall:{toolCallId:'t1'},options:[]}});
     if(mode==='steps'){fs.appendFileSync(args[args.indexOf('--log-file')+1],'step limit reached outcome_kind=step_limit\\n');return send({id:m.id,result:{stopReason:'refused'}})}
     send({method:'session/update',params:{sessionId:sid,update:{sessionUpdate:'tool_call',toolCallId:'t0',name:'read_file',status:'pending'}}});
@@ -617,4 +618,21 @@ test("a changed saved FX configuration refuses resumption before any attempt or 
   const path = join(f.repo.directory, admitted.session_id + ".json"), before = readFileSync(path, "utf8")
   await assert.rejects(() => f.bridge.resume(f.repo.cwd, admitted.session_id, "continue"), /configuration changed/)
   assert.equal(readFileSync(path, "utf8"), before)
+})
+
+test("an ACP worker that calls the ungated FX web_fetch built-in is stopped and reported as a detected policy violation", async t => {
+  const f = acpFixture(t, "webfetch")
+  const admitted = await f.bridge.start(f.repo.cwd, "fixture", "worker", f.scope, "task")
+  const done = await acpSettled(f.bridge, f.repo.cwd, admitted.session_id)
+  assert.equal(done.state, "failed")
+  assert.match(String(done.error), /ungated built-in tool web_fetch.*detection, not prevention/)
+  const job = JSON.parse(readFileSync(acpRun(f, admitted.session_id).output + ".job.json", "utf8"))
+  assert.deepEqual(JSON.parse(readFileSync(join(job.fxHome, "settings.json"), "utf8")).tool_placement, { web_fetch: "toolbox", web_search: "toolbox" })
+})
+
+test("a CLI FX result that used an ungated web built-in is not accepted", async t => {
+  const f = fixture(t, "webfetch"), run = f.fx.start(f.request)
+  const result = await ended(run)
+  assert.equal(result.state, "failed")
+  assert.match(JSON.stringify(result.result), /ungated built-in tool web_fetch/)
 })

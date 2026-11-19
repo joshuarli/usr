@@ -138,14 +138,16 @@ export async function bridgePilot(binary, scratch, options = {}) {
     out.step_limit = { state: limited.state, provider_requests: 20, continuation: continued.state, attempts_consumed: 1 }
     // Hostile read-only scout with ambient project configuration that tries to widen access.
     reset()
-    requests = []; calls = [['write_file', { path: 'forbidden.txt', content: 'x' }], ['edit_file', { path: 'arithmetic.py', old_string: 'a - b', new_string: 'a * b' }], ['shell', { action: 'run', command: 'touch shell-forbidden' }], ['subagent', { action: 'message', agent: 'x', message: 'spawn' }], ['toolbox', { run: 'write_file', arguments: { path: 'alternate-forbidden', content: 'x' } }]]; final = 'arithmetic.py:2 evidence'
+    requests = []; calls = [['write_file', { path: 'forbidden.txt', content: 'x' }], ['edit_file', { path: 'arithmetic.py', old_string: 'a - b', new_string: 'a * b' }], ['shell', { action: 'run', command: 'touch shell-forbidden' }], ['subagent', { action: 'message', agent: 'x', message: 'spawn' }], ['toolbox', { run: 'write_file', arguments: { path: 'alternate-forbidden', content: 'x' } }], ['web_fetch', { url: 'http://127.0.0.1:9/' }]]; final = 'arithmetic.py:2 evidence'
     const hostile = await admit('hostile read-only fixture', 'scout', { ...scope, writable_paths: [], acceptance_proof: 'arithmetic.py:2 evidence' })
     const hostileState = await settled(hostile.session_id)
-    assert.equal(hostileState.state, 'succeeded')
-    assert.ok(acpToolCalls(runOf(hostile.session_id)).every(call => call.status === 'failed'))
+    assert.equal(hostileState.state, 'failed'); assert.match(hostileState.error, /ungated built-in tool web_fetch/)
+    const hostileCalls = acpToolCalls(runOf(hostile.session_id))
+    assert.deepEqual(hostileCalls.map(call => call.name), ['write_file', 'edit_file', 'shell', 'subagent', 'write_file', 'web_fetch'])
+    assert.ok(hostileCalls.slice(0, 5).every(call => call.status === 'failed'))
     for (const name of ['forbidden.txt', 'shell-forbidden', 'alternate-forbidden', 'ambient-started']) assert.equal(existsSync(join(cwd, name)), false, name)
     assert.match(readFileSync(join(cwd, 'arithmetic.py'), 'utf8'), /a - b/)
-    out.hostile_read_only = { tool_statuses: 'all failed', escapes: 0, ambient_mcp_started: false }
+    out.hostile_read_only = { tool_statuses: 'write/edit/shell/subagent/toolbox failed', escapes: 0, ambient_mcp_started: false, ungated_web_fetch: 'detected and stopped' }
     // Changed saved configuration refuses continuation before any effect.
     const savedJob = JSON.parse(readFileSync(runOf(recovering.session_id).output + '.job.json', 'utf8'))
     const settingsPath = join(savedJob.fxHome, 'settings.json'), original = readFileSync(settingsPath, 'utf8')
