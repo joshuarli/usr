@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import { spawnSync } from "node:child_process"
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import test from "node:test"
@@ -64,9 +64,18 @@ test("every CLI worker launcher actually strips coordinator authority before exe
       const report = join(root, `report-${index}.json`)
       process.env.USR_ENV_REPORT = report
       launch({ directory: root, logDirectory: root, prompt: "fixture", selection: { model, effort: "high" }, access: { kind: "write" } })
-      for (let attempt = 0; attempt < 200 && !existsSync(report); attempt++)
-        await new Promise((resolve) => setTimeout(resolve, 10))
-      assert.deepEqual(JSON.parse(readFileSync(report, "utf8")), { USR_SCOPED_WORKER: "1" }, model)
+      let received: Record<string, string> | undefined
+      let lastError: unknown
+      for (let attempt = 0; attempt < 200; attempt++) {
+        try {
+          received = JSON.parse(readFileSync(report, "utf8"))
+          break
+        } catch (error) {
+          lastError = error
+          await new Promise((resolve) => setTimeout(resolve, 10))
+        }
+      }
+      assert.deepEqual(received, { USR_SCOPED_WORKER: "1" }, `${model}: ${lastError}`)
     }
   } finally {
     for (const [key, value] of Object.entries(previous)) {
