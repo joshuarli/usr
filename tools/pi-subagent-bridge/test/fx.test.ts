@@ -34,7 +34,7 @@ if(['exhaust','quotafail','smallretry'].includes(mode))setTimeout(()=>{
 if(['hold','oversized','early-json','exhaust','quotafail','smallretry'].includes(mode))setInterval(()=>{},1000);
 `
   writeFileSync(binary, source, { mode: 0o755 })
-  const fx = makeFxAdapter({ binary, binarySha256: createHash("sha256").update(source).digest("hex"), home: scratch.path, provider: "fixture", connection: {}, allowedCommands: [], wallMs })
+  const fx = makeFxAdapter({ transport: "cli", binary, binarySha256: createHash("sha256").update(source).digest("hex"), home: scratch.path, provider: "fixture", connection: {}, allowedCommands: [], wallMs })
   const request = { directory: repo.cwd, logDirectory: repo.directory, prompt: "fixture task", selection, access: { kind: "write" as const } }
   mkdirSync(repo.directory, { recursive: true })
   return { repo, fx, request }
@@ -212,7 +212,7 @@ fs.writeFileSync(p.join(process.env.FX_HOME,'probe.json'),JSON.stringify({path:p
 console.log(JSON.stringify({exit_code:0,model:'fixture-model',session_id:id,final_output:'PROOF fixture\\nACCEPTANCE: met',usage:{input_tokens:1,output_tokens:1}}));
 `
   writeFileSync(binary, source, { mode: 0o755 })
-  const fx = makeFxAdapter({ binary, binarySha256: createHash("sha256").update(source).digest("hex"), home: scratch.path, provider: "fixture", connection: {}, allowedCommands: [], wallMs: 5000, ...configure?.(scratch) })
+  const fx = makeFxAdapter({ transport: "cli", binary, binarySha256: createHash("sha256").update(source).digest("hex"), home: scratch.path, provider: "fixture", connection: {}, allowedCommands: [], wallMs: 5000, ...configure?.(scratch) })
   const request = { directory: repo.cwd, logDirectory: repo.directory, prompt: "fixture task", selection, access: { kind: "write" as const } }
   mkdirSync(repo.directory, { recursive: true })
   return { scratch, repo, fx, request }
@@ -268,7 +268,7 @@ test("FX reserved env names are refused for secrets and extra environment", t =>
   const binary = join(scratch.path, "fake-fx")
   writeFileSync(binary, "#!/bin/true\n", { mode: 0o755 })
   const sha = createHash("sha256").update(readFileSync(binary)).digest("hex")
-  const base = { binary, binarySha256: sha, home: scratch.path, provider: "fixture", connection: {}, allowedCommands: [] }
+  const base = { transport: "cli" as const, binary, binarySha256: sha, home: scratch.path, provider: "fixture", connection: {}, allowedCommands: [] }
   for (const name of ["FX_PROVIDER", "FX_PERMISSION_MODE", "LD_PRELOAD", "DYLD_INSERT_LIBRARIES", "GIT_DIR", "BASH_ENV", "PYTHONPATH", "NODE_OPTIONS", "HOME", "USR_SCOPED_WORKER", "lowercase"]) {
     assert.throws(() => makeFxAdapter({ ...base, secretEnvFiles: { [name]: "/tmp/x" } }), /Invalid FX secret env/, name)
     assert.throws(() => makeFxAdapter({ ...base, extraEnv: { [name]: "x" } }), /Invalid FX extra env/, name)
@@ -486,4 +486,135 @@ test("an unavailable FX primary admits the next approved lane with a recorded re
   const status = await settle(bridge, f.repo.cwd, admitted.session_id)
   assert.equal(status.backend, "command-code")
   assert.equal(cmd.launches.length, 1)
+})
+
+function acpFixture(t: TestContext, behavior: string, wallMs = 5000) {
+  const scratch = new Scratch()
+  t.after(() => scratch.close())
+  const repo = scratch.repo(), binary = join(scratch.path, "fake-fx-acp")
+  const source = `#!${process.execPath}
+const fs=require('node:fs'),p=require('node:path');
+if(process.argv.includes('--version')){console.log('0.0.17');process.exit(0)}
+const mode=${JSON.stringify(behavior)},home=process.env.FX_HOME,args=process.argv.slice(2);
+const model=args[args.indexOf('--model')+1],effort=args[args.indexOf('--effort')+1];
+const send=m=>process.stdout.write(JSON.stringify({jsonrpc:'2.0',...m})+'\\n');
+let buf='',sid=null;
+process.stdin.on('data',d=>{buf+=d;let i;while((i=buf.indexOf('\\n'))>=0){const line=buf.slice(0,i);buf=buf.slice(i+1);if(line.trim())handle(JSON.parse(line))}});
+process.stdin.on('end',()=>process.exit(0));
+function open(id){sid=id;const dir=p.join(home,'sessions/v2',id);fs.mkdirSync(dir,{recursive:true});if(!fs.existsSync(p.join(dir,'log.jsonl')))fs.writeFileSync(p.join(dir,'log.jsonl'),JSON.stringify({v:1,kind:'session_created',id,workspace:process.cwd(),role:'root'})+'\\n')}
+function config(){return[{id:'provider',currentValue:'fixture'},{id:'model',currentValue:mode==='wrong-pin'?'other-model':model},{id:'effort',currentValue:effort}]}
+let prompt=null;
+function handle(m){
+  if(m.method==='initialize')return send({id:m.id,result:{protocolVersion:1,agentInfo:{name:'fx',version:'0.0.17'}}});
+  if(m.method==='session/new'){open('acp-native');return send({id:m.id,result:{sessionId:'acp-native',configOptions:config()}})}
+  if(m.method==='session/resume'){if(!fs.existsSync(p.join(home,'sessions/v2',m.params.sessionId)))return send({id:m.id,error:{code:-32602,message:'Session not found'}});open(m.params.sessionId);return send({id:m.id,result:{configOptions:config()}})}
+  if(m.method==='session/prompt'){prompt=m.id;
+    if(mode==='hold'||mode==='hold-once'&&!fs.existsSync(p.join(home,'held'))){fs.writeFileSync(p.join(home,'held'),'');return}
+    if(mode==='permission')return send({id:'perm-1',method:'session/request_permission',params:{sessionId:sid,toolCall:{toolCallId:'t1'},options:[]}});
+    if(mode==='steps'){fs.appendFileSync(args[args.indexOf('--log-file')+1],'step limit reached outcome_kind=step_limit\\n');return send({id:m.id,result:{stopReason:'refused'}})}
+    send({method:'session/update',params:{sessionId:sid,update:{sessionUpdate:'tool_call',toolCallId:'t0',name:'read_file',status:'pending'}}});
+    send({method:'session/update',params:{sessionId:sid,update:{sessionUpdate:'agent_message_chunk',content:{type:'text',text:'PROOF fixture\\nACCEPTANCE: met'}}}});
+    return send({id:m.id,result:{stopReason:'end_turn',usage:{inputTokens:1,outputTokens:1}}})}
+  if(m.method==='session/cancel'&&prompt!==null)return send({id:prompt,result:{stopReason:'cancelled'}});
+  if(m.id==='perm-1')return;
+}
+`
+  writeFileSync(binary, source, { mode: 0o755 })
+  const fx = makeFxAdapter({ transport: "acp", binary, binarySha256: createHash("sha256").update(source).digest("hex"), home: scratch.path, provider: "fixture", connection: {}, allowedCommands: [], wallMs })
+  const request = { directory: repo.cwd, logDirectory: repo.directory, prompt: "fixture task", selection, access: { kind: "write" as const } }
+  mkdirSync(repo.directory, { recursive: true })
+  const policy: ExecutionPlan = { kind: "leaf", target: { executor: "fx", selection } }
+  const bridge = makeHybridBridge(piAdapter(unusedApi()), undefined, undefined, () => policy, fx)
+  const scope = { base_revision: repo.base, writable_paths: ["README"], acceptance_proof: "fixture proof", attempt_limit: 2, stop_on: "scope expansion" }
+  return { scratch, repo, fx, request, bridge, scope }
+}
+async function acpSettled(bridge: ReturnType<typeof makeHybridBridge>, cwd: string, id: string) {
+  const deadline = Date.now() + 15000
+  while (Date.now() < deadline) {
+    const status = await bridge.status(cwd, id)
+    if (status.state !== "running") return status
+    await new Promise<void>(resolve => setTimeout(resolve, 25))
+  }
+  throw new Error("FX ACP worker did not settle")
+}
+function acpRun(f: ReturnType<typeof acpFixture>, id: string): CommandRun {
+  const session = decodeSession(JSON.parse(readFileSync(join(f.repo.directory, id + ".json"), "utf8")), f.repo.cwd, id)
+  if (session.execution.kind !== "process") throw new Error("missing process")
+  return session.execution.run
+}
+
+test("an ACP worker publishes its exact native session at admission and completes with the streamed final text", async t => {
+  const f = acpFixture(t, "success")
+  const admitted = await f.bridge.start(f.repo.cwd, "fixture", "worker", f.scope, "task")
+  const done = await acpSettled(f.bridge, f.repo.cwd, admitted.session_id)
+  assert.equal(done.state, "succeeded")
+  assert.equal(done.acceptance_claim, "met")
+  const run = acpRun(f, admitted.session_id)
+  assert.equal(JSON.parse(readFileSync(run.output + ".native.json", "utf8")).session_id, "acp-native")
+  assert.equal(JSON.parse(readFileSync(run.output, "utf8")).termination, "verified")
+  const job = JSON.parse(readFileSync(run.output + ".job.json", "utf8"))
+  assert.ok(!job.args.includes("--provider"), "the provider is selected through private settings, never the failing CLI override")
+})
+
+test("an ACP worker whose effective pins differ from admission stops before prompting and cannot be resumed as success", async t => {
+  const f = acpFixture(t, "wrong-pin")
+  const admitted = await f.bridge.start(f.repo.cwd, "fixture", "worker", f.scope, "task")
+  const done = await acpSettled(f.bridge, f.repo.cwd, admitted.session_id)
+  assert.equal(done.state, "failed")
+  assert.match(String(done.error), /differed from the admitted pins/)
+})
+
+test("an ACP permission request is denied and surfaces as a blocked failure", async t => {
+  const f = acpFixture(t, "permission")
+  const admitted = await f.bridge.start(f.repo.cwd, "fixture", "worker", f.scope, "task")
+  const done = await acpSettled(f.bridge, f.repo.cwd, admitted.session_id)
+  assert.equal(done.state, "failed")
+  assert.match(String(done.error), /interactive permission/)
+  assert.equal(JSON.parse(readFileSync(acpRun(f, admitted.session_id).output, "utf8")).permission_requests, 1)
+})
+
+test("ACP step exhaustion reports turn_limit and continues without consuming an attempt", async t => {
+  const f = acpFixture(t, "steps")
+  const admitted = await f.bridge.start(f.repo.cwd, "fixture", "worker", f.scope, "task")
+  const done = await acpSettled(f.bridge, f.repo.cwd, admitted.session_id)
+  assert.equal(done.state, "turn_limit")
+  assert.equal(done.run_step_limit, 20)
+  assert.equal((await f.bridge.resume(f.repo.cwd, admitted.session_id, "continue")).status, "admitted")
+  const session = decodeSession(JSON.parse(readFileSync(join(f.repo.directory, admitted.session_id + ".json"), "utf8")), f.repo.cwd, admitted.session_id)
+  assert.equal(session.attempts, 1)
+  assert.equal(session.continuations, 1)
+})
+
+test("a cancelled ACP run resumes the exact native session through session/resume", async t => {
+  const f = acpFixture(t, "hold-once")
+  const admitted = await f.bridge.start(f.repo.cwd, "fixture", "worker", f.scope, "task")
+  await ready(acpRun(f, admitted.session_id).output + ".native.json")
+  assert.equal((await f.bridge.cancel(f.repo.cwd, admitted.session_id)).interrupted, true)
+  assert.equal((await acpSettled(f.bridge, f.repo.cwd, admitted.session_id)).state, "cancelled")
+  assert.equal((await f.bridge.resume(f.repo.cwd, admitted.session_id, "continue")).status, "admitted")
+  assert.equal((await acpSettled(f.bridge, f.repo.cwd, admitted.session_id)).state, "succeeded")
+  const job = JSON.parse(readFileSync(acpRun(f, admitted.session_id).output + ".job.json", "utf8"))
+  assert.equal(job.resume, "acp-native")
+})
+
+test("an ACP receipt without verified process-tree termination stays unknown and blocks resumption", async t => {
+  const f = acpFixture(t, "success")
+  const admitted = await f.bridge.start(f.repo.cwd, "fixture", "worker", f.scope, "task")
+  await acpSettled(f.bridge, f.repo.cwd, admitted.session_id)
+  const run = acpRun(f, admitted.session_id)
+  writeFileSync(run.output, JSON.stringify({ ...JSON.parse(readFileSync(run.output, "utf8")), termination: "unverified" }))
+  assert.equal(fxResult(run, selection).state, "unknown_or_interrupted")
+  await assert.rejects(() => f.bridge.resume(f.repo.cwd, admitted.session_id, "continue"), /not known complete/)
+})
+
+test("a changed saved FX configuration refuses resumption before any attempt or transition is recorded", async t => {
+  const f = acpFixture(t, "success")
+  const admitted = await f.bridge.start(f.repo.cwd, "fixture", "worker", f.scope, "task")
+  await acpSettled(f.bridge, f.repo.cwd, admitted.session_id)
+  const job = JSON.parse(readFileSync(acpRun(f, admitted.session_id).output + ".job.json", "utf8"))
+  const settings = join(job.fxHome, "settings.json")
+  writeFileSync(settings, readFileSync(settings, "utf8").replace('"max_agent_steps":20', '"max_agent_steps":21'))
+  const path = join(f.repo.directory, admitted.session_id + ".json"), before = readFileSync(path, "utf8")
+  await assert.rejects(() => f.bridge.resume(f.repo.cwd, admitted.session_id, "continue"), /configuration changed/)
+  assert.equal(readFileSync(path, "utf8"), before)
 })

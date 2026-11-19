@@ -7,8 +7,23 @@
 - **Completed foundation:** runtime independence, optional Pi loading, core-only installation, shared state/owner/lease machinery, and the isolated `fx ask --json` experiment. Preserve the [runtime-independence evidence](verification/runtime-independence.md) and [original CLI spike evidence](verification/runtime-independence-fx.md); do not restart those campaigns.
 - **Historical qualification:** native macOS ARM64 deterministic tools, successful continuation, owner controls, isolation probes and quota failover through the approved ladder. A Codex fallback success is not FX inference. No successful live FX task is established by the recorded evidence.
 - **Phase 0 recovery and telemetry, November 19, 2026:** a receipt-verified deadline, cancellation, nonzero exit or quota stop now keeps the validated native session token. These outcomes report `timed_out`, `cancelled` or `failed` and resume through `worker_resume`. Missing or invalid receipts, mismatched native sessions, and changed pins or worktrees still block resumption. Each new FX admission persists `wallMs` and `maxSteps`. Admission and status report them as `run_deadline_ms` and `run_step_limit`. Records written before that report `null`. Evidence: `npm run test:fx` on Node 26.13.1 with deterministic fake FX executables.
-- **Remaining Phase 0 gap:** step-budget exhaustion is not yet distinguished from incomplete output. A run that exits zero with an empty `final_output` stays `unknown_or_interrupted`. The pinned 0.0.17 signal for step exhaustion is unobserved; the installed `fx` is 0.0.16. Retry when a 0.0.17 binary can be run against a fixture that exhausts its step limit. The 15-minute/20-step pilot bounds still differ from Pi's four-hour deadline, and `makeFxAdapter` still caps `wallMs` at 15 minutes. Raising either needs an approved production budget.
-- **Next implementation slice:** prove one ACP leaf worker through admission, control and recovery (Phase 1). Account access blocks live inference proof, not local work.
+- **Phase 0 step budgets:** over ACP, step exhaustion is distinguished. FX ends the prompt with `stopReason: "refused"` and logs `outcome_kind=step_limit`. The bridge reports this as `turn_limit` and continues without consuming an attempt. The CLI transport still cannot distinguish it: an empty `final_output` stays `unknown_or_interrupted`. The 15-minute/20-step pilot bounds and the 15-minute `wallMs` cap remain until a production budget is approved.
+- **Phase 1 ACP leaf worker, November 19, 2026:** accepted with deterministic proof. `makeFxAdapter({ transport: "acp" })` runs `fx acp` under a detached supervisor (`src/fx-acp-supervisor.ts`):
+  - It persists the native session ID at admission and verifies effective pins from `configOptions`.
+  - Unexpected permission requests are denied, and the run is reported as blocked.
+  - Stops send `session/cancel`, and termination is verified against a snapshot of FX's descendant tree. FX runs shell tools in their own process groups, so a group check alone is insufficient.
+  - Resumption validates token, worktree, pins and saved configuration before attempt accounting or transition, through `preflightResume`. FX itself resumes a session for any `cwd`, so the bridge-side workspace binding is required.
+- **ACP session-creation blocker resolved:** FX 0.0.17 returns `-32603 Failed to create session` whenever `fx acp --provider <name>` is given. This includes configured custom providers, which `--help` documents as accepted. Built-in providers without credentials fail differently, with `-32600`. Selecting the provider through private `settings.json` works. Reproduction: `fx acp --provider <configured>` followed by `initialize` and `session/new {cwd, mcpServers: []}`.
+- **Phase 1 evidence:** `npm run spike:fx -- --local-acp` passes with the pinned 0.0.17 binary (`binary_sha256` in `experiment/fx/pin.json`) on macOS ARM64 and Node 26.13.1 against a loopback provider. It covers:
+  - scout evidence, edit and parent check, owner correction with idempotent replay, and steering through interrupt-resume
+  - interrupt after edit, deadline then resume, and cancellation during a writing tool (tool killed, no late write) then resume
+  - failed-tool recovery, step limit then continuation, changed-configuration refusal, and a hostile read-only scout. The scout ran with committed `.fx.json` (full-access, `max_agent_steps: 0`) and `.mcp.json`: all five escape tools failed, and the ambient MCP server never started.
+  - `npm run test:fx` adds binary-free ACP regressions for pin mismatch, permission denial, unverified termination and the preflight ordering.
+- **Phase 1 limits:**
+  - Steering remains interrupt-resume. The negotiated `_meta.fx.steer` live steering is not used, so delivery states are the bridge's existing pending/completed/failed.
+  - A process that detaches and reparents after the descendant snapshot is not detected. This is lifecycle control, not an OS sandbox.
+  - ACP is not wired into production routing.
+- **Next implementation slice:** Phase 2 live DeepSeek through ACP, with an account-access check first. Phases 3 and 4 can proceed deterministically in parallel.
 - **Current boundary:** FX remains experimental. Production routes, public names, ordinary schema-2 writes, experimental schema-3 readers/writes, installer defaults and provider entitlements are unchanged.
 
 This is the authoritative remaining execution plan. The dated audit holds the comparison, pinned references and diagnostic evidence; earlier verification documents hold historical results.
@@ -168,7 +183,7 @@ Extend existing behavior tests. Separate source support, fake-process proof, rea
 | Gate | Current evidence / retry condition |
 | --- | --- |
 | Supported contracts | Audit used Node 24; rerun affected fixtures on Node 26 with development tools. Reproduce the no-Pi owner case where Unix sockets are permitted. |
-| ACP execution | Release 0.0.17 initializes ACP but session creation returned `-32603`. Preserve a minimal reproduction and resolve the cause before claiming lifecycle support. |
+| ACP execution | Resolved on macOS ARM64: `-32603` comes from the `--provider` override; select the provider through private settings. Linux ACP still needs native execution proof. |
 | Live account/model | Historical Go quota and absent FX-owned Codex login blocked inference. Recheck the selected authorized account once; use the printed login handoff if needed, never unrelated client credentials. |
 | Native platforms | Retain historical macOS CLI evidence; new ACP and each Linux musl architecture need native execution/install proof. |
 | External consumers | Agentctl/Intercom peers were not exercised in this audit. Preserve local receipt/environment-scrubbing fixtures; integration needs the relevant checkout/authorized host. |

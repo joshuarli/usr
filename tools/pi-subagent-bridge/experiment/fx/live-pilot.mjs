@@ -471,7 +471,7 @@ export async function livePilot(binary, scratch, requested) {
     mkdirSync(home, { recursive: true })
     const base = provisionRepo(repo)
     const fx = makeFxAdapter({
-      binary, binarySha256: pin.binary_sha256, home, provider: profile.provider, connection: profile.connection,
+      transport: 'cli', binary, binarySha256: pin.binary_sha256, home, provider: profile.provider, connection: profile.connection,
       allowedCommands: ['python3', 'python3 *', 'node', 'node *', 'cargo', 'cargo *', 'git status*', 'git diff*', 'git log*', 'git show*'],
       wallMs: BOUNDS.wall_ms_per_job, pathEnv: toolchainPath(),
       secretEnvFiles: auth.secretEnvFiles ?? {},

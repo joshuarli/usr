@@ -542,8 +542,7 @@ export function makeHybridBridge(api: PiAdapter, command = {
       const reason = extension ? required(extension.extension_reason, "extension_reason", 2000) : undefined
       const total = (s.attempt_extensions ?? []).reduce((sum, entry) => sum + entry.added, 0)
       if (total + added > 2) throw new Error("Attempt extension limit reached")
-      const continuation = s.execution.kind === "process" && s.execution.executor === "command-code" &&
-        command.status(s.execution.run).state === "turn_limit"
+      const continuation = s.execution.kind === "process" && observe(s.execution).state === "turn_limit"
       if (continuation && (s.continuations ?? 0) >= TURN_LIMIT_CONTINUATIONS)
         throw new Error("Turn-limit continuation limit reached")
       if (!laneHead(s).head_on_lane ||
@@ -571,7 +570,10 @@ export function makeHybridBridge(api: PiAdapter, command = {
           throw new Error("Command Code run not known complete")
         if (!previous.result?.sessionId) throw new Error("No resumable Command Code session")
         runnerFor(execution.executor)
-        if (execution.executor === "fx" && !fx?.available(execution.selection)) throw new Error("Pinned FX runtime unavailable; cannot resume")
+        if (execution.executor === "fx") {
+          if (!fx?.available(execution.selection)) throw new Error("Pinned FX runtime unavailable; cannot resume")
+          fx.preflightResume({ directory: s.cwd, logDirectory: stateDir(s.cwd), selection: execution.selection, access: accessFor(s), resume: previous.result.sessionId })
+        }
         await admitEffect?.()
         ensureWorktree(stateDir(s.cwd), s.cwd, s.id)
         if (reason) s.attempt_extensions = [...s.attempt_extensions ?? [], { added, reason, at: new Date().toISOString() }]
@@ -674,6 +676,7 @@ export function makeHybridBridge(api: PiAdapter, command = {
       const sessionId = execution.executor === "fx" ? fx?.session(run, execution.selection) : backend === "command-code" ? commandSession(run) : codex.session(run)
       if (!sessionId)
         throw new Error(execution.executor === "fx" ? "FX native session identity is not bound; steering is unavailable until it is recorded" : "Command Code session identity is not recorded; cannot restart after steering")
+      if (execution.executor === "fx") fx?.preflightResume({ directory: s.cwd, logDirectory: stateDir(s.cwd), selection: execution.selection, access: accessFor(s), resume: sessionId })
       await beforeDeadline(admitEffect?.())
       ensureWorktree(stateDir(s.cwd), s.cwd, s.id)
       s.pending_steer = { note: steering, requested_at: new Date().toISOString(), phase: "signaling", caller_pid: process.pid, previous_output: run.output }

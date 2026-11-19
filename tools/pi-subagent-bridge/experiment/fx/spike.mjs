@@ -12,7 +12,7 @@ const pin = JSON.parse(readFileSync(new URL('./pin.json', import.meta.url), 'utf
 const scratch = join(root, '.work/tmp'), installHome = join(scratch, 'fx-spike/installed-home'), binary = join(installHome, '.local/bin/fx')
 const args = process.argv.slice(2), mode = args[0] ?? '--local'
 const liveProfile = mode === '--live' ? args[1] : undefined
-if (args.length > (mode === '--live' ? 2 : 1) || !['--setup', '--local-protocol', '--local', '--live', '--bench'].includes(mode) || (mode === '--live' && args.length === 2 && !args[1])) throw new Error('usage: spike:fx [--setup|--local-protocol|--local|--live [profile]|--bench]')
+if (args.length > (mode === '--live' ? 2 : 1) || !['--setup', '--local-protocol', '--local-acp', '--local', '--live', '--bench'].includes(mode) || (mode === '--live' && args.length === 2 && !args[1])) throw new Error('usage: spike:fx [--setup|--local-protocol|--local-acp|--local|--live [profile]|--bench]')
 mkdirSync(scratch, { recursive: true })
 if (mode === '--setup') {
   const result = spawnSync('python3', ['-I', fileURLToPath(new URL('./setup.py', import.meta.url)), installHome], { stdio: 'inherit', timeout: 300000, env: { ...process.env, TMPDIR: scratch } })
@@ -32,10 +32,10 @@ if (mode === '--setup') {
   console.log(JSON.stringify({ mode, runtime: pin.version, provider: 'loopback fixture only', live_account: false, production_routing: false }))
   const source_revision = execFileSync('git', ['-C', root, 'rev-parse', 'HEAD'], { encoding: 'utf8', timeout: 10000 }).trim()
   const tracked_source_dirty = spawnSync('git', ['-C', root, 'diff', '--quiet', 'HEAD', '--', 'tools/pi-subagent-bridge/src', 'tools/pi-subagent-bridge/experiment', 'tools/pi-subagent-bridge/package.json'], { timeout: 10000 }).status !== 0
-  const report = { source_revision, tracked_source_dirty, pin, installed_binary_bytes: statSync(binary).size, platform: process.platform + '-' + process.arch, protocol: mode === '--local-protocol' || mode === '--local' ? await protocolPilot(binary, scratch) : undefined, bridge: mode === '--local' || mode === '--bench' ? await bridgePilot(binary, scratch, { benchmark: mode === '--bench' }) : undefined }
+  const report = { source_revision, tracked_source_dirty, pin, installed_binary_bytes: statSync(binary).size, platform: process.platform + '-' + process.arch, protocol: mode === '--local-protocol' || mode === '--local' ? await protocolPilot(binary, scratch) : undefined, bridge: mode === '--local' || mode === '--bench' ? await bridgePilot(binary, scratch, { benchmark: mode === '--bench' }) : undefined, acp: mode === '--local' || mode === '--local-acp' ? await bridgePilot(binary, scratch, { transport: 'acp' }) : undefined }
   const output = join(scratch, mode === '--bench' ? 'fx-benchmark.json' : 'fx-qualification.json')
   writeFileSync(output, JSON.stringify(report, null, 2))
   const deferred = report.bridge?.benchmark?.status === 'deferred'
   if (deferred) process.exitCode = 75
-  console.log(JSON.stringify({ status: deferred ? 'deferred' : 'passed', report: output, protocol_root: report.protocol?.root, bridge_root: report.bridge?.root, benchmark: report.bridge?.benchmark }))
+  console.log(JSON.stringify({ status: deferred ? 'deferred' : 'passed', report: output, protocol_root: report.protocol?.root, bridge_root: report.bridge?.root, acp_root: report.acp?.root, benchmark: report.bridge?.benchmark }))
 }
