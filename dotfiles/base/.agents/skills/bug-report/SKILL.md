@@ -33,9 +33,11 @@ A report is short, exact and reproducible. Every sentence is a verified fact. On
 
 ## Before filing
 
-1. Minimize: remove each step, line and dependency in turn and keep only those whose removal changes the result.
-2. Run the reproduction exactly as pasted, against the base and the fix, from an empty directory with `docker build --no-cache` (or a fresh QEMU scratch directory) and no local build context beyond the pasted files. Confirm the quoted output matches.
-3. Check that every commit is 40 hex characters and every image is pinned by digest.
-4. Post only where you are allowed to. Repositories outside `joshuarli` and `laputa-systems` need Joshua's explicit consent per post; otherwise file it as an `Upstream draft:` issue in the `laputa-systems` fork (see `~/.agents/instructions/owned-tools.md`).
+1. Confirm it still fails on the tip of the upstream default branch: run the reproduction against that commit, and pin the report to it (cite the release commit too when the consumer pins a release).
+2. Search the upstream tracker (open and closed issues and pull requests) for duplicates. A duplicate does not stop the report when ours adds a better reproduction or a fix; link it in the summary ("Same defect as #N; this adds a minimal reproduction and a fix.").
+3. Minimize: remove each step, line and dependency in turn and keep only those whose removal changes the result.
+4. Run the reproduction exactly as pasted, against the base and the fix, from an empty directory with `docker build --no-cache` (or a fresh QEMU scratch directory) and no local build context beyond the pasted files. Confirm the quoted output matches.
+5. Check that every commit is 40 hex characters and every image is pinned by digest.
+6. Post only where you are allowed to. Repositories outside `joshuarli` and `laputa-systems` need Joshua's explicit consent per post; otherwise file it as an `Upstream draft:` issue in the `laputa-systems` fork (see `~/.agents/instructions/owned-tools.md`).
 
 **Report:** the report's URL or the draft text, the reproduction runs (base failing, fix passing) with their decisive lines, and anything cut for lack of evidence.
