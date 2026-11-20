@@ -47,6 +47,8 @@ it instead of touching it.
 
 ## Verification
 
+Test tiers are local unit and CLI fixture tests, subprocess integration tests, and a separate Alpine VM journey. The [deslop inventory](docs/verification/deslop-test-inventory.md) records boundaries and gaps.
+
 Run with `TMPDIR="$PWD/.work/tmp"`, Python 3.10+, and pinned Node 26.13.1 for the offline bridge fixture.
 - `make test`: cache-empty 230s, warm 265s and 283s; `make lint`: 12s. Busy-host observations, not performance gates. On macOS the Pi offline SDK binding check fails identically at base `7f9e2af` (DSLP-6).
 - `sync` CLI, links and ownership formats: `tools/sync/test_main.py`, `test_links.py`, `test_integration.py`, `test_uninstall.py`.
