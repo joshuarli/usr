@@ -13,6 +13,7 @@ from pathlib import Path
 HEADER = re.compile(r'\APrefix: ([A-Z]{3,4})\nNext: ([1-9][0-9]*)\n')
 TICKET = re.compile(r'^### ([A-Z]{3,4}-[1-9][0-9]*) · (P[1-4]) · (.+)\n', re.M)
 FIELD = re.compile(r'^- \*\*(Area|Where|Problem|Recommendation|Fix with|Effort|Design):\*\* (.+)\n', re.M)
+BLANK_RUN = re.compile(r'\n[ \t]*(?:\n[ \t]*)+')
 NAMES = {'Area': 'area', 'Where': 'where', 'Problem': 'problem', 'Recommendation': 'recommendation', 'Fix with': 'fix_with', 'Effort': 'effort', 'Design': 'design'}
 REQUIRED = set(NAMES.values()) - {'design'}
 
@@ -188,6 +189,10 @@ def lock(path):
         yield
 
 
+def normalize(text):
+    return BLANK_RUN.sub('\n\n', text)
+
+
 def write(path, text):
     mode = path.stat().st_mode
     name = None
@@ -195,7 +200,7 @@ def write(path, text):
         with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', dir=path.parent, delete=False) as handle:
             name = handle.name
             os.fchmod(handle.fileno(), mode & 0o7777)
-            handle.write(text)
+            handle.write(normalize(text))
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(name, path)
@@ -209,7 +214,7 @@ def run(args, path):
     prefix, next_number, head, records = parse(text)
     if args.command in ('check', 'fmt'):
         good = ordered(records)
-        if args.command == 'fmt' and not args.check and not good:
+        if args.command == 'fmt' and not args.check:
             write(path, assemble(head, sort_records(records)))
             return
         if args.command == 'check' and args.json:

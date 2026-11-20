@@ -68,6 +68,26 @@ class TodoTests(unittest.TestCase):
         self.cli('check')
         self.assertEqual(self.path.read_text().count('**Problem:** Broken'), 2)
 
+    def test_repeated_mutations_do_not_accumulate_blank_lines(self):
+        for index in range(3):
+            self.cli('add', '--json', '-', data={**ITEM, 'title': f'T{index}'})
+        self.cli('close', 'ABC-1')
+        self.cli('add', '--json', '-', data=ITEM)
+        self.cli('close', 'ABC-2')
+        text = self.path.read_text()
+        self.assertNotIn('\n\n\n', text)
+        self.cli('check')
+
+    def test_fmt_collapses_excess_blank_lines(self):
+        self.cli('add', '--json', '-', data=ITEM)
+        self.cli('add', '--json', '-', data={**ITEM, 'priority': 'P1'})
+        original = self.path.read_text()
+        self.path.write_text(original.replace('Next: 3\n', 'Next: 3\n\n\n\n'))
+        self.cli('fmt')
+        self.assertNotIn('\n\n\n', self.path.read_text())
+        self.assertIn('Introduction stays.', self.path.read_text())
+        self.cli('check')
+
     def test_file_selects_a_separate_backlog_with_its_own_ids(self):
         other = self.root / 'TODO-DESLOP.md'
         other.write_text('Prefix: DSLP\nNext: 1\n\n')
