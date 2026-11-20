@@ -4,7 +4,7 @@ The scan covers `tools/`, `src/`, and `host/`. Vendored PyYAML is excluded from 
 
 ## Types
 
-The existing `ty.toml` enables error-level rules. `uvx ty check tools src host` with ty 0.0.107 reports 634 diagnostics, including 422 `missing-attribute`, 57 `missing-type-argument`, 36 `missing-union-attribute`, and 30 `invalid-argument-type` diagnostics. Triage is incomplete. Enabling every rule for measurement reports 806 diagnostics: the extra results include 63 `missing-override-decorator`, 84 `truthiness-test-of-none-union`, and 26 `redundant-condition-strict`. No extra rule was adopted.
+The existing `ty.toml` enables error-level rules. `uvx ty check tools src host` with ty 0.0.107 reports 634 diagnostics, including 422 `missing-attribute`, 57 `missing-type-argument`, 36 `missing-union-attribute`, and 30 `invalid-argument-type` diagnostics. With Python 3.15 explicitly selected and vendored PyYAML excluded, 175 first-party diagnostics remain. Triage is incomplete. Enabling every rule for measurement reports 806 diagnostics: the extra results include 63 `missing-override-decorator`, 84 `truthiness-test-of-none-union`, and 26 `redundant-condition-strict`. No extra rule was adopted.
 
 Ruff 0.17.6 candidate scans reported: `ANN` 1,610, `ANN401` 4, `PGH003` 0, `TC` 14, `B` 18, and `RET` 1. The `B` diagnostics all concern the already excluded `B905`. `TC` includes ordinary standard-library import placement. No new Ruff rule was adopted without a defect witness and false-positive assessment.
 

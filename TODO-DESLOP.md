@@ -5,13 +5,13 @@ Deslop campaign backlog ([plan](https://github.com/laputa-systems/stuff/blob/mai
 
 ## Report
 
-The tooling pass is incomplete. DSLP-3 and DSLP-5 remain open: the existing ty profile reports 634 diagnostics, and Vulture and Knip findings remain untriaged. [Scanner observations](docs/verification/deslop-scans.md) record the candidates and scope. The [test inventory](docs/verification/deslop-test-inventory.md) records fixture boundaries and unverified live and platform cases.
+The tooling pass is incomplete. DSLP-3 and DSLP-5 remain open: the existing ty profile reports 175 first-party diagnostics after excluding vendored PyYAML, and Vulture and Knip findings remain untriaged. [Scanner observations](docs/verification/deslop-scans.md) record the candidates and scope. The [test inventory](docs/verification/deslop-test-inventory.md) records fixture boundaries and unverified live and platform cases.
 
 - **Types:** no new strict settings adopted; Python and TypeScript matching escape-hatch lines are 75 and 201. Full bridge typechecking needs its development environment.
 - **Tests:** the inventory is complete. No mutation lane was added. The pinned offline fixture changes have failing-first checks. Branch coverage and a repeat flake baseline were not measured.
 - **Dead code:** eight lines of unreferenced private pinact helpers removed; no dependency removed. Scanner triage is incomplete.
 - **Bench outcomes:** the existing FX fixture entrypoint passed its numeric edit and numeric-string correction workloads with Node 26.13.1. It uses a loopback provider and cannot establish live runtime performance. Gate checks exited 0, but reported a hot external process; timing conclusions are deferred. DSLP-9 tracks missing representative CLI workloads. The `bench-pyramid` tool is unavailable (DSLP-10).
-- **Findings:** DSLP-6 and DSLP-7 fixed; DSLP-8 remains open. The Intercom test inherited a worker role marker; its coordinator fixture now clears role markers. The bridge fixture now rejects a mismatched Node release.
+- **Findings:** DSLP-6 and DSLP-7 fixed; DSLP-8 remains open; DSLP-12 records a null companion pin accepted by validation. The Intercom test inherited a worker role marker; its coordinator fixture now clears role markers. The bridge fixture now rejects a mismatched Node release.
 - **Verification:** `make test` and `make lint` passed with isolated home and config, Python 3.15.1 and Node 26.13.1. Earlier runs exposed Python 3.9 and missing scratch Git identity; both environment prerequisites were corrected for the passing run. CI minutes, coverage, mutation counts, and live provider behavior are unmeasured.
 - **Review:** cumulative diff reviewed. The stale SDK failure note in AGENTS.md was corrected. No other demonstrated regression was found. No shared-file change was made; unavailable audit tools are recorded in DSLP-10.
 
