@@ -9,6 +9,7 @@ import sys
 import tempfile
 from contextlib import contextmanager
 from pathlib import Path
+from typing import Literal, Optional, TypedDict
 
 HEADER = re.compile(r'\APrefix: ([A-Z]{3,4})\nNext: ([1-9][0-9]*)\n')
 TICKET = re.compile(r'^### ([A-Z]{3,4}-[1-9][0-9]*) · (P[1-4]) · (.+)\n', re.M)
@@ -271,11 +272,22 @@ Agents working for Joshua: record nonblocking problems and continue your task.
 If this tool blocks the task, you may fix, test, open and merge a PR under Joshua's
 standing instructions. Release only when needed to deliver the verified fix.
 Procedure: https://github.com/joshuarli/usr/blob/main/dotfiles/base/.agents/instructions/owned-tools.md"""
-FILE_OPTION = ('--file', {'metavar': 'NAME', 'help': 'backlog file name in this directory or its parents (default: TODO.md; show also searches workspace backlogs)'})
-ID = ('id', {'metavar': 'ID', 'help': 'ticket ID, such as ABC-1'})
-JSON_ALWAYS = ('--json', {'action': 'store_true', 'help': 'accepted for scripts; output is always JSON'})
-JSON_INPUT = ('--json', {'required': True, 'choices': ['-'], 'metavar': '-', 'help': 'read a JSON object from stdin (required)'})
-COMMANDS = (
+class OptionSpec(TypedDict, total=False):
+    help: str
+    metavar: str
+    action: Literal['store_true']
+    required: bool
+    choices: list[str]
+
+
+ArgumentSpec = tuple[str, OptionSpec]
+CommandSpec = tuple[str, str, tuple[ArgumentSpec, ...], tuple[str, ...]]
+
+FILE_OPTION: ArgumentSpec = ('--file', {'metavar': 'NAME', 'help': 'backlog file name in this directory or its parents (default: TODO.md; show also searches workspace backlogs)'})
+ID: ArgumentSpec = ('id', {'metavar': 'ID', 'help': 'ticket ID, such as ABC-1'})
+JSON_ALWAYS: ArgumentSpec = ('--json', {'action': 'store_true', 'help': 'accepted for scripts; output is always JSON'})
+JSON_INPUT: ArgumentSpec = ('--json', {'required': True, 'choices': ['-'], 'metavar': '-', 'help': 'read a JSON object from stdin (required)'})
+COMMANDS: tuple[CommandSpec, ...] = (
     ('list', 'Print compact records in priority and ID order.', (('--priority', {'metavar': 'P1,P2', 'help': 'only these comma-separated priorities'}), JSON_ALWAYS), ('todo list --priority P1,P2 --json',)),
     ('show', 'Print one ticket with all fields and its repository_root as JSON.', (ID, JSON_ALWAYS), ('todo show ABC-1 --json',)),
     ('add', 'File a ticket from JSON and print the record.', (JSON_INPUT,), ('todo add --json - < ticket.json',)),
@@ -309,9 +321,9 @@ def build_parser():
     commands = {}
 
     class Root(Parser):
-        def format_help(self):
+        def format_help(self, formatter: Optional[argparse.HelpFormatter] = None) -> str:
             lines = [f'usage: {_usage(self)}', '', 'Manage a Markdown TODO backlog.', '', 'Common options, given before COMMAND:', *_arguments([FILE_OPTION]), f"    {'-h, --help':<18} print this reference", '', 'Commands:']
-            for name, description, arguments, examples in COMMANDS:
+            for name, description, arguments, _ in COMMANDS:
                 lines += ['', f'  {_usage(commands[name])}', f'    {description}', *_arguments(arguments)]
             lines += ['', 'Examples:', *(f'  {example}' for *_, examples in COMMANDS for example in examples)]
             return '\n'.join([*lines, '', FOOTER, ''])

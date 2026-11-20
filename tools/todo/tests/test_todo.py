@@ -5,6 +5,10 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from tools.todo.src import todo as todo_module
 
 CLI = Path(__file__).resolve().parents[1] / 'src' / 'todo.py'
 ITEM = {'priority': 'P2', 'title': 'A problem', 'area': 'Delegation', 'where': '`a:1`', 'problem': 'Broken', 'recommendation': 'Fix it', 'fix_with': 'none', 'effort': 'S'}
@@ -206,8 +210,11 @@ class HelpTests(unittest.TestCase):
     def setUp(self):
         sys.path.insert(0, str(CLI.parent))
         self.addCleanup(sys.path.remove, str(CLI.parent))
-        import todo
-        self.todo = todo
+        if TYPE_CHECKING:
+            self.todo = todo_module
+        else:
+            import todo
+            self.todo = todo
 
     def test_bare_invocation_prints_the_full_reference(self):
         bare = subprocess.run([sys.executable, str(CLI)], capture_output=True, text=True)
