@@ -224,6 +224,7 @@ class OfflineTests(unittest.TestCase):
             self.skipTest("Node 26 required")
         checker = ROOT/"tools/pi/verify-extensions.mjs"
         env = dict(os.environ, HOME=str(self.home), PI_OFFLINE="1",
+                   USR_SCOPED_WORKER="1",
                    npm_config_registry="http://127.0.0.1:9")
         command = [node, str(checker), str(self.root)]
         if self.profile == "full":

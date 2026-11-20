@@ -18,6 +18,19 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
 BRIDGE_LINK = ROOT / "tools/pi-subagent-bridge/node_modules"
+sys.path.insert(0, str(ROOT / "tools/sync"))
+from installer import NODEJS_VERSION  # noqa: E402
+
+
+def node_release_matches(version: str) -> bool:
+    return version == NODEJS_VERSION
+
+
+class NodeReleaseSelection(unittest.TestCase):
+    def test_rejects_other_node_releases(self) -> None:
+        self.assertTrue(node_release_matches("26.13.1"))
+        self.assertFalse(node_release_matches("26.12.0"))
+        self.assertFalse(node_release_matches("27.0.0"))
 
 
 class BridgeOfflineEndToEnd(unittest.TestCase):
@@ -27,8 +40,8 @@ class BridgeOfflineEndToEnd(unittest.TestCase):
             self.skipTest("Node.js unavailable")
         version = subprocess.run([node, "-p", "process.versions.node"],
                                  capture_output=True, text=True, check=True).stdout.strip()
-        if int(version.split(".")[0]) < 26:
-            self.skipTest("Requires Node.js 26")
+        if not node_release_matches(version):
+            self.skipTest(f"Requires Node.js {NODEJS_VERSION}; found {version}")
         if BRIDGE_LINK.exists() or BRIDGE_LINK.is_symlink():
             self.skipTest("Refusing to change an existing developer bridge installation")
         with tempfile.TemporaryDirectory(prefix="usr-bridge-no-npm-") as scratch:
@@ -50,7 +63,7 @@ class BridgeOfflineEndToEnd(unittest.TestCase):
                 glibc = subprocess.run(["getconf", "GNU_LIBC_VERSION"],
                                        capture_output=True, text=True).returncode == 0
                 target = "linux-" + arch + ("" if glibc else "-musl")
-            release = home / ".local/share/nodejs" / f"26.13.1-npm11.20.0-{target}"
+            release = home / ".local/share/nodejs" / f"{NODEJS_VERSION}-npm11.20.0-{target}"
             nodebin = release / "bin"
             nodebin.mkdir(parents=True)
             (nodebin / "node").symlink_to(node)

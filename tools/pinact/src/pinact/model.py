@@ -29,10 +29,6 @@ class SourceDocument:
     kind: str = "workflow"
 
 
-def _mark_line_col(node) -> tuple[int, int]:
-    return node.start_mark.line + 1, node.start_mark.column + 1
-
-
 def mapping_pairs(node: MappingNode) -> list[tuple[ScalarNode, object]]:
     out = []
     for key, value in node.value:
