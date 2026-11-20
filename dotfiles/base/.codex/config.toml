@@ -12,7 +12,8 @@ model_reasoning_effort = "medium"
 goals = true
 memories = true
 apps = false
-plugins = false
+# Enable the native browser plugin; other plugins default off below.
+plugins = true
 remote_plugin = false
 # The launch shim also uses --no-daemon to prevent reusing a running daemon.
 daemon_auto_start = false
@@ -343,11 +344,14 @@ source = "/Users/josh/.codex/.tmp/bundled-marketplaces/openai-bundled"
 source_type = "local"
 source = "/Users/josh/.cache/codex-runtimes/codex-primary-runtime/plugins/openai-primary-runtime"
 
+[plugins._default]
+enabled = false
+
 [plugins."codex-app-tools@openai-bundled"]
-enabled = true
+enabled = false
 
 [plugins."browser@openai-bundled"]
-enabled = false
+enabled = true
 
 [plugins."unified-computer-use@openai-bundled"]
 enabled = false
@@ -356,32 +360,32 @@ enabled = false
 enabled = false
 
 [plugins."code-review@openai-bundled"]
-enabled = true
+enabled = false
 
 [plugins."visualize@openai-bundled"]
-enabled = true
+enabled = false
 
 [plugins."documents@openai-primary-runtime"]
-enabled = true
+enabled = false
 
 [plugins."pdf@openai-primary-runtime"]
-enabled = true
+enabled = false
 
 [plugins."spreadsheets@openai-primary-runtime"]
-enabled = true
+enabled = false
 
 [plugins."presentations@openai-primary-runtime"]
-enabled = true
+enabled = false
 
 [plugins."template-creator@openai-primary-runtime"]
-enabled = true
+enabled = false
 
 [mcp_servers.notion]
 url = "https://mcp.notion.com/mcp"
 
 [mcp_servers.node_repl]
-# Browser/Computer Use companion; keep configured for a deliberate opt-in only.
-enabled = false
+# Companion for the enabled native browser plugin.
+enabled = true
 args = []
 command = "/Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl"
 env_vars = ["BROWSER_USE_ACCESS_EXECUTOR_ID", "BROWSER_USE_ACCESS_PIPE_PATH", "BROWSER_USE_ACCESS_VERIFYING_IDENTITY"]

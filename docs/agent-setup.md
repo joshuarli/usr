@@ -72,7 +72,7 @@ Harnesses use native skill metadata and discovery paths. The checker at [`skills
 
 ## Harness configuration
 
-The [lean harness defaults](harness-lean.md) use small launch shims alongside native settings to disable unwanted daemon, browser and startup work. The shims live separately from sync-managed binaries; coding tools, MCP, subagents, session hooks and agent-browser remain available.
+The [lean harness defaults](harness-lean.md) use small launch shims alongside native settings to disable unwanted daemon and startup work. OpenCode and Codex retain native browsing; Claude keeps native Chrome off and uses agent-browser. Web search, coding tools, MCP, subagents and session hooks remain available. The shims live separately from sync-managed binaries.
 
 Codex session defaults remain in its tracked configuration. Delegated work follows the generated policy above. Multi-agent V2 has eight resident-thread slots including the parent; `agents.max_depth` is a V1 setting and does not impose V2 nesting limits. The orchestration contract requires CLI workers to remain leaves.
 
