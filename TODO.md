@@ -1,5 +1,5 @@
 Prefix: USR
-Next: 94
+Next: 95
 
 ### USR-83 · P2 · running sessions on two hosts cannot reach each other over intercom
 
@@ -99,6 +99,15 @@ Next: 94
 - **Recommendation:** When adopting a newer FX release, update pin.json per target, rerun npm run spike:fx -- --local plus experiment/fx/linux.sh arm64 and amd64, and drop each workaround only with a reproduction showing it is fixed.
 - **Fix with:** none
 - **Effort:** M
+
+### USR-94 · P3 · Make perf-gate-ready catch bursty load from short-lived processes
+
+- **Area:** perf-gate-ready
+- **Where:** `dotfiles/base/.local/bin/perf-gate-ready`
+- **Problem:** On 2026-11-20 on the Laputa build host (32 cores), another session's kernel build ran bursts of `cc1` processes that each live under a second. `perf-gate-ready` checks load per core (default 0.7) and hot process trees (>= 100% CPU) at a few instants, so it reported ready before and after Laputa's `root-compose` benchmark while that workload's five rounds took 4.07, 3.15, 3.20, 1.70 and 1.68 s. The bench reported `inconclusive: spread` rather than a false verdict, but the gate's readiness did not reflect the contention. A 15-minute load average of 6.95 was visible at the same time.
+- **Recommendation:** Sample /proc/stat over the check window (for example busy fraction across all CPUs over 1 to 2 s), and fail when non-idle CPU time from processes outside the caller's tree exceeds a threshold, in addition to the instantaneous hot-tree check. Acceptance: a background loop starting ten 0.3 s compiles per second on other cores makes `perf-gate-ready` exit nonzero, and an idle host still passes.
+- **Fix with:** benchmark-checklist
+- **Effort:** S
 
 ### USR-90 · P4 · Muse and Devin Pi routes have no FX-side replacement design
 
