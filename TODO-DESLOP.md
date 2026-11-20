@@ -1,5 +1,5 @@
 Prefix: DSLP
-Next: 12
+Next: 13
 
 Deslop campaign backlog ([plan](https://github.com/laputa-systems/stuff/blob/main/docs/campaigns/deslop.md), tier C). One agent works this file with the `deslop` skill: take the lowest-numbered open ticket whose area does not start with `Needs owner ·`. After DSLP-5, work the open P1 and P2 findings, then fill in `## Report` below.
 
@@ -60,5 +60,14 @@ The tooling pass is incomplete. DSLP-3 and DSLP-5 remain open: the existing ty p
 - **Problem:** The test-pyramid, debloat, and bench-pyramid commands are unavailable in this worker environment, so their dedicated audits could not run. The inventory and direct scanner results are recorded under docs/verification.
 - **Recommendation:** Make the audit tools available in an isolated environment and run them against this worktree without adding project dependencies.
 - **Fix with:** deslop
+- **Effort:** S
+
+### DSLP-12 · P3 · Reject a null companion archive mapping
+
+- **Area:** Pi release · pin validation
+- **Where:** tools/sync/pi_release.py:76, tools/sync/pi_release.py:95
+- **Problem:** A release pin with companions set to null passes _is_pin, but companions then raises TypeError rather than the missing-archives OfflinePiError. A local reproduction using the tracked pin with companions replaced by null printed validation True and TypeError.
+- **Recommendation:** Define the supported absent and null pin states, validate them consistently, and cover loading and companion selection with a failing-first test.
+- **Fix with:** root-cause
 - **Effort:** S
 
