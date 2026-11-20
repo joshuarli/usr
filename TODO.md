@@ -1,5 +1,5 @@
 Prefix: USR
-Next: 99
+Next: 100
 
 ### USR-83 · P2 · running sessions on two hosts cannot reach each other over intercom
 
@@ -9,6 +9,15 @@ Next: 99
 - **Recommendation:** Keep the trust model: enrolled, tailnet-only, credential per host. Remove the per-session ceremony. (1) Run the hub on one always-on host under its existing supervisor, from one documented command. (2) Enroll once per host, not per session, storing the credential at a fixed private path. (3) Have the normal claude/codex/pi launchers join the hub automatically whenever that host credential exists, so every ordinary session is reachable without relaunching through `intercom-tailnet run`. (4) Give `intercom_list` a fleet scope that shows remote sessions by host. (5) Make `intercom-tailnet` find the pinned Node the same way the other usr tools do, so `doctor` works over non-login SSH. Acceptance: two ordinary sessions started normally on the Mac and on threadripper can `intercom_list` each other and exchange `intercom_ask`.
 - **Fix with:** none
 - **Effort:** M
+
+### USR-99 · P2 · Codex cybersecurity refusals end worker runs without provider fallback
+
+- **Area:** pi-subagent-bridge
+- **Where:** tools/pi-subagent-bridge/src/inspect.ts:17
+- **Problem:** On 2026-11-20 a worker-tier run on codex (gpt-6.1-terra, high) for a kernel filesystem repair in bctl ended in state failed before any edit (changed_paths empty, head_unchanged true) with Codex's refusal "This content was flagged for possible cybersecurity risk. You're approved for Daybreak Blue ... use a compatible FIDO2 hardware security key". fallback_reason was null, although command-code was available. PROVIDER_UNAVAILABLE (inspect.ts:17) matches the earlier hardware-key text through "not authenticated", which did fall back the same day, but not this refusal text. The parent had to relaunch on a native fallback by hand, and a new worker_start routes to Codex again.
+- **Recommendation:** Treat the Codex cybersecurity-flag refusal as a provider refusal: before edits with unambiguous termination, fall back along the tier's admitted routes and set fallback_reason, as for the hardware-key message; after edits, report needs_attention. Acceptance: a fixture whose error is that refusal text with a clean worktree falls back to command-code with fallback_reason set, and the same text after edits yields needs_attention.
+- **Fix with:** root-cause
+- **Effort:** S
 
 ### USR-73 · P3 · The refactor-web-ui skill has only been applied to agentctl
 
@@ -180,3 +189,4 @@ Next: 99
 - **Recommendation:** If wanted, package pi-web-access through a pinned release, re-verify its source revision, supply it as a per-tool-granted ACP MCP server for approved roles only, and prove search, fetch, citation and restart offline before any live check.
 - **Fix with:** none
 - **Effort:** L
+
