@@ -12,6 +12,6 @@ The bridge core TypeScript profile already has `strict` enabled. The pinned tsrs
 
 ## Dead code
 
-Ruff `F401,F841` reports no findings. Vulture 2.16 reports 133 owned-tree findings at 60 percent confidence. Many are framework callbacks, unittest discovery, record fields, or overrides. Knip 6.45.1 reports seven unused files in default mode and 23 in production mode. The latter mode excludes test consumers. Both include dynamic entries and cannot establish that these files are dead. The `debloat` command is unavailable in this environment.
+Ruff `F401,F841` reports no findings. Vulture 2.16 reports 133 owned-tree findings at 60 percent confidence. Many are framework callbacks, unittest discovery, record fields, or overrides. Knip 6.45.1 reports seven unused files in default mode and 23 in production mode. The latter mode excludes test consumers. All seven default-mode file findings are referenced dynamically by `optional-pi.ts`, `pi-port.ts`, `sdk-worker.ts`, or `fx.ts`; the two supervisors import `fx-supervision.ts`. These are live entry paths. The production scan also omits test consumers. The `debloat` command is unavailable in this environment.
 
 Two private pinact helpers, `_mark_line_col` and `_is_falsy_str`, had no tracked source references across the repository. They had no CLI entry points, registrations, build references, or platform branches. The pinact security fixture suite passed after their removal. Other scanner findings remain untriaged; this is not a clean or allowlisted scan.
