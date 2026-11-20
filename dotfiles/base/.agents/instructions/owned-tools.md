@@ -48,6 +48,19 @@ Repositories outside the `joshuarli` and `laputa-systems` namespaces are not our
 4. File an issue in the fork titled `Upstream draft: …` with the label `upstream-draft`. It holds the text that would go upstream: the defect, evidence against the upstream revision, the fix branch and commit, and whether an upstream issue or pull request is suggested. Link any related upstream issues instead of commenting on them.
 5. Report the draft. Joshua decides whether and how it goes upstream.
 
+### Draft format
+
+A draft is short, exact and reproducible; every sentence is a verified fact. One defect per draft.
+
+- **Title**: `area: defect` in the project's own convention, lowercase, no trailing period.
+- **Body**, in this order, omitting any section with nothing verified to say:
+  1. One paragraph: the defect and its consequence, pinned to `OWNER/REPO@<40-hex commit>` with `path:line` links at that commit. Name releases only alongside their commit.
+  2. `Reproduction`: the two commands, then a self-contained Dockerfile. Pin the base image by digest, fetch sources by full commit (`ADD https://codeload.github.com/OWNER/REPO/tar.gz/<sha>`), and make the final `RUN` or entrypoint assert the defect, so the build or run fails on the base commit and passes on the fix. Paste the decisive output lines verbatim.
+  3. `Fix` (pull requests only): what changed and why, in at most three sentences, naming `laputa-systems/REPO@<40-hex commit>`.
+  4. `Tested`: exact toolchain versions, host `uname -srvm`, and the statement that the shown Dockerfile was run unchanged against both commits. Add a benchmark table only when the change can affect performance.
+- No hedges or unverified scope: no "some", "may", "probably", "older versions", or CPU, OS or configuration classes the reproduction did not exercise. A claim the Dockerfile cannot show needs a `path:line` at the pinned commit, or it is cut.
+- Before filing, run the Dockerfile exactly as pasted on a clean build and confirm the outputs quoted.
+
 ## Releases
 
 Release only when the blocked consumer cannot use the fix through a local build or the existing distribution path. Follow the repository's live release workflow and the consumer's pins; use `repomod release` where it applies. Verify the commit a dispatched workflow ran, wait for its real result, check artifact provenance and checksums, update only the relevant pins, install, and retry. A dispatch, tag, or asset name is not a successful release. Never publish to crates.io, npm, or PyPI because a manifest exists, and never mass-release the fleet.
