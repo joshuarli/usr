@@ -45,21 +45,8 @@ Repositories outside the `joshuarli` and `laputa-systems` namespaces are not our
 1. Fork it into `laputa-systems` with `gh repo fork OWNER/REPO --org laputa-systems --clone=false`, or reuse the existing fork. Enable its issues if they are off.
 2. Fix it there from a worktree, on a branch based on the exact upstream revision the consumer uses, with a regression test, and run the project's own checks. Keep one branch per upstream candidate so each can be offered separately.
 3. Switch the consumer to the fork at the fixed commit through its normal pin (a Cargo `git` + `rev` dependency, a vendored tree recorded with the fork URL and revision, a lockfile entry), and verify the consumer.
-4. File an issue in the fork titled `Upstream draft: …` with the label `upstream-draft`. It holds the text that would go upstream: the defect, evidence against the upstream revision, the fix branch and commit, and whether an upstream issue or pull request is suggested. Link any related upstream issues instead of commenting on them.
+4. File an issue in the fork titled `Upstream draft: …` with the label `upstream-draft`. It holds the text that would go upstream, written with the `bug-report` skill, plus the fix branch and commit and whether an upstream issue or pull request is suggested. Link any related upstream issues instead of commenting on them.
 5. Report the draft. Joshua decides whether and how it goes upstream.
-
-### Draft format
-
-A draft is short, exact and reproducible; every sentence is a verified fact. One defect per draft.
-
-- **Title**: `area: defect` in the project's own convention, lowercase, no trailing period.
-- **Body**, in this order, omitting any section with nothing verified to say:
-  1. One paragraph: the defect and its consequence, pinned to `OWNER/REPO@<40-hex commit>` with `path:line` links at that commit. Name releases only alongside their commit.
-  2. `Reproduction`: the commands, then the smallest self-contained, pinned environment that exercises the defect. Default to a Dockerfile: base image pinned by digest, sources fetched by full commit (`ADD https://codeload.github.com/OWNER/REPO/tar.gz/<sha>`). When the defect depends on the CPU, kernel or devices, run it under QEMU instead (for example TCG with `-cpu Haswell,-bmi2`), with the QEMU version, machine and CPU flags exact and any guest image pinned by checksum; a Dockerfile that builds that QEMU run is fine. Either way the final step asserts the defect, failing on the base commit and passing on the fix. Paste the decisive output lines verbatim.
-  3. `Fix` (pull requests only): what changed and why, in at most three sentences, naming `laputa-systems/REPO@<40-hex commit>`.
-  4. `Tested`: exact toolchain versions, host `uname -srvm`, and the statement that the shown reproduction was run unchanged against both commits. Add a benchmark table only when the change can affect performance.
-- No hedges or unverified scope: no "some", "may", "probably", "older versions", or CPU, OS or configuration classes the reproduction did not exercise. A claim the reproduction cannot show needs a `path:line` at the pinned commit, or it is cut.
-- Before filing, run the reproduction exactly as pasted on a clean build and confirm the outputs quoted.
 
 ## Releases
 
