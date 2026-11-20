@@ -130,7 +130,7 @@ When you park unfinished work, commit it on a named branch and record its exact 
 
 ## Campaigns
 
-For a backlog too large for one session, read [campaign mechanics and lane contract](references/campaigns.md) before preparing or launching work. The default is one writer on one slice until it is accepted. Add lanes only when they own disjoint files.
+For a backlog too large for one session, read [campaign mechanics and lane contract](references/campaigns.md) before preparing or launching work. By default, ready slices that own disjoint files run in parallel; slices that share files run serially.
 
 The parent runs the [steering checkpoint](references/campaigns.md#parent-steering-checkpoint) after each accepted slice, on resume, and after repeated failures, without waiting for the owner to complain.
 

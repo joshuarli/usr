@@ -18,7 +18,7 @@
 ## Sequence
 
 - **Items** have an ID, a size, prerequisites, the files they own, and an acceptance proof. Prerequisites that cross workstreams are written on the item. An item that shares code with another is in the same workstream.
-- **Size for speed.** An item is a slice: a capability a lane delivers end to end, with one local acceptance command that runs in minutes. Merge adjacent increments that touch the same files into one item. Items sharing files run serially. Allow parallel lanes only between disjoint ownership sets, and state which pairs qualify.
+- **Size for speed.** An item is a slice: a capability a lane delivers end to end, with one local acceptance command that runs in minutes. Merge adjacent increments that touch the same files into one item. Items sharing files run serially. Items with disjoint ownership sets run in parallel by default; state which sets are disjoint.
 - **Order the phases:**
   1. *P0, ground:* note the known failures on the baseline (so the executor never mistakes a pre-existing red for its own), and the loop timings, and repair the loop itself if it is the bottleneck.
   2. *Parity and completeness:* every deliverable works end to end, and every behavior of the reference has a test that fails if it is wrong. The reference is the thing being ported, replaced, or specified, and the doc names it. The parity register is built as `reference-parity` describes.
@@ -40,7 +40,7 @@ Length follows the work: keep the executable core and its proof, never cut a dec
    - Hard stops are few, and each one parks the item: an irreversible or outside-the-repo action, a boundary the doc forbids, or a loop that cannot check anything. Pushing is always forbidden.
    - Fix egregious problems met on the way, in their own commit, to thresholds stated in numbers. Record anything else and leave it.
    - Parity before optimization.
-   - One writer by default. Parallel lanes only for the disjoint pairs named in **Sequence**, in worktrees at `.work/wt/<lane>`, never `/tmp`, following [`orchestrate`'s worktree lifecycle](../../orchestrate/SKILL.md#worktree-lifecycle).
+   - Parallel lanes for the disjoint sets named in **Sequence**, serial otherwise, each in a worktree at `.work/wt/<lane>`, never `/tmp`, following [`orchestrate`'s worktree lifecycle](../../orchestrate/SKILL.md#worktree-lifecycle).
    - Every commit is a Conventional Commit with the workstream as its scope. The item ID belongs in the body. Code comments never cite this doc.
 3. **Decisions:** only binding ones, each with its reason, marked owner, prescribed, or delegated with a bound.
 4. **Baseline:** known red and loop timings.

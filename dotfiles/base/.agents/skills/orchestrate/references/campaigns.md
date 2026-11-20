@@ -4,9 +4,9 @@ A campaign is a backlog too large for one session. It succeeds by completing fea
 
 Campaign mechanics never expand the authority grant.
 
-## Default shape: one slice at a time
+## Default shape: parallel where files are disjoint
 
-Run one writer on one slice until it is accepted, then pick the next. Add a second writer only when both slices own disjoint files, including shared contracts, schemas, indexes, and lockfiles, and the integration branch is green. Work that shares core files is serial, however large the backlog. Integration cost grows faster than lane count, and a slice parked unaccepted is worth nothing. Finish a started feature before starting another; three half-done features are worth less than one done.
+Run every ready slice that owns disjoint files at once, each writer in its own worktree, up to `perf-gate-ready -s` headroom and what the parent can review and integrate. Slices that share files, including shared contracts, schemas, indexes, and lockfiles, run serially, however large the backlog. A red integration branch pauses new lanes until it is green. Review and integration bound the width, and a slice parked unaccepted is worth nothing. Finish a started feature before starting another; three half-done features are worth less than one done.
 
 A slice is one capability with one acceptance command that runs locally in minutes. If a deliverable's proof needs hardware, hosts, or services that are not available, split it. The local part is a slice. The rest goes on the doc's **Needs environment** list, which never blocks local work or the campaign's local completion.
 
@@ -37,7 +37,7 @@ Run this after each accepted slice, on resume, and whenever a slice fails twice.
 | Many short turns, long time to first token | Batch reads, searches, and edits per turn, lower the child's reasoning effort for routine work, and give lanes larger, fully specified briefs. |
 | Audits, checkpoints, handoffs, or doc rewrites dominate | Stop them. Rewrite **Status** once and deliver. |
 | Checks dominate wall time | Run the narrowest acceptance command per slice, reuse evidence whose inputs are unchanged, and group wider suites at milestones. |
-| Implementation is starved and the ready work owns disjoint files | Add one writer within `perf-gate-ready -s` headroom. |
+| Ready slices own disjoint files and headroom remains | Launch them now. |
 | The owner asks about progress | Report finished features and landed slices only. |
 
 ## Run a slice
