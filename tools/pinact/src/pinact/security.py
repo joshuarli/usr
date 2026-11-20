@@ -125,10 +125,6 @@ def _is_truthy_str(value: str | None) -> bool:
     return value is not None and value.strip().lower() == "true"
 
 
-def _is_falsy_str(value: str | None) -> bool:
-    return value is not None and value.strip().lower() == "false"
-
-
 def workflow_triggers(root: MappingNode) -> set[str]:
     on = mapping_get(root, "on")
     if on is None:
