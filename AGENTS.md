@@ -47,8 +47,8 @@ it instead of touching it.
 
 ## Verification
 
-Run with `TMPDIR="$PWD/.work/tmp"` and Python 3.10+; this host uses Python 3.15 via `/opt/homebrew/bin`.
-- `make test`: first complete run 198s, warm 209s; `make lint`: 20s. Busy-host observations, not performance gates.
+Run with `TMPDIR="$PWD/.work/tmp"`, Python 3.10+, and pinned Node 26.13.1 for the offline bridge fixture.
+- `make test`: cache-empty 230s, warm 265s and 283s; `make lint`: 12s. Busy-host observations, not performance gates. On macOS the Pi offline SDK binding check fails identically at base `7f9e2af` (DSLP-6).
 - `sync` CLI, links and ownership formats: `tools/sync/test_main.py`, `test_links.py`, `test_integration.py`, `test_uninstall.py`.
 - `sync` installers, archives and companion configuration: `tools/sync/test_installer.py`, `test_ffmpeg_runtime.py`, `test_companions.py`.
 - `pinact` CLI, workflow YAML and action pins: `tools/pinact/test_pinact.py`, `tools/pinact/tests/`.

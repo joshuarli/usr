@@ -36,6 +36,7 @@ test: ## Run the repository and policy test suites
 	@sh sync check
 	@python3 -I tools/pi/test_release_install.py
 	@python3 -I tools/pi/test_sync_bridge_offline.py
+	@python3 -I tools/sync/opencode-worker-test.py
 	@sh -n dotfiles/base/.local/bin/pk
 	@python3 -I dotfiles/pk-test.py
 	@$(NODE) --test tools/policy/generate.test.ts

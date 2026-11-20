@@ -1,5 +1,5 @@
 Prefix: DSLP
-Next: 7
+Next: 8
 
 Deslop campaign backlog ([plan](https://github.com/laputa-systems/stuff/blob/main/docs/campaigns/deslop.md), tier C). One agent works this file with the `deslop` skill: take the lowest-numbered open ticket whose area does not start with `Needs owner ·`. After DSLP-5, work the open P1 and P2 findings, then fill in `## Report` below.
 
@@ -53,4 +53,13 @@ Not started.
 - **Recommendation:** Inspect the pinned extension and SDK binding and reproduce in CI before changing the acceptance test.
 - **Fix with:** root-cause
 - **Effort:** M
+
+### DSLP-7 · P2 · Offline bridge fixture mislabels the selected Node release
+
+- **Area:** Needs environment · Pi offline acceptance
+- **Where:** tools/pi/test_sync_bridge_offline.py:25, tools/pi/test_sync_bridge_offline.py:53
+- **Problem:** The fixture accepts any Node major 26 but places that executable in a 26.13.1 managed release; Node 26.12.0 fails sync bridge identity validation before the npm-free behavior is exercised. Reproduced by make test with Node 26.12.0; the same focused test passes with Node 26.13.1.
+- **Recommendation:** Make the fixture select and validate a matching pinned runtime or report the exact prerequisite before seeding the managed release.
+- **Fix with:** root-cause
+- **Effort:** S
 
