@@ -32,9 +32,9 @@ Use the repository's existing host gate or resource reservation first. If it spe
 
 1. **Coordinate owned work.** Use an existing lock/reservation or the smallest equivalent across agents/worktrees sharing the machine. Reserve relevant CPU, memory and I/O capacity; avoid overlapping compilation, indexing and timed work. A cooperative lock does not exclude unrelated host processes.
 2. **Check before and during.** Record effective CPU set/quota and topology, runnable/CPU load, memory and swap pressure, I/O pressure, throttling/OOM events and frequency/thermal state where available. Capture a useful summary before/during/after, plus the resource allocation and missing telemetry. Raw load average alone does not establish readiness.
-3. **Bound waiting.** If unavailable or busy, defer timing and continue useful correctness or applicable resource work. Report timing incomplete; do not claim release readiness when required evidence is missing.
+3. **Bound waiting.** If unavailable or busy, do not wait. Use [busy-host evidence](../../../instructions/performance.md#busy-host-evidence) where it decides the claim, and continue correctness or resource work. Report only the undecided absolute timings as incomplete.
 4. **Attribute pressure.** External contention may invalidate timing. Pressure, oversubscription or OOM caused by the candidate can be the regression itself; do not throw it away as “host noise.” Retain the sample, work counters and diagnostics.
-5. **Keep validity explicit.** Do not divide timing by host load or compare unmatched machines as if normalized. Compare like environments or report distinct tracks. Noisy-host observations may guide investigation without becoming accepted gate evidence.
+5. **Keep validity explicit.** Do not divide timing by host load or compare unmatched machines as if normalized. Compare like environments or report distinct tracks. Unpaired noisy-host observations may guide investigation but are not gate evidence. Interleaved paired ratios, scaling ratios and load-independent counters are gate evidence, as described in the busy-host evidence rules.
 
 Readiness tolerances must fit the host and workload. Do not hard-code a universal “load below N” policy. Missing isolation or telemetry lowers the strength of the claim and may leave a strict gate inconclusive.
 

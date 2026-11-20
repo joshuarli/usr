@@ -13,7 +13,7 @@ A ballpark the user asked for needs one run: still answer questions 4 and 7, and
 
 - Write the sentence you expect to ship ("export is 30% faster at p50 on the 60k-row set"). The questions test that sentence.
 - Read the measurement script. Note what it times, counts, and ignores.
-- Check machine load (`uptime`) and core count (`sysctl -n hw.ncpu` or `nproc`). If the machine is busy, find the cause. If you cannot stop it, interleave the sides and say so.
+- Check machine load (`uptime`) and core count (`sysctl -n hw.ncpu` or `nproc`). If the machine is busy, find the cause. If you cannot stop it, do not wait: use [busy-host evidence](../../instructions/performance.md#busy-host-evidence) (interleaved paired ratios, scaling ratios, load-independent counters) and say so.
 
 ## The questions
 
