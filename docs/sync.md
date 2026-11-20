@@ -41,7 +41,7 @@ Some configured commands require separately installed tools:
 
 macOS memory inspection treats Watchman as optional. Linux sandbox prerequisites remain in the [sbx reference](sbx-spec.md#linux-backend-out-of-scope).
 
-`sh sync` also runs host setup: macOS installs Homebrew packages, while Alpine Linux installs the sync prerequisites and configures Unbound and DNS. These steps can use `sudo`. Other Linux distributions skip Unbound setup. Touch ID, macOS DNS, and Tailscale SSH setup are manual; the packages step installs Homebrew's `tailscale`, the only macOS variant that serves Tailscale SSH. See [`setup-macos`](../host/macos/setup-macos) and [macOS preferences](macos-preferences.md).
+`sh sync` also runs host setup: macOS installs Homebrew packages, while Alpine Linux installs the sync prerequisites and configures Unbound and DNS. These steps can use `sudo`. Other Linux distributions skip Unbound setup. Touch ID, pointing `/bin/sh` at dash (`setup-macos posix-sh`, which `sync doctor` checks), macOS DNS, and Tailscale SSH setup are manual; the packages step installs Homebrew's `tailscale`, the only macOS variant that serves Tailscale SSH. See [`setup-macos`](../host/macos/setup-macos) and [macOS preferences](macos-preferences.md).
 
 On macOS, `sh sync tools ghostty` or `sh sync tools ghostty-custom` installs the latest `release-*` prerelease from `joshuarli/ghostty`. It verifies `SHA256SUMS`, installs `Ghostty Custom.app` with a `~/.local/bin/ghostty-custom` symlink, and records the release asset identity. Set `GHOSTTY_APPLICATIONS_DIR="$HOME/Applications"` if `/Applications` is not writable. It will not overwrite an existing unmanaged app or launcher; `sh sync uninstall` removes a sync-managed installation.
 

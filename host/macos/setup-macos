@@ -8,11 +8,12 @@
 #   STEP    brew        install Homebrew if missing
 #           packages    install the packages listed in host/macos/Brewfile
 #           touchid     Touch ID for sudo, working inside tmux
+#           posix-sh    /bin/sh runs dash instead of bash 3.2, as Linux's /bin/sh is POSIX sh
 #           dns         unbound as a local caching resolver, and point the system at it
 #                       To undo: networksetup -setdnsservers SERVICE Empty
 #           tailscale   tailscaled as a system service, serving Tailscale SSH
 #                       Removes the GUI app if present; reboot, then rerun to finish.
-#   With no STEP the default is: brew packages touchid dns, in that order. Packages come
+#   With no STEP the default is: brew packages touchid posix-sh dns, in that order. Packages come
 #   first because touchid and dns use what they install, and touchid comes before dns so
 #   that later sudo prompts accept a fingerprint. tailscale is not a default: it takes over
 #   the tunnel from the GUI app and signs in through a browser.
@@ -333,18 +334,31 @@ step_tailscale() {
     info "Tailscale SSH is enabled"
 }
 
+sh_select=/private/var/select/sh
+
+step_posix_sh() {
+    [ -x /bin/dash ] || die "/bin/dash is missing"
+    if [ "$(readlink "$sh_select")" = /bin/dash ]; then
+        info "/bin/sh runs dash"
+        return
+    fi
+    info "Pointing /bin/sh at dash (was $(readlink "$sh_select"))"
+    need_sudo
+    act sudo ln -sfn /bin/dash "$sh_select"
+}
+
 # ── main ──────────────────────────────────────────────────────────────────────
 [ "$(uname -s)" = Darwin ] || die "macOS only"
 
 if [ "${1:-}" = -n ]; then dry=true; shift; fi
 
 if [ $# -eq 0 ]; then
-    set -- brew packages touchid dns
+    set -- brew packages touchid posix-sh dns
 fi
 
 for step in "$@"; do
     case $step in
-        brew|packages|touchid|dns|tailscale) ;;
+        brew|packages|touchid|posix-sh|dns|tailscale) ;;
         *) die "unknown step: $step (see the usage at the top of this script)" ;;
     esac
 done
@@ -355,6 +369,7 @@ while [ $# -gt 0 ]; do
         brew)       step_brew ;;
         packages)   step_packages ;;
         touchid)    step_touchid ;;
+        posix-sh)   step_posix_sh ;;
         dns)        step_dns ;;
         tailscale)  step_tailscale ;;
     esac

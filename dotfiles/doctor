@@ -142,6 +142,12 @@ case $(uname -s) in
             problem 'Brewfile packages missing or check failed'
             cat "$scratch/brew"
         fi
+        printf 'macOS shell:\n'
+        if [ "$(readlink /private/var/select/sh)" = /bin/dash ]; then
+            ok '/bin/sh runs dash'
+        else
+            problem "/bin/sh runs $(readlink /private/var/select/sh), not dash; run: sh host/macos/setup-macos posix-sh"
+        fi
         ;;
     Linux)
         if [ -r /etc/os-release ]; then
