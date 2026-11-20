@@ -16,7 +16,7 @@ Prove that a newcomer with a fresh Linux box, a clone and the repository's own d
 
 **Trace the branches a fresh host takes.** Build files often pick a target, toolchain or wrapper from the host: a `Makefile` that turns a glibc host into a musl target, or that uses a wrapper only when one is on `PATH`. Note which branch the capsule's distribution takes, and whether CI ever runs that branch. A default path that CI never runs is the likeliest to be broken. Check that dependency sources, including registry mirrors and source replacements, are reachable without credentials, or that the docs say how to get them. Follow the links on the newcomer path, such as the README's contributing link, and confirm each one resolves.
 
-**Pick the capsule.** Default to the current Ubuntu LTS image. Add the distributions the owner names, and the repository's own CI distribution as a second capsule when it differs. Run the host's native architecture so the run stays fast and faithful. Emulated runs prove that the build compiles and the tests pass, not performance. If the owner's target box has a different architecture, run that architecture as well, and say which runs were emulated.
+**Pick the capsule.** Default to `ubuntu:24.04`, the base most AI cloud environments run, even after a newer LTS ships. Add the distributions the owner names, and the repository's own CI distribution as a second capsule when it differs. Run the host's native architecture so the run stays fast and faithful. Emulated runs prove that the build compiles and the tests pass, not performance. If the owner's target box has a different architecture, run that architecture as well, and say which runs were emulated.
 
 ## Run it
 
