@@ -10,6 +10,7 @@ const repo = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
 const globalRoot = resolve(repo, 'dotfiles/base/.agents/skills')
 const rel = (path: string) => relative(repo, path)
 const read = (path: string) => readFileSync(path, 'utf8')
+const sizeExempt = new Set(['orchestrate', 'ultrareview'])
 function parse(root: string): Skill[] {
   const entries = readdirSync(root, { withFileTypes: true }).filter(e => e.isDirectory() || e.isSymbolicLink()).map(e => {
     const path = join(root, e.name)
@@ -136,8 +137,7 @@ function main(args: string[]): number {
     if (r.invocation === 'explicit' && /^(Use|Apply) when\b/.test(r.description)) error(`${r.id}: explicit skill description names a situation the gate never lets it load for; start with "Use for /${r.id}"`)
     for (const id of s.missing) error(`${r.id}: unknown referenced skill: ${id}`)
     for (const m of s.text.matchAll(/`mdtool ([a-z][a-z-]*)/g)) if (!commands.has(m[1])) error(`${r.id}: unknown mdtool command: ${m[1]}`)
-    const limit = r.id === 'orchestrate' ? 12000 : 8000
-    if (r.id !== 'ultrareview' && Buffer.byteLength(s.text) > limit) console.log(`warning: ${r.id} is over ${limit} bytes`)
+    if (!sizeExempt.has(r.id) && Buffer.byteLength(s.text) > 8000) console.log(`warning: ${r.id} is over 8000 bytes`)
     if (!/^\*\*Report:\*\*/m.test(s.text)) console.log(`warning: ${r.id} has no closing **Report:**`)
   }
   for (const o of changed) error(`stale adapter: ${rel(o.file)}`)
