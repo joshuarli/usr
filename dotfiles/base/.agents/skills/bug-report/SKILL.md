@@ -41,4 +41,16 @@ A report is short, exact and reproducible. Every sentence is a verified fact. On
 5. Check that every commit is 40 hex characters and every image is pinned by digest.
 6. Post only where you are allowed to. Repositories outside `joshuarli` and `laputa-systems` need Joshua's explicit consent per post; otherwise file it as an `Upstream draft:` issue in the `laputa-systems` fork (see `~/.agents/instructions/owned-tools.md`).
 
-**Report:** the report's URL or the draft text, the reproduction runs (base failing, fix passing) with their decisive lines, and anything cut for lack of evidence.
+## After opening a pull request
+
+Watch it for about an hour after opening it, and again after each push, so automated reviewers (Bugbot, Copilot, CodeRabbit, CI) can post. Poll its reviews, review comments, issue comments and checks every few minutes (`gh api repos/OWNER/REPO/pulls/N/reviews`, `.../pulls/N/comments`, `.../issues/N/comments`, `gh pr checks N`) rather than sleeping through the hour.
+
+For each comment, verify the claim against the code before acting:
+
+- **A real defect:** fix it on the same branch with a regression test, rerun the reproduction and the affected checks, and push a new Conventional Commits commit (no force-push unless the project asks). Reply to the comment with the commit and what the test shows, then resolve its thread.
+- **A false or out-of-scope finding:** reply once with the `path:line` evidence or the reason, and leave the thread for the maintainers.
+- **A change to the report's claims:** update the pull request body so it still matches the code.
+
+A push restarts the hour.
+
+**Report:** the report's URL or the draft text, the review comments received and how each was handled, the reproduction runs (base failing, fix passing) with their decisive lines, and anything cut for lack of evidence.
