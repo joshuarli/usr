@@ -90,6 +90,10 @@ class Installer:
             self._write(name)
 ''')
         self.env = dict(os.environ, HOME=str(self.root / "home"),
+                        XDG_CONFIG_HOME=str(self.root / "home/.config"),
+                        XDG_CACHE_HOME=str(self.root / "home/.cache"),
+                        XDG_DATA_HOME=str(self.root / "home/.local/share"),
+                        XDG_STATE_HOME=str(self.root / "home/.local/state"),
                         PATH=str(self.root / "bin") + os.pathsep + os.environ.get("PATH", ""),
                         DL_PROFILE="server", TARGET=str(self.root / "home"))
 
