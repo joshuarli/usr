@@ -120,7 +120,7 @@ Carry forward findings and failed approaches. Every child gets:
 
 The parent owns each child worktree from creation through removal. Every skill that removes worktrees or branches follows this section. Record its exact path, its branch when it has one, and the integration worktree when you create it or the harness creates it. A child finishing does not remove its worktree. Remove only the recorded path, never every entry under `.work/wt/`.
 
-Treat retirement as part of accepting the lane, regardless of free disk space. Claude's `WorktreeRemove` hook does not run when a hook-created subagent finishes: the parent must explicitly retire that lane. Separately, unsolicited cleanup sweeps require an `agent-disk-pressure` notice and a fresh reading strictly below 10%; use `cleanup`, never periodic model polling. Workers report pressure to their parent and keep their assigned scope.
+Treat retirement as part of accepting the lane, regardless of free disk space. Claude's `WorktreeRemove` hook does not run when a hook-created subagent finishes: the parent must explicitly retire that lane. Separately, unsolicited cleanup sweeps require an `agent-disk-pressure` notice and a fresh reading strictly below 16 GiB; use `cleanup`, never periodic model polling. Workers report pressure to their parent and keep their assigned scope.
 
 After a child finishes, review its changes and decide whether to integrate or park them. For accepted changes, inspect the integrated diff and reuse worker evidence unless integration or changed inputs could invalidate it. Remove the child worktree only after applicable proof is complete, the child has stopped, and all work worth keeping is in the integration branch or a preserved branch.
 

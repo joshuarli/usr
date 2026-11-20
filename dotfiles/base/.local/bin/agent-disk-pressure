@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Request one bounded cleanup pass only below 10% available system disk space.
+"""Request one bounded cleanup pass only below 16 GiB available system disk space.
 
 The hook never deletes anything and never runs Git, df, du, or a subprocess.
 Healthy events are silent. Harnesses sharing a state directory share a cooldown.
@@ -25,6 +25,8 @@ import time
 NOTICE_INTERVAL = 30 * 60
 INPUT_LIMIT = 1024 * 1024
 STATE_LIMIT = 4096
+THRESHOLD_GIB = 16
+THRESHOLD_BYTES = THRESHOLD_GIB * 2**30
 EVENTS = {"SessionStart", "UserPromptSubmit", "PostToolUse", "PostToolUseFailure"}
 
 
@@ -36,13 +38,13 @@ class Sample:
 
     @property
     def low(self) -> bool:
-        # Do not use df's rounded percentage or blocks reserved for root.
-        return self.available * 10 < self.total
+        # Count only space available to this user, not blocks reserved for root.
+        return self.available < THRESHOLD_BYTES
 
     def as_dict(self) -> dict[str, object]:
         return {"path": self.path, "available_bytes": self.available,
                 "total_bytes": self.total, "free_percent": self.available * 100 / self.total,
-                "below_threshold": self.low, "threshold_percent": 10}
+                "below_threshold": self.low, "threshold_bytes": THRESHOLD_BYTES}
 
 
 def sample_disk() -> Sample:
@@ -124,15 +126,15 @@ def save_notice(path: Path, now: float) -> None:
 
 
 def cleanup_message(sample: Sample) -> str:
-    # Truncate for display: 9.999% must not look like a healthy 10.0%.
-    percent = sample.available * 1000 // sample.total / 10
+    # Truncate for display: 15.999 GiB must not look like a healthy 16.00 GiB.
+    gib = sample.available * 100 // 2**30 / 100
     return (
-        f"System disk pressure: {sample.path} has {percent:.1f}% available "
-        f"({sample.available / 2**30:.2f} GiB), strictly below 10%. "
+        f"System disk pressure: {sample.path} has {gib:.2f} GiB available, "
+        f"strictly below {THRESHOLD_GIB} GiB. "
         "The coordinator should use the cleanup skill for one bounded pass over its own "
         "completed worktrees and known disposable scratch. If you are a delegated worker, "
         "relay this to the parent; do not expand your scope. Recheck agent-disk-pressure status "
-        "before removing anything and after each batch; stop at >=10%. Preserve active, "
+        "before removing anything and after each batch; stop at >=16 GiB. Preserve active, "
         "leased, dirty, parked, unknown-owner and unintegrated work. Use worktree-retire "
         "for accepted lanes; never rm a worktree. If no safe candidates remain, report "
         "the blocker and continue the original task where feasible. Do not poll or repeat "

@@ -1,11 +1,11 @@
 ---
 name: cleanup
-description: "Apply to an agent-disk-pressure notice below 10% system free space, or an explicit cleanup request. Reclaim only owned completed worktrees and known stale scratch. Skip unsolicited sweeps on healthy disks, live or parked work, and generic system cleanup."
+description: "Apply to an agent-disk-pressure notice below 16 GiB system free space, or an explicit cleanup request. Reclaim only owned completed worktrees and known stale scratch. Skip unsolicited sweeps on healthy disks, live or parked work, and generic system cleanup."
 ---
 
 # Cleanup
 
-For a proactive sweep, first run `agent-disk-pressure status`. It prints a fresh system-volume reading: exit 1 means strictly below 10% available; 0 means healthy; 2 means unknown. Do not inventory or remove anything on 0 or 2. Recheck before each removal batch and after it; stop at >=10%, unknown, or no safe candidates. A notice can be stale by the time you read it. Do one bounded pass per notice, not a polling loop. Explicit user-requested cleanup and ordinary retirement of the current task's completed lanes do not need pressure.
+For a proactive sweep, first run `agent-disk-pressure status`. It prints a fresh system-volume reading: exit 1 means strictly below 16 GiB available; 0 means healthy; 2 means unknown. Do not inventory or remove anything on 0 or 2. Recheck before each removal batch and after it; stop at >=16 GiB, unknown, or no safe candidates. A notice can be stale by the time you read it. Do one bounded pass per notice, not a polling loop. Explicit user-requested cleanup and ordinary retirement of the current task's completed lanes do not need pressure.
 
 The coordinator owns cleanup and all removals. A worker may provide a bounded read-only inventory when that saves time; workers never delete worktrees, branches or scratch. Supply the repository, integration worktree and head, campaign scope, and exact known-owned and active paths. Do not expand a pressure notice into an all-repository or home-directory sweep. Skip candidates on unrelated disks that cannot relieve the pressured system volume.
 

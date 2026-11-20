@@ -1,16 +1,16 @@
 # Disk pressure and worktree cleanup
 
-Proactive cleanup starts only when the system disk has **strictly less than 10% available space**. A deterministic event hook measures space; agents do not poll, enumerate worktrees, or run `du` to decide whether a sweep is needed. Routine retirement of a stopped, accepted lane remains part of completing that lane. An explicit cleanup request also remains actionable on a healthy disk.
+Proactive cleanup starts only when the system disk has **strictly less than 16 GiB available space**. A deterministic event hook measures space; agents do not poll, enumerate worktrees, or run `du` to decide whether a sweep is needed. Routine retirement of a stopped, accepted lane remains part of completing that lane. An explicit cleanup request also remains actionable on a healthy disk.
 
 ## Detection and cost
 
-[`agent-disk-pressure`](../dotfiles/base/.local/bin/agent-disk-pressure) uses Python's standard-library `os.statvfs`. The measured path is `/` on Linux and `/System/Volumes/Data`, the writable boot volume, on macOS. Available blocks are those usable by the ordinary user, not blocks reserved for root. The comparison uses integers before display rounding: `available * 10 < total`. Exactly 10% is healthy. Invalid or unavailable counters do not authorize cleanup.
+[`agent-disk-pressure`](../dotfiles/base/.local/bin/agent-disk-pressure) uses Python's standard-library `os.statvfs`. The measured path is `/` on Linux and `/System/Volumes/Data`, the writable boot volume, on macOS. Available blocks are those usable by the ordinary user, not blocks reserved for root. The threshold is absolute, not a share of the disk: `available < 16 * 2**30` in integer bytes, compared before display rounding. Exactly 16 GiB is healthy. `status` reports `threshold_bytes` alongside the informational `free_percent`. Invalid or unavailable counters do not authorize cleanup.
 
 The ordinary healthy path performs one filesystem-capacity query and checks for an existing notice marker. It starts no subprocess, traverses no directory, runs no Git command, and creates no state. The hook has a Python interpreter startup cost, but consumes no model tool call or extra model turn. No daemon, timer, cron job, or systemd service is installed.
 
 On this Linux development host, 30 interleaved samples measured a **29.4 ms median complete hook invocation** (36.5 ms p95), versus 6.3 ms for an empty isolated Python process. Both host-load gates passed. These are local implementation measurements, not a macOS or production latency guarantee. There are no new package dependencies.
 
-On a low reading, a stable nonblocking `flock` and an atomically replaced timestamp admit one notice per user/host every 30 minutes across harnesses resolving the same state directory. The helper takes a fresh reading under the lock before emitting. Observed recovery to >=10% clears the notice episode and rearms immediately. The lock inode stays in place. State is under `${XDG_STATE_HOME:-~/.local/state}/usr-disk-pressure/<host-hash>/`; different home or state roots have separate notice claims.
+On a low reading, a stable nonblocking `flock` and an atomically replaced timestamp admit one notice per user/host every 30 minutes across harnesses resolving the same state directory. The helper takes a fresh reading under the lock before emitting. Observed recovery to >=16 GiB clears the notice episode and rearms immediately. The lock inode stays in place. State is under `${XDG_STATE_HOME:-~/.local/state}/usr-disk-pressure/<host-hash>/`; different home or state roots have separate notice claims.
 
 The shared timestamp deduplicates notices; it is not a lock around arbitrary manual cleanup commands. A failed/unwritable state claim produces no cleanup request. `notify` and `status` report failures on stderr with exit 2; hook failures leave the unrelated task running. Use those commands when diagnosing a missing notice. No transcript, tool arguments, credentials, or repository inventory is retained.
 
@@ -43,7 +43,7 @@ The [`cleanup` skill](../dotfiles/base/.agents/skills/cleanup/SKILL.md) owns the
 2. Limit candidates to recorded owned worktrees and positively identified stale scratch in the current campaign. Verify that reclaiming them can relieve the system volume. Do not turn pressure into a home-directory or repository-fleet sweep.
 3. Establish completion and quiescence independently. A clean checkout may still have a running build or agent. Preserve active, leased, locked, dirty, parked and unknown-owner lanes.
 4. From the surviving integration checkout, preview `worktree-retire <lane> --into <integration-head> --dry-run`, then retire only after reviewing its integration evidence and ignored files. Use `--discard-ignored` only for individually reviewed disposable data. Never force removal or recursively delete a worktree.
-5. Stop once free space is >=10%, the reading is unknown, or no safe candidates remain. Report a blocker once and continue the original task where feasible. Do not repeatedly rescan the same fruitless inventory.
+5. Stop once free space is >=16 GiB, the reading is unknown, or no safe candidates remain. Report a blocker once and continue the original task where feasible. Do not repeatedly rescan the same fruitless inventory.
 
 Completed-lane retirement is separate: review, integrate, verify, stop the worker, retire its exact checkout. Claude's [WorktreeRemove contract](https://code.claude.com/docs/en/hooks#worktreeremove) explicitly leaves hook-created subagent worktrees behind when the subagent finishes; the coordinator cannot delegate this responsibility to that hook.
 

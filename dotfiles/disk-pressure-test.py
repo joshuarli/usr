@@ -27,11 +27,14 @@ assert spec and spec.loader
 pressure = importlib.util.module_from_spec(spec)
 sys.modules[spec.name] = pressure
 spec.loader.exec_module(pressure)
+T = pressure.THRESHOLD_BYTES
+LOW = T - 1
+TOTAL = 2**41
 
 
 def notify_process(directory: str) -> str | None:
     with patch.object(pressure, "state_directory", return_value=Path(directory)), \
-         patch.object(pressure, "sample_disk", return_value=pressure.Sample("/", 9, 100)), \
+         patch.object(pressure, "sample_disk", return_value=pressure.Sample("/", LOW, TOTAL)), \
          patch.dict(os.environ, {"USR_SCOPED_WORKER": ""}):
         return pressure.notification()
 
@@ -46,7 +49,7 @@ class DiskPressureTests(unittest.TestCase):
         self.enterContext(patch.object(pressure, "state_directory", return_value=self.directory))
         self.enterContext(patch.dict(os.environ, {"USR_SCOPED_WORKER": ""}))
 
-    def notify(self, available: int, total: int = 100, now: float = 10000) -> str | None:
+    def notify(self, available: int, total: int = TOTAL, now: float = 10000) -> str | None:
         with patch.object(pressure, "sample_disk", return_value=pressure.Sample("/", available, total)), \
              patch.object(pressure.time, "time", return_value=now):
             return pressure.notification()
@@ -61,10 +64,12 @@ class DiskPressureTests(unittest.TestCase):
     def test_exact_threshold_and_no_state_or_external_commands_when_healthy(self):
         with patch.object(subprocess, "run", side_effect=AssertionError("no subprocess")), \
              patch.object(pressure, "locked", side_effect=AssertionError("no lock needed")):
-            for available, total in ((10, 100), (11, 100), (100, 100), (10001, 100000)):
+            # The threshold is absolute: a small disk with 16 GiB free is healthy, and a
+            # large disk with a high free percentage but under 16 GiB is low.
+            for available, total in ((T, TOTAL), (T + 1, TOTAL), (T, T), (TOTAL, TOTAL)):
                 self.assertIsNone(self.notify(available, total))
                 self.assertFalse(self.directory.exists())
-        self.assertIsNotNone(self.notify(9999, 100000))
+        self.assertIsNotNone(self.notify(LOW, LOW + 1))
 
     def test_available_not_root_reserved_blocks_and_writable_macos_boot_volume(self):
         info = SimpleNamespace(f_bavail=9, f_bfree=50, f_blocks=100, f_frsize=4096, f_bsize=4096)
@@ -79,18 +84,18 @@ class DiskPressureTests(unittest.TestCase):
                 pressure.sample_disk()
 
     def test_cross_session_cooldown_recovery_and_clock_rollback(self):
-        self.assertIsNotNone(self.notify(9, now=10000))
-        self.assertIsNone(self.notify(8, now=10001))
+        self.assertIsNotNone(self.notify(LOW, now=10000))
+        self.assertIsNone(self.notify(LOW - 1, now=10001))
         self.assertIsNone(self.notify(1, now=11799))
         self.assertIsNotNone(self.notify(1, now=11800))
-        self.assertIsNone(self.notify(10, now=11801))
+        self.assertIsNone(self.notify(T, now=11801))
         self.assertFalse((self.directory / "notice.json").exists())
         self.assertTrue((self.directory / "notice.lock").exists())
-        self.assertIsNotNone(self.notify(9, now=11802))
-        self.assertIsNotNone(self.notify(9, now=100))
+        self.assertIsNotNone(self.notify(LOW, now=11802))
+        self.assertIsNotNone(self.notify(LOW, now=100))
 
     def test_fresh_sample_under_lock_prevents_stale_low_notice(self):
-        with patch.object(pressure, "sample_disk", side_effect=[pressure.Sample("/", 9, 100), pressure.Sample("/", 10, 100)]):
+        with patch.object(pressure, "sample_disk", side_effect=[pressure.Sample("/", LOW, TOTAL), pressure.Sample("/", T, TOTAL)]):
             self.assertIsNone(pressure.notification())
         self.assertFalse((self.directory / "notice.json").exists())
 
@@ -104,12 +109,12 @@ class DiskPressureTests(unittest.TestCase):
             self.assertIsNotNone(self.notify(9))
 
     def test_hook_is_context_only_and_deduplicates_between_harness_events(self):
-        with patch.object(pressure, "sample_disk", return_value=pressure.Sample("/", 9, 100)):
+        with patch.object(pressure, "sample_disk", return_value=pressure.Sample("/", LOW, TOTAL)):
             event = self.event({"hook_event_name": "SessionStart", "cwd": "/untrusted", "session_id": "one"})
             parsed = json.loads(event)
             self.assertEqual(set(parsed), {"hookSpecificOutput"})
             self.assertEqual(parsed["hookSpecificOutput"]["hookEventName"], "SessionStart")
-            self.assertIn("strictly below 10%", parsed["hookSpecificOutput"]["additionalContext"])
+            self.assertIn("strictly below 16 GiB", parsed["hookSpecificOutput"]["additionalContext"])
             self.assertNotIn("/untrusted", event)
             for name in ("PostToolUse", "PostToolUseFailure", "UserPromptSubmit"):
                 self.assertEqual(self.event({"hook_event_name": name, "session_id": "another"}), "")
@@ -125,7 +130,7 @@ class DiskPressureTests(unittest.TestCase):
 
     def test_unavailable_disk_or_failed_state_write_does_not_authorize_cleanup(self):
         for target in ("sample_disk", "save_notice"):
-            with patch.object(pressure, "sample_disk", return_value=pressure.Sample("/", 9, 100)), \
+            with patch.object(pressure, "sample_disk", return_value=pressure.Sample("/", LOW, TOTAL)), \
                  patch.object(pressure, target, side_effect=OSError("fixture error")):
                 self.assertEqual(self.event({"hook_event_name": "PostToolUse"}), "")
         self.assertFalse((self.directory / "notice.json").exists())
@@ -151,7 +156,7 @@ from pathlib import Path
 namespace = runpy.run_path(sys.argv[1])
 notify = namespace['notification']
 notify.__globals__['state_directory'] = lambda: Path(sys.argv[2])
-notify.__globals__['sample_disk'] = lambda: namespace['Sample']('/', int(sys.argv[3]), 100)
+notify.__globals__['sample_disk'] = lambda: namespace['Sample']('/', int(sys.argv[3]), 2**41)
 try:
     notify()
 except OSError as error:
@@ -159,7 +164,7 @@ except OSError as error:
     raise SystemExit(2)
 raise SystemExit(3)
 """
-        for filename, available in (("notice.lock", 9), ("notice.json", 10)):
+        for filename, available in (("notice.lock", LOW), ("notice.json", T)):
             path = self.directory / filename
             os.mkfifo(path)
             result = subprocess.run([sys.executable, "-I", "-S", "-c", fixture, str(TOOL),
@@ -197,9 +202,9 @@ raise SystemExit(3)
             self.assertTrue(acquired)
 
     def test_status_has_no_state_and_preserves_exit_status_contract(self):
-        for available, expected in ((9, 1), (10, 0)):
+        for available, expected in ((LOW, 1), (T, 0)):
             output = io.StringIO()
-            with patch.object(pressure, "sample_disk", return_value=pressure.Sample("/", available, 100)), \
+            with patch.object(pressure, "sample_disk", return_value=pressure.Sample("/", available, TOTAL)), \
                  patch.object(sys, "argv", [str(TOOL), "status"]), patch.object(sys, "stdout", output):
                 self.assertEqual(pressure.main(), expected)
                 self.assertEqual(json.loads(output.getvalue())["below_threshold"], expected == 1)
