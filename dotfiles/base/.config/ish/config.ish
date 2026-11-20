@@ -1,4 +1,4 @@
-set PATH "$HOME/.local/bin:/opt/homebrew/opt/rustup/bin:$HOME/.cargo/bin:$HOME/go/bin:$HOME/.cache/.bun/bin:/Applications/OrbStack.app/Contents/MacOS/xbin:/opt/homebrew/bin:/sbin:$PATH"
+set PATH "$HOME/.local/lib/harness-shims:$HOME/.local/bin:/opt/homebrew/opt/rustup/bin:$HOME/.cargo/bin:$HOME/go/bin:$HOME/.cache/.bun/bin:/Applications/OrbStack.app/Contents/MacOS/xbin:/opt/homebrew/bin:/sbin:$PATH"
 set EDITOR $HOME/.local/bin/e
 set PAGER less
 

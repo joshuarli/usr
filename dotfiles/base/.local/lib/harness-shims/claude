@@ -1,0 +1,4 @@
+#!/bin/sh
+# Use agent-browser by default; an explicit --chrome remains available.
+export CLAUDE_CODE_ENABLE_CFC=0
+exec "$HOME/.local/bin/claude" "$@"

@@ -34,12 +34,14 @@ cat > "$bin/dsh" <<'EOF'
 printf '%s\n' core > "$DSH_COMMAND_CAPTURE"
 printf '%s\n' "$@" > "$DSH_CAPTURE"
 printf '%s\n' "${DEEPSEEK_API_KEY:-}" > "$DSH_KEY_CAPTURE"
+[ -z "${DSH_TELEMETRY_CAPTURE:-}" ] || printf '%s\n' "${DSH_TELEMETRY_DISABLED:-}" > "$DSH_TELEMETRY_CAPTURE"
 EOF
 cat > "$bin/dsh-tui" <<'EOF'
 #!/bin/sh
 printf '%s\n' tui > "$DSH_COMMAND_CAPTURE"
 printf '%s\n' "$@" > "$DSH_CAPTURE"
 printf '%s\n' "${DEEPSEEK_API_KEY:-}" > "$DSH_KEY_CAPTURE"
+[ -z "${DSH_TELEMETRY_CAPTURE:-}" ] || printf '%s\n' "${DSH_TELEMETRY_DISABLED:-}" > "$DSH_TELEMETRY_CAPTURE"
 [ -z "${DSH_PATH_CAPTURE:-}" ] || printf '%s\n' "$PATH" > "$DSH_PATH_CAPTURE"
 EOF
 chmod +x "$bin/dsh" "$bin/dsh-tui" "$mock_bin/vault"
@@ -169,23 +171,42 @@ fi
 printf '%s\n' "$output" | grep -Fqx 'dsh: set DEEPSEEK_API_KEY or install vault with that entry'
 [ ! -e "$test_root/command" ]
 
-cat > "$mock_bin/dl" <<'EOF'
+# Both launch routes carry the telemetry opt-out through vault to the runtime.
+for profile in tui headless; do
+    HOME="$home" XDG_DATA_HOME="$data" DSH_CAPTURE="$capture" \
+        DSH_COMMAND_CAPTURE="$test_root/command" DSH_KEY_CAPTURE="$test_root/key" \
+        DSH_TELEMETRY_DISABLED='' DSH_TELEMETRY_CAPTURE="$test_root/telemetry" \
+        sh "$launcher" "$profile" --dump-config
+    if [ "$(cat "$test_root/telemetry")" != 1 ]; then
+        printf '%s\n' "dsh: telemetry opt-out did not reach $profile" >&2
+        exit 1
+    fi
+done
+
+# Update resolves sync beside the tracked launcher, not a dl command on PATH.
+# Use a repo-shaped fixture so this test cannot invoke the real installer.
+update_repo="$test_root/update-repo"
+update_launcher="$update_repo/dotfiles/base/.local/bin/dsh"
+mkdir -p "$(dirname "$update_launcher")"
+cp "$repo_root/dotfiles/base/.local/bin/dsh" "$update_launcher"
+cat > "$update_repo/sync" <<'EOF'
 #!/bin/sh
 printf '%s\n' "$@" > "$DSH_UPDATE_CAPTURE"
 EOF
-chmod +x "$mock_bin/dl"
-if output=$(HOME="$home" PATH="$mock_bin:$PATH" DSH_UPDATE_CAPTURE="$test_root/update" \
-    sh "$launcher" update 2>&1); then
+if output=$(HOME="$home" DSH_UPDATE_CAPTURE="$test_root/update" \
+    sh "$update_launcher" update 2>&1); then
     :
 else
     printf '%s\n' "$output" >&2
     exit 1
 fi
-[ "$(sed -n '1p' "$test_root/update")" = dsh ]
+[ "$(sed -n '1p' "$test_root/update")" = tools ]
+[ "$(sed -n '2p' "$test_root/update")" = dsh ]
 
-if output=$(HOME="$home" PATH="$mock_bin:$PATH" DSH_UPDATE_CAPTURE="$test_root/update" \
-    sh "$launcher" update --check 2>&1); then
+if output=$(HOME="$home" DSH_UPDATE_CAPTURE="$test_root/update" \
+    sh "$update_launcher" update --check 2>&1); then
     printf '%s\n' 'dsh update accepted an unsupported argument' >&2
     exit 1
 fi
-[ "$(cat "$test_root/update")" = dsh ]
+[ "$(sed -n '1p' "$test_root/update")" = tools ]
+[ "$(sed -n '2p' "$test_root/update")" = dsh ]

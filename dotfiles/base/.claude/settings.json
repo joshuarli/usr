@@ -115,10 +115,5 @@
   "theme": "dark-ansi",
   "autoCompactEnabled": true,
   "disableDeepLinkRegistration": "disable",
-  "disableBundledSkills": true,
-  "deniedMcpServers": [
-    {
-      "serverName": "claude-in-chrome"
-    }
-  ]
+  "disableBundledSkills": true
 }

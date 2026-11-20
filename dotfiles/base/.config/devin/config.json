@@ -8,6 +8,7 @@
   },
   "theme_mode": "dark",
   "permission_mode": "dangerous",
+  "auto_update": false,
   "read_config_from": {
     "claude": false,
     "cloud": false

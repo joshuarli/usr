@@ -1,6 +1,10 @@
 #!/bin/sh
 set -eu
 
+# Skip the optional OpenTelemetry uploader in both TUI and headless profiles.
+DSH_TELEMETRY_DISABLED=1
+export DSH_TELEMETRY_DISABLED
+
 script_path=$0
 while [ -L "$script_path" ]; do
     target=$(readlink "$script_path")

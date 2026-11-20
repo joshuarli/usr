@@ -72,6 +72,7 @@ YTDLP = Area("`yt-dlp` shim")
 PK = Area("`pk` process picker")
 DSH = Area("DeepSeek launcher")
 CLAUDE_API = Area("Claude API launcher")
+HARNESS_SHIMS = Area("Lean harness launchers and shell PATH")
 GHOSTTY = Area("`ghostty-fda-check`")
 SKILLS = Area("a skill or agent definition", "`node tools/skills/skills.ts generate` refreshes invocation adapters; use the focused check for other agent configuration")
 POLICY = Area("model routes, native Pi policy, or generated policy blocks", "use `make generate` to refresh projections")
@@ -184,6 +185,11 @@ REGISTRY: tuple[Check, ...] = (
     Check("dsh-shellcheck", (DSH,), ("shellcheck", "-s", "sh", "dotfiles/base/.local/bin/dsh", "dotfiles/dsh-launcher-test.sh"), ("dotfiles/base/.local/bin/dsh", "dotfiles/dsh-launcher-test.sh"), needs=("shellcheck",)),
     Check("claude-api", (CLAUDE_API,), ("sh", "dotfiles/claude-api-test.sh"), ("dotfiles/base/.local/bin/claude-api", "dotfiles/claude-api-test.sh")),
     Check("claude-api-shellcheck", (CLAUDE_API,), ("shellcheck", "-s", "sh", "dotfiles/base/.local/bin/claude-api", "dotfiles/claude-api-test.sh"), ("dotfiles/base/.local/bin/claude-api", "dotfiles/claude-api-test.sh"), needs=("shellcheck",)),
+    Check("harness-lean", (HARNESS_SHIMS,), py("dotfiles/harness-lean-test.py"),
+          ("dotfiles/base/.local/lib/harness-shims/", "dotfiles/harness-lean-test.py",
+           "dotfiles/base/.config/sh/config.sh", "dotfiles/base/.config/ish/config.ish", "dotfiles/base/.config/xshi/config.ini")),
+    Check("harness-shims-shellcheck", (HARNESS_SHIMS,), ("shellcheck", "-s", "sh", "{file}"),
+          ("dotfiles/base/.local/lib/harness-shims/*",), needs=("shellcheck",), per_file=True),
     Check("ghostty-fda", (GHOSTTY,), ("sh", "dotfiles/ghostty-fda-test.sh"), ("dotfiles/base/.local/bin/ghostty-fda-check", "dotfiles/ghostty-fda-test.sh")),
     Check("ghostty-fda-shellcheck", (GHOSTTY,), ("shellcheck", "-s", "sh", "dotfiles/base/.local/bin/ghostty-fda-check", "dotfiles/ghostty-fda-test.sh"), ("dotfiles/base/.local/bin/ghostty-fda-check", "dotfiles/ghostty-fda-test.sh"), needs=("shellcheck",)),
     Check("skills", (SKILLS,), ("node", "tools/skills/skills.ts", "check"), SKILL_PATHS, needs=("node",)),
@@ -231,7 +237,7 @@ SUITE: tuple[str, ...] = (
     "pi-git-guard", "pinact", "pinact-yaml", "pinact-lint-rules", "pinact-expressions", "pinact-security",
     "pinact-fix", "pinact-pins", "pi-profile", "policy-generated", "policy-generator", "orchestrate", "sbx",
     "reset-agents", "pre-push", "worktree-remove", "worktree-retire", "disk-pressure", "pi-disk-pressure", "campaign-closeout",
-    "zsh-shim", "mdtool-suite", "decide", "skills", "project-skills", "skills-campaign",
+    "zsh-shim", "harness-lean", "mdtool-suite", "decide", "skills", "project-skills", "skills-campaign",
 )
 
 BY_ID = {check.id: check for check in REGISTRY}

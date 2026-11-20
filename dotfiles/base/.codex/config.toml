@@ -8,15 +8,13 @@ service_tier = "default"
 model = "gpt-6.2-sol"
 model_reasoning_effort = "medium"
 
-notify = ["/Users/josh/.codex/computer-use/Codex Computer Use.app/Contents/SharedSupport/SkyComputerUseClient.app/Contents/MacOS/SkyComputerUseClient", "turn-ended"]
-
 [features]
 goals = true
 memories = true
 apps = false
 plugins = false
 remote_plugin = false
-# No auto-started daemon for ordinary CLI sessions. Do not disable app-server internals.
+# The launch shim also uses --no-daemon to prevent reusing a running daemon.
 daemon_auto_start = false
 
 prevent_idle_sleep = true

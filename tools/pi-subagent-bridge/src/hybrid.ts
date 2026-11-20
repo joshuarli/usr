@@ -2,8 +2,8 @@ import { cancelFxChildren, fxBudget, fxChildren, fxResult, type FxAdapter, type 
 import type { PiAdapter } from "./pi-adapter.ts"
 import { randomUUID } from "node:crypto"
 import { execFileSync } from "node:child_process"
-import { accessSync, constants, existsSync, mkdirSync, readFileSync, renameSync, rmdirSync, rmSync, statSync, writeFileSync } from "node:fs"
-import { dirname, join, resolve } from "node:path"
+import { existsSync, mkdirSync, readFileSync, renameSync, rmdirSync, rmSync, statSync, writeFileSync } from "node:fs"
+import { dirname, join } from "node:path"
 import { PreAdmissionError, checkedWorktree } from "./bridge.ts"
 import { cancelCommand, commandResult, commandSession, processStartTime, startCommand, type CommandRun } from "./command.ts"
 import { codexAvailable, codexResult, codexSession, cancelCodex, startCodex } from "./codex.ts"
@@ -28,6 +28,7 @@ import type { Access, PlannedRun } from "./launch.ts"
 import { ROOT_PLANS, type CliExecutor, type CliPin, type PiSelection, type RootPlan } from "./policy.ts"
 import { parseScope, requiredText as required, type Scope } from "./scope.ts"
 import { beforeDeadline, deadlineTimeout, steerCleanup, steerDeadline, SteerDeadlineError } from "./steer-deadline.ts"
+import { workerEnvironment } from "./worker-env.ts"
 export type RoutedTier = BridgeTier
 export type { Scope } from "./scope.ts"
 const TERMINATION_WAIT_MS = 2000
@@ -122,11 +123,11 @@ async function withSessionLock<T>(cwd: unknown, id: unknown, work: (session: Ses
   }
 }
 function cmdAvailable(): boolean {
-  for (const part of (process.env.PATH || "").split(":")) {
-    if (!part) continue
-    try { accessSync(resolve(part, "cmd"), constants.X_OK); return true } catch { /* continue */ }
-  }
-  return false
+  try {
+    // A PATH shim can exist before its underlying executable is installed.
+    execFileSync("cmd", ["--version"], { timeout: 5000, stdio: "ignore", env: workerEnvironment() })
+    return true
+  } catch { return false }
 }
 function prompt(s: Session): string {
   return [

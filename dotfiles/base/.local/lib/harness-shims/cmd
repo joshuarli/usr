@@ -1,0 +1,6 @@
+#!/bin/sh
+# Sync owns updates. Keep startup notices and telemetry out of CLI sessions.
+export CMD_DISABLE_NOTICES=1
+export COMMANDCODE_SKIP_UPDATES=1
+export DO_NOT_TRACK=1
+exec "$HOME/.local/bin/cmd" "$@"

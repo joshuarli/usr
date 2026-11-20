@@ -1,76 +1,74 @@
-# Lean harnesses: native tool surfaces before wrapper shims
+# Lean harness defaults
 
-Goal: keep coding, MCP, the `agent-browser` skill/CLI, native expert subagents,
-the Pi bridge, session lifecycle hooks, and session recovery. Remove
-unneeded *model-facing* browser/computer-use tools and bundled prompt material
-where there is a verified switch. Do not confuse reduced tool-schema tokens
-with smaller installed binaries, lower process RSS, or lower API latency.
+Keep coding tools, MCP, shared skills, subagents, session hooks and
+`agent-browser`. Disable unused browser integrations and background work
+with supported switches. These defaults do not shrink installed binaries;
+token, RSS and latency improvements need separate measurement.
 
-This is intentionally **not** a universal `PATH` interception shim. The
-clients use different config formats, many are installed into
-`~/.local/bin` by sync, and some use themselves as headless SDK subprocesses.
-A wrapper can shadow an installed executable, recurse, drop auth/signal
-handling, or silently break bridge launches. A wrapper that just execs the
-original also saves no tokens. Prefer the native mechanism.
+## Launch shims
 
-## Status by harness
+The tracked shims live in `~/.local/lib/harness-shims`. The sh, ish and xshi
+configs put that directory before `~/.local/bin`. Each shim directly execs
+the sync-managed binary in `~/.local/bin`, so installers and vendor updates
+retain ownership of their launchers. No PATH search or binary renaming is
+needed. Programs launched with an absolute binary path, or from a GUI that
+does not inherit this PATH, bypass the shims.
 
-| Harness | Default lean mechanism | Kept intact / limitation |
+| Command | Shim default | Explicit override |
 | --- | --- | --- |
-| Codex | `daemon_auto_start = false` (already set); Apps/plugins/remote plugins already off. Browser, unified computer-use, and computer-use plugin entries now off. The browser-only `node_repl` MCP server is disabled, as is `cua_repl`. | The normal remote MCP servers (`sentry`, `notion`), `pi-subagent-bridge`, `codex-intercom`, multi-agent V2, memory, hooks and CLI remain. The CLI/app-server protocol is **not** stripped from the binary. |
-| Claude Code | `disableBundledSkills = true`, and deny only the built-in `claude-in-chrome` MCP server. Remote Control and Workflows were already disabled. | Normal MCP, project/user/plugin skills, LSP plugins, native subagents, worktree hooks, and agent-browser remain. `--chrome` will not override the MCP deny; undo this opt-out before using native Chrome. |
-| Pi | Already defaults to four core tools (`read`, `bash`, `edit`, `write`) with extension/MCP tools governed separately. | No global `--no-tools` or blanket MCP removal; would break Pi-subagent-bridge, web-search extensions and nesting. |
-| Command Code | Existing native-tier agents and tracked minimal settings; taste learning already disabled through host-local config. | No unverified flag injection into `cmd`; native children and subscriptions must keep working. |
-| OpenCode | Already uses a small TUI config and native tier agents. No stock Chrome/Computer Use tool configured. | Keep `webfetch` and `websearch` independent of browser automation, and leave native subagent tools intact. |
-| Muse Code | Telemetry already off; known MCP servers explicitly configured. | Keep `sentry` and `notion` MCP and native skills; no verified browser daemon to remove. |
-| Devin CLI | Claude/Cloud config imports already off; explicit bridge guard remains. | Preserve `run_subagent` and headless hooks; no unsupported feature flag. |
-| Antigravity CLI (`agy`) | Settings are rewritten by the upstream CLI, so no durable tracked feature switch. | Preserve Neon/Hydrogen native subagents and shared skills; audit its advertised browser tools on a live host before adding a wrapper or launcher flag. |
-| DeepSeek Harness (`dsh`) | Existing POSIX launcher only selects headless/TUI and the tracked patch. | Do not nest another launcher; no verified redundant browser or daemon process. |
-| Vercel fx | `auto_upgrade = false`, `session_titles = false` already; no tracked browser integration. | Keep skills, agent delegation and the CLI. |
+| `codex` | Adds `--no-daemon`, which avoids both starting and reusing the shared daemon. Does not duplicate an existing flag; leaves explicit `--remote` invocations alone. | Use `~/.local/bin/codex` for the native launcher. |
+| `claude` | Sets `CLAUDE_CODE_ENABLE_CFC=0`, so native Chrome starts off without changing subcommand arguments. | `claude --chrome` explicitly opts back in. |
+| `cmd` | Disables startup notices, the automatic updater and telemetry with `CMD_DISABLE_NOTICES`, `COMMANDCODE_SKIP_UPDATES` and `DO_NOT_TRACK`. | Use `~/.local/bin/cmd` for the native launcher. |
 
-**Important Codex distinction:** upstream labels `browser_use`,
-`browser_use_external`, `browser_use_full_cdp_access`, `computer_use`,
-and `in_app_browser` as *requirements-only* feature gates. Writing those
-keys in `~/.codex/config.toml` would falsely promise enforcement. The
-tracked configuration instead turns off the actual plugin entries and
-browser-backed MCP processes. Administratively disabling the feature gates
-requires a separate system-managed `/etc/codex/requirements.toml` or
-managed policy, not a user launcher shim. We deliberately do **not** touch
-system requirements or the desktop app's own installation.
+`codex-or`, `claude-or` and `claude-ds` inherit these defaults when they
+resolve the underlying command through that PATH. Direct invocation of a
+native launcher bypasses only its shim; tracked configuration still applies.
 
-Native tool inventories may change in upstream releases. Do not add
-undocumented settings or pattern-match tool names to delete things blindly.
-A denied/permission-gated tool may still be present in the model's tool
-catalog: verify **declared tool names and schemas**, not just whether
-execution is denied.
+## Configuration by harness
 
-## Apply and verify
+| Harness | Native configuration and scope |
+| --- | --- |
+| Codex | Keeps `daemon_auto_start=false`, Apps/plugins/remote plugins off, and browser MCP servers `node_repl`/`cua_repl` off. The three browser/computer-use plugin entries are also off if plugins are later re-enabled. Removes the unused Sky Computer Use `notify` process launch; terminal BEL notifications remain. |
+| Claude Code | `disableBundledSkills=true` removes vendor-bundled skills and model-visible built-in commands while retaining personal/project/plugin skills. Existing Remote Control and Workflows opt-outs remain. Chrome is default-off through the shim, rather than permanently denied. |
+| OpenCode v2 | A `browser` deny after the general allow removes the built-in browser Code Mode catalog. Web search/fetch, MCP and native subagents remain. |
+| Devin | `auto_update=false` stops automatic downloads/installation; update checks may still occur. Existing Claude/Cloud import opt-outs remain. |
+| DeepSeek Harness | Its existing launcher sets `DSH_TELEMETRY_DISABLED=1` for both TUI and headless paths. This disables OTel delivery, not the separate session-log contribution plugin. |
+| Pi | Existing offline package policy, four core coding tools and explicit extensions remain. No additional shim or browser toggle needed for this profile. |
+| Muse | Existing telemetry opt-out and MCP configuration remain. No additional browser/tool removal was verified. |
+| Antigravity CLI | Native settings remain upstream-owned. Its documented `/browser` is on demand; no supported persistent browser-off switch was verified. |
+| Vercel fx | Existing automatic-update and generated-title opt-outs remain. No additional browser automation integration was found in the reviewed profile. |
+| Command Code | Existing native-tier agents and host-local taste-learning opt-out remain alongside the shim defaults. |
 
-1. `sh sync plan` to review link reconciliation; then `sh sync` on the
-   intended Mac/Linux host (not in CI or a disposable SDK session).
-2. Start fresh Codex/Claude sessions. In Codex, check `codex features list`,
-   `codex mcp list`, and the loaded plugins; in Claude, inspect `/mcp` and
-   verify native Chrome is not connected. Do a normal MCP call and a
-   `pi-subagent-bridge` scout/worker smoke test.
-3. Compare initial tool lists / model-visible tool-schema token counts and
-   startup process trees against an unmodified host baseline. Check for
-   absent browser/computer-use tools, no unwanted daemon, and intact MCP.
-   Do not claim performance wins before measuring the same model/version.
+Codex's `daemon_auto_start=false` alone still permits attaching to a running
+daemon, and `codex agents` can initiate one; this is why the shim matters.
+Disabling individual plugin entries adds no baseline savings while plugins
+are globally off. The direct MCP opt-outs and removed notification callback
+are independent of that global plugin switch.
 
-Offline guard: `python3 -I -S dotfiles/harness-lean-test.py`. It proves
-the tracked configuration invariants only; it cannot prove a native
-harness's live tool advertisement, plugin load behavior, or process/RSS.
+Codex marks `browser_use`, `computer_use` and related gates as
+requirements-only. CLI parsing accepts these names, but that does not prove
+they control the desktop integrations. This setup disables the configured
+integration sources; it does not install system-managed requirements or
+claim to prohibit every desktop browser entry point.
 
-## Re-enable deliberately
+## Apply and check
 
-- Codex: set the relevant `[plugins.*].enabled` value to `true`,
-  re-enable `[mcp_servers.node_repl]` only if that browser companion is
-  required, and explicitly opt into daemon auto-start only for a workflow
-  that uses it. Keep `cua_repl` disabled unless necessary.
-- Claude Code: remove the `claude-in-chrome` deny entry. Set
-  `disableBundledSkills = false` if you want the upstream bundled skill
-  catalog again. Your own skills remain available either way.
+After updating `~/usr`, review `sh sync plan`, apply with `sh sync`, and
+start a fresh shell/session. `command -v codex`, `command -v claude` and
+`command -v cmd` should resolve to the shim directory. For a POSIX shell,
+`. "$HOME/.config/sh/config.sh"` also refreshes the shared PATH.
 
-This configuration is an ergonomic optimization, not a security boundary:
-project config, upstream updates, and other enabled entry points may expose
-capabilities. Use OS sandbox/permissions for enforcement.
+`python3 -I dotfiles/harness-lean-test.py` checks launcher forwarding and
+failure behavior with fake upstream binaries. `sh dotfiles/dsh-launcher-test.sh`
+checks the existing DeepSeek launcher. These do not authenticate or call
+models. On the intended host, check the fresh tool inventory, make a normal
+MCP call and exercise delegation before attributing performance gains.
+
+## Upstream references
+
+- Codex: [no-daemon option](https://github.com/openai/codex/blob/ead489ac4d06b13a69909173469a17be126348a4/codex-rs/tui/src/cli.rs), [startup decisions](https://github.com/openai/codex/blob/ead489ac4d06b13a69909173469a17be126348a4/codex-rs/tui/src/startup_orchestration.rs), [feature gates](https://github.com/openai/codex/blob/ead489ac4d06b13a69909173469a17be126348a4/codex-rs/features/src/lib.rs).
+- Claude: [environment variables](https://code.claude.com/docs/en/env-vars), [settings reference](https://code.claude.com/docs/en/settings-reference).
+- OpenCode: [browser catalog](https://opencode.ai/docs/tools#browser), [permission ordering](https://opencode.ai/docs/permissions).
+- Command Code: [environment variables](https://commandcode.ai/docs/settings#environment-variables).
+- Devin: [automatic updates](https://docs.devin.ai/cli/reference/configuration/config-file#auto_update-user-only).
+- DeepSeek: [telemetry variables](https://github.com/deepseek-ai/deepseek-harness/blob/master/apps/cli/reference/README.md).

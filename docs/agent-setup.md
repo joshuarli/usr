@@ -72,8 +72,7 @@ Harnesses use native skill metadata and discovery paths. The checker at [`skills
 
 ## Harness configuration
 
-The [lean harness policy](harness-lean.md) removes unneeded built-in browser/computer-use integrations where supported, without replacing coding tools, MCP, subagents, session hooks, or agent-browser. Do not install generic PATH shims over sync-managed binaries: most harnesses need native tool-surface controls, and a wrapper that only forwards arguments does not reduce model context.
-
+The [lean harness defaults](harness-lean.md) use small launch shims alongside native settings to disable unwanted daemon, browser and startup work. The shims live separately from sync-managed binaries; coding tools, MCP, subagents, session hooks and agent-browser remain available.
 
 Codex session defaults remain in its tracked configuration. Delegated work follows the generated policy above. Multi-agent V2 has eight resident-thread slots including the parent; `agents.max_depth` is a V1 setting and does not impose V2 nesting limits. The orchestration contract requires CLI workers to remain leaves.
 

@@ -12,6 +12,11 @@
       "effect": "allow"
     },
     {
+      "action": "browser",
+      "resource": "*",
+      "effect": "deny"
+    },
+    {
       "action": "shell",
       "resource": "pi-subagent-bridge",
       "effect": "deny"

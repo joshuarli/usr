@@ -35,6 +35,7 @@ Run the narrowest check that covers the change. `sh sync check-parallel` runs th
 | `pk` process picker | `python3 -I dotfiles/pk-test.py`, `sh -n dotfiles/base/.local/bin/pk`, `dash -n dotfiles/base/.local/bin/pk`, and `shellcheck -s sh dotfiles/base/.local/bin/pk` |
 | DeepSeek launcher | `sh dotfiles/dsh-launcher-test.sh` and `shellcheck -s sh dotfiles/base/.local/bin/dsh dotfiles/dsh-launcher-test.sh` |
 | Claude API launcher | `sh dotfiles/claude-api-test.sh` and `shellcheck -s sh dotfiles/base/.local/bin/claude-api dotfiles/claude-api-test.sh` |
+| Lean harness launchers and shell PATH | `python3 -I dotfiles/harness-lean-test.py` and `shellcheck -s sh FILE` for each changed match |
 | `ghostty-fda-check` | `sh dotfiles/ghostty-fda-test.sh` and `shellcheck -s sh dotfiles/base/.local/bin/ghostty-fda-check dotfiles/ghostty-fda-test.sh` |
 | a skill or agent definition | `node tools/skills/skills.ts check`, `node tools/skills/skills.ts check --root .agents/skills`, `node --test tools/skills/skills.test.ts`, `python3 -I tools/skills/test_usage.py`, and `python3 -I dotfiles/skills-campaign-test.py`; `node tools/skills/skills.ts generate` refreshes invocation adapters; use the focused check for other agent configuration |
 | model routes, native Pi policy, or generated policy blocks | `node tools/policy/generate.ts --check` and `node --test tools/policy/generate.test.ts`; use `make generate` to refresh projections |

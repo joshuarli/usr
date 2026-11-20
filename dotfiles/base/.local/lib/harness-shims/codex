@@ -1,0 +1,9 @@
+#!/bin/sh
+# Keep local sessions off the daemon; an explicit remote target stays remote.
+for arg do
+	case $arg in
+	--) break ;;
+	--no-daemon|--remote|--remote=*) exec "$HOME/.local/bin/codex" "$@" ;;
+	esac
+done
+exec "$HOME/.local/bin/codex" --no-daemon "$@"

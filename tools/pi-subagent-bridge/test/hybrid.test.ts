@@ -5,6 +5,7 @@ import { execFileSync, spawn, spawnSync } from "node:child_process"
 import { appendFileSync, chmodSync, existsSync, mkdtempSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync, realpathSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { fileURLToPath } from "node:url"
 import { makeHybridBridge, type Scope } from "../src/hybrid.ts"
 import { stateDir } from "../src/git.ts"
 import { inspectStored } from "../src/inspect.ts"
@@ -156,6 +157,28 @@ test("model check reports Codex primary and Command Code pins", async () => {
     await assert.rejects(bridge.modelCheck(f.cwd, "expert"), /Unknown bridge tier/)
     await assert.rejects(bridge.start(f.cwd, "escalate", "expert", f.scope, "Work"), /Unknown bridge tier/)
   } finally { f.close() }
+})
+
+test("Command Code availability requires the executable behind a PATH shim", async () => {
+  const f = fixture(), previous = { HOME: process.env.HOME, PATH: process.env.PATH }
+  try {
+    const m = fake(f.cwd), bridge = makeHybridBridge(piAdapter(m.api), undefined, noCodex)
+    const shims = fileURLToPath(new URL("../../../dotfiles/base/.local/lib/harness-shims", import.meta.url))
+    process.env.HOME = f.root
+    process.env.PATH = shims + ":" + previous.PATH
+    assert.equal((await bridge.modelCheck(f.cwd, "scout")).command_code?.available, false)
+
+    const bin = join(f.root, ".local/bin")
+    mkdirSync(bin, { recursive: true })
+    writeFileSync(join(bin, "cmd"), '#!/bin/sh\n[ "$#" -eq 1 ] && [ "$1" = --version ]\n', { mode: 0o755 })
+    assert.equal((await bridge.modelCheck(f.cwd, "scout")).command_code?.available, true)
+  } finally {
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[key]
+      else process.env[key] = value
+    }
+    f.close()
+  }
 })
 
 
