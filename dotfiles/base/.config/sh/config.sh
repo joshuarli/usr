@@ -19,6 +19,10 @@ export LS_COLORS="su=00:sg=00:ca=00:or=40;31;01:"
 export XDG_CONFIG_HOME="$HOME/.config"
 export XDG_CACHE_HOME="$HOME/.cache"
 export XDG_DATA_HOME="$HOME/.local/share"
+if [ "${TERM-}" = network ]; then
+    TERM=xterm-256color
+    export TERM
+fi
 export HOMEBREW_NO_AUTO_UPDATE="1"
 export HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK="1"
 export HOMEBREW_NO_INSTALL_CLEANUP="1"
