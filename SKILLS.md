@@ -56,9 +56,7 @@ Rule of thumb:
 | `brainstorm [focus]` | Explicit | Survey a repository's real state and surface the top evidence-grounded ideas for what to do next, when you are out of ideas. |
 | `ultratriage` | Explicit | Act as the owner: settle every open RFC and unresolved ticket, update docs and tickets, and report each decision with its reason and next action. |
 
-Use `brainstorm` to find candidate work, `ultrareview` to find defects, `ultratriage` to decide the ticket queue, and `burn-down-the-backlog` to implement it. `brainstorm` proposes; only the owner picks what happens next.
-
-Use `ultrareview` to find the work, `ultratriage` to decide it, and `burn-down-the-backlog` to implement it. Each can run on its own. `ultratriage` ends open to feedback or the choice to start burn-down; it continues straight into implementation only when you have already asked for both. Accepted designs remain open until implemented, and prerequisite work lands before its dependents.
+Use `brainstorm` to find candidate work, `ultrareview` to find defects, `ultratriage` to decide the ticket queue, and `burn-down-the-backlog` to implement it. Each can run on its own. `brainstorm` proposes; only the owner picks what happens next. `ultratriage` ends open to feedback or the choice to start burn-down; it continues straight into implementation only when you have already asked for both. Accepted designs remain open until implemented, and prerequisite work lands before its dependents.
 
 ## Maintenance
 
@@ -85,7 +83,7 @@ A campaign is a long, multi-lane effort run from a design doc. Use them in this 
 | `campaign-preflight` | Explicit | Turn a draft campaign doc into a final plan an agent can run unattended. |
 | `burn-down-the-backlog` | Explicit | Work the starting `TODO.md` queue through `orchestrate`, honoring prerequisites and priority, one commit per closed ticket, with unattended execution. |
 | `deslop` | Explicit | Work one repository's `TODO-DESLOP.md` from the fleet deslop campaign: ground, diagnose, types, tests with coverage and mutation, dead code, findings, report. |
-| `accelerate` | Auto | Speed up a running campaign: measure where wall time went, then fix that one cause and land the next slice. |
+| `accelerate` | Auto | Push a running campaign to feature completion: count what is done, measure where wall time went, cut work that moves no feature toward done, fix the dominant cause, and land the next slice. |
 | `campaign-winddown` | Explicit | Pause a running campaign cleanly: finish in-flight lanes, start nothing new, leave a handoff that survives a reboot. |
 | `cleanup` | Auto | On system disk pressure below 10% free or an explicit request, reclaim only owned completed lanes and known stale scratch. |
 

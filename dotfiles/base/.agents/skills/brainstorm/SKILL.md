@@ -49,9 +49,9 @@ For each surviving candidate record: a one-line pitch, the evidence, what done w
 
 Order by evidence of value weighed against cost and risk. Prefer ideas whose evidence includes an internal pain (a slow path, a repeated operation, an open exposure) over symmetrical speculation. State the shape of the shortlist when it matters: one big unstarted decision plus two small closes out is different from three comparable fixes, and the owner should see that.
 
-## Report
+**The test:** every shortlisted idea traces to cited repository evidence, the list has one top recommendation, and nothing in the repository changed.
 
-Default shortlist size is 3 unless the user named another number. For each: the idea, why now (the evidence), rough effort, what done looks like, and the main risk or unknown. Then:
+**Report:** a shortlist, 3 ideas unless the user named another number. For each: the idea, why now (the evidence), rough effort, what done looks like, and the main risk or unknown. Then:
 
 - **Honorable mentions**: one line each, with their missing evidence or blocker.
 - **Wrong ideas** (when any arose): attractive-sounding candidates the evidence rejects, and why.

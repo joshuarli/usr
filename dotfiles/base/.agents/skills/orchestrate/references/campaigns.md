@@ -1,12 +1,12 @@
 # Campaigns
 
-A campaign is a backlog too large for one session. It succeeds by landing accepted product slices on the integration branch, one after another. Busy agents, doc commits, audits, and steering notes are not progress. Only one measure counts: product changes whose named acceptance checks pass on the integration branch.
+A campaign is a backlog too large for one session. It succeeds by completing features: deliverables that work end to end with their named acceptance checks passing on the integration branch. Accepted product slices, landed one after another, are how it gets there. Busy agents, doc commits, audits, diagnostics, and steering notes are not progress.
 
 Campaign mechanics never expand the authority grant.
 
 ## Default shape: one slice at a time
 
-Run one writer on one slice until it is accepted, then pick the next. Add a second writer only when both slices own disjoint files, including shared contracts, schemas, indexes, and lockfiles, and the integration branch is green. Work that shares core files is serial, however large the backlog. Integration cost grows faster than lane count, and a slice parked unaccepted is worth nothing.
+Run one writer on one slice until it is accepted, then pick the next. Add a second writer only when both slices own disjoint files, including shared contracts, schemas, indexes, and lockfiles, and the integration branch is green. Work that shares core files is serial, however large the backlog. Integration cost grows faster than lane count, and a slice parked unaccepted is worth nothing. Finish a started feature before starting another; three half-done features are worth less than one done.
 
 A slice is one capability with one acceptance command that runs locally in minutes. If a deliverable's proof needs hardware, hosts, or services that are not available, split it. The local part is a slice. The rest goes on the doc's **Needs environment** list, which never blocks local work or the campaign's local completion.
 
@@ -20,7 +20,7 @@ A slice is one capability with one acceptance command that runs locally in minut
 
 Run this after each accepted slice, on resume, and whenever a slice fails twice. It is a short decision, not an audit. Write it down only when the ruling changes, and then only by rewriting **Status**.
 
-1. **What landed?** Name the accepted slices since the last checkpoint. If the answer is none, the method is wrong. Change it now instead of adding lanes or process.
+1. **What landed?** Name the accepted slices and finished features since the last checkpoint. If the answer is none, the method is wrong. Change it now instead of adding lanes or process.
 2. **What limits delivery?** Pick one: implementation, a red check, integration conflicts, an unavailable environment, or an owner decision. Agent turn latency counts as implementation. Many small turns at a high reasoning effort can cost more wall time than every test run combined.
 3. **Ruling.** Continue, narrow the slice, serialize lanes, fix one prerequisite, or park the slice with its cause and retry condition. Ask the owner only for authority or a contract decision.
 
@@ -31,11 +31,14 @@ Run this after each accepted slice, on resume, and whenever a slice fails twice.
 | Tests red on the integration branch | Fix them before any new slice. |
 | Doc or tooling commits outnumber product commits | Freeze the doc and tooling. Deliver. |
 | A slice needs an unavailable environment | Move it to **Needs environment**. Keep going. |
+| Diagnosis, instrumentation, or profiling spans a checkpoint with no fix landed | Narrow to the smallest fix that passes acceptance, or park the slice with its evidence and move to the next feature. |
+| A slice waits on a long build, transfer, or remote job | Work independent ready slices meanwhile. Check the job at the next checkpoint. |
+| A reply would end with a known next step and nothing needed from the owner | Take the step if the campaign's authority covers it. |
 | Many short turns, long time to first token | Batch reads, searches, and edits per turn, lower the child's reasoning effort for routine work, and give lanes larger, fully specified briefs. |
 | Audits, checkpoints, handoffs, or doc rewrites dominate | Stop them. Rewrite **Status** once and deliver. |
 | Checks dominate wall time | Run the narrowest acceptance command per slice, reuse evidence whose inputs are unchanged, and group wider suites at milestones. |
 | Implementation is starved and the ready work owns disjoint files | Add one writer within `perf-gate-ready -s` headroom. |
-| The owner asks about progress | Report landed slices only. |
+| The owner asks about progress | Report finished features and landed slices only. |
 
 ## Run a slice
 

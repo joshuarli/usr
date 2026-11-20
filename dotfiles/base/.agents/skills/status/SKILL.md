@@ -96,3 +96,5 @@ For multiple repos, append:
 - Never delete, retire, reset, or move anything to produce the report.
 
 **The test:** the owner can tell how close the product is to the stated goal without asking a follow-up; every status line names its evidence, every owner decision sits under "Needs the owner", and nothing was changed to produce the report.
+
+**Report:** the standard form above, one block per repo, then **Overall**.
