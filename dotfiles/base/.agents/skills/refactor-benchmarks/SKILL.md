@@ -5,37 +5,26 @@ description: "Apply when benchmarks are synthetic, overly micro, disconnected fr
 
 # Refactor Benchmarks
 
-A benchmark is a claim about how real software performs under real use. Overly micro or synthetic benchmarks mislead: they measure compiler loop-unrolling, early-exit guards, mock closures, or cache hits that never occur in production, while missing the allocation churn, layout latency, and data complexity users actually feel.
-
-This skill reshapes a benchmark suite around representative user workflows and realistic inputs, eliminating synthetic trivialities.
+A benchmark is a claim about how real software performs under real use. Micro or synthetic benchmarks mislead: they measure loop unrolling, early-exit guards, mock closures, or cache hits that never occur in production, and they miss the allocation churn, I/O, and data complexity users actually feel. Reshape the suite around the workflows users wait on and the inputs they actually send.
 
 ## Principles
 
-1. **User workflows over micro-loops:** Measure what users wait on or systems pay for: opening a document, typing with live syntax highlighting, scrolling across pages, full-text search navigation, and multi-cursor batch edits. Never benchmark isolated getters, trivial boolean checks, or single-branch returns in isolation.
-2. **Representative fixtures over synthetic loops:** Replace repetitive synthetic generators (such as modulo-generated repeated lines) with realistic, diverse files: real code across supported languages, real config files, realistic line lengths, mixed ASCII and UTF-8 text, realistic comment and string densities.
-3. **Multi-tier scales:** Measure realistic file and input sizes representing real usage: small (quick configs: a few KB), typical (real modules: 50KB to 500KB), and heavy (large files: 5MB to 25MB).
-4. **Track allocations, not just nanoseconds:** Hot interactive loops (steady-state typing, scrolling a rendered frame) must measure heap allocation counts and bytes (`alloc_count` and `alloc_bytes`). In high-performance software, hot path steady-state operations should ideally perform zero allocations per frame.
-5. **No mock seams or synthetic shortcuts:** A benchmark that passes mock closures returning constant values or operates on empty shells measures the mock, not the engine. Always exercise the actual production layout, viewport, and rendering pipelines.
+1. **User workflows over micro-loops.** Measure what users wait on or systems pay for, end to end through the production path. An editor opens a file, types with live highlighting, scrolls, and searches. A service handles a realistic request mix at realistic concurrency. A CLI runs its common commands on a real tree. A library runs the call sequence its main consumers make. Never benchmark an isolated getter, a boolean check, or a single-branch return.
+2. **Representative fixtures over synthetic generators.** Replace generators that repeat a few canned lines or records with real or realistically varied data: real source, configs, payloads, or datasets, with natural sizes, nesting, encodings, and edge content such as UTF-8 or wide rows.
+3. **Several realistic scales.** Cover the small, typical, and heavy inputs the project actually sees, with sizes taken from real usage, not round numbers.
+4. **Track allocations as well as time** on hot steady-state paths such as a render frame, a request, or a keystroke: allocation count and bytes. Ask whether that steady state should allocate at all.
+5. **No mock seams.** A benchmark that passes mock closures returning constants, or runs on an empty shell, measures the mock. Exercise the production pipeline.
 
 ## Method
 
-1. **Audit existing benchmarks:**
-   - Classify each benchmark: workflow-driven, realistic micro, or synthetic triviality.
-   - Flag benchmarks that take < 50 ns (measuring an if-statement or inline branch), benchmarks that use synthetic generators repeating 5 canned lines, and benchmarks using fake closures or mock callbacks.
-2. **Prune synthetic trivialities:**
-   - Delete benchmarks that measure trivial branch checks, constant-time property reads, or mock implementations.
-   - Merge narrow unit-level micro-benchmarks into meaningful workflow benchmarks where the entire path is exercised.
-3. **Assemble realistic fixtures:**
-   - Use representative multi-language source trees or realistic generated files that exhibit natural syntax variance, nesting, comments, identifiers, and UTF-8 content.
-4. **Write workflow benchmarks:**
-   - **File opening and layout:** Loading file bytes, computing line indices, viewport initialization, and first-frame rendering.
-   - **Interactive typing & steady-state render:** Typing characters in real files with live syntax highlighting, dirty line tracking, and ANSI frame emission. Track both wall time and allocation churn.
-   - **Interactive navigation & scrolling:** Rapid scrolling (viewport shifting, soft-wrap calculation, incremental row diffing).
-   - **Real-world search & replace:** Regex and literal search over realistic documents, match counting, navigation, and replacement batch application.
-   - **Multi-cursor editing:** Concurrent edits across multiple carets in realistic code.
-5. **Calibrate and verify:**
-   - Ensure all benchmarks use `black_box` to prevent compiler dead-code elimination.
-   - Measure separate from setup: prepare buffers and viewports before entering the timed block; do not measure temp file creation or fixture generation inside the timed region.
-   - Verify with the project's benchmark harness (`cargo bench`, `rustybench`, etc.).
+1. **Audit.** Classify each benchmark as workflow-driven, a realistic micro-benchmark of a measured hot spot, or synthetic triviality. Flag sub-50 ns results, canned-line generators, and fake callbacks.
+2. **Prune.** Delete benchmarks of trivial branches, constant-time reads, or mocks. Fold narrow micro-benchmarks into the workflow benchmark that exercises the same path, unless a profile shows that spot dominates a workflow.
+3. **Assemble fixtures** from real or realistically varied data, committed or generated deterministically with a fixed seed.
+4. **Write the workflow benchmarks** for the project's main user journeys, timing wall time and, on hot paths, allocations.
+5. **Calibrate.** Keep setup and fixture generation outside the timed region. Prevent dead-code elimination (`black_box` or the language's equivalent) and confirm the work happened. Run through the project's existing harness.
 
-**Report:** benchmarks pruned, added, or refactored with names and motivations; fixture improvements; measured timing and allocation deltas on representative workflows; and remaining performance limiters discovered.
+Report any before-and-after numbers by [benchmark-checklist](../benchmark-checklist/SKILL.md).
+
+**The test:** every remaining benchmark maps to a named user workflow or a profiled hot spot, runs on realistic data at a realistic scale, and fails to compile away.
+
+**Report:** benchmarks pruned, added, or refactored, each with its workflow; fixture changes; timing and allocation deltas on representative workflows; and limiters found.

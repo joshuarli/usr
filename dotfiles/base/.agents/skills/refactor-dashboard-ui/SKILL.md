@@ -1,6 +1,6 @@
 ---
 name: refactor-dashboard-ui
-description: "Apply when a dashboard or admin UI is overwhelming, hard to act on, or not yet built on @laputa-systems/ui-dashboard. Rebuild it around the reader's next action, using ~/d/stats as the conceptual benchmark. Skip single-component tweaks, chart-only work (use dataviz), and new dashboards with no existing UI to measure."
+description: "Apply when a dashboard or admin UI is overwhelming, hard to act on, or not yet built on @laputa-systems/ui-dashboard. Rebuild it around the reader's next action, using ~/d/stats as the conceptual benchmark. Skip single-component tweaks, chart-only work, and new dashboards with no existing UI to measure."
 ---
 
 # Refactor Dashboard UI
@@ -45,7 +45,7 @@ Tables are the last resort. Use one only on a lookup surface the reader searched
 
 Group first. Give each group a heading, a count, and a one-line note, named for the decision or outcome ("Fix now", "Decide"), not the analysis behind it.
 
-Then pick the form from the data's job. Follow the `dataviz` skill for marks, labels, and checks.
+Then pick the form from the data's job. Label axes and series directly, start bar scales at zero, and keep one scale per comparison.
 
 | The data | Use |
 | --- | --- |
@@ -62,7 +62,7 @@ Then pick the form from the data's job. Follow the `dataviz` skill for marks, la
 Keep the page quiet: the owner wants minimal and tasteful ([visual restraint](references/owner-preferences.md#visual-restraint)). Clipped or awkwardly wrapped text is a defect ([text must fit](references/owner-preferences.md#text-must-fit)).
 
 - One or two facts per row; identifiers go in a tooltip or disclosure.
-- Run the `dataviz` palette validator rather than trusting the library's series colors.
+- Check series colors for contrast against the background and for distinguishability under color-vision deficiency rather than trusting the library's defaults.
 - Print every charted value as text. Tooltips add detail but must not be the only way to read a value.
 
 ## Method

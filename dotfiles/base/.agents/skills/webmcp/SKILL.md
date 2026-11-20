@@ -39,6 +39,7 @@ assume its results or security annotations match agent-browser's CDP domain.
 Attached Helium builds may lack the experimental WebMCP CDP domain; the
 `webmcp_unsupported` response is expected, not a reason to disable
 bctl's sandbox or switch to an unrelated browser without authorization.
+
 ## UI SDK support
 
 UI SDK's `registerTools(agent, { allow })` is one implementation of this
@@ -47,6 +48,7 @@ standard. It exposes `snapshot`, `query` and `act` from the component bridge.
 and needs `--allow-write` plus any site-side per-step approval. Read each
 tool's actual schema from `list` instead of inventing arguments. Neither
 UI SDK nor WebMCP itself needs to be installed into the agent harness.
+
 ## Discover
 
 1. Use `sh sync tools bctl` to install the bctl release if it is not present
