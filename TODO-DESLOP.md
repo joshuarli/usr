@@ -15,25 +15,9 @@ The tooling pass is incomplete. DSLP-3 and DSLP-5 remain open: the existing ty p
 - **Verification:** `make test` and `make lint` passed with isolated home and config, Python 3.15.1 and Node 26.13.1. Earlier runs exposed Python 3.9 and missing scratch Git identity; both environment prerequisites were corrected for the passing run. CI minutes, coverage, mutation counts, and live provider behavior are unmeasured.
 - **Review:** cumulative diff reviewed. The stale SDK failure note in AGENTS.md was corrected. No other demonstrated regression was found. No shared-file change was made; unavailable audit tools are recorded in DSLP-10.
 
+Types and Dead code close on the existing rules: the adopted profile (`make lint`: ruff and ty as configured) is clean and gains no setting, because the 175 diagnostics of a fully strict ty run are candidate findings without a defect witness ([scans](docs/verification/deslop-scans.md)). Vulture is discovery-only under the Tier A checkpoint (more than half of its findings are dynamic-use false positives); the confirmed dead pinact helpers were removed and the dynamic bridge entries recorded.
+
 ## Tickets
-
-### DSLP-3 · P2 · Types: strict profile and typing findings
-
-- **Area:** deslop · types
-- **Where:** type checker and lint configuration; Python/TypeScript sources
-- **Problem:** The strict-profile candidates in the deslop skill's tools reference have not been measured here.
-- **Recommendation:** Run the deslop Types step. Accept: clean at the adopted profile, escape hatches not increased, witnesses recorded.
-- **Fix with:** deslop
-- **Effort:** M
-
-### DSLP-5 · P2 · Dead code: tools and debloat
-
-- **Area:** deslop · dead code
-- **Where:** whole repository
-- **Problem:** No dead-code scan has run.
-- **Recommendation:** Run the deslop Dead code step. Accept: tools clean or allowlisted with reasons; walk-backs filed as Needs owner tickets.
-- **Fix with:** deslop
-- **Effort:** M
 
 ### DSLP-8 · P3 · Wake-on-LAN file input drops compact MAC addresses
 
