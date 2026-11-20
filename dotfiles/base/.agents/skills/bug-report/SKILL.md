@@ -24,6 +24,7 @@ A report is short, exact and reproducible. Every sentence is a verified fact. On
      - Paste the decisive output lines verbatim.
   4. **Fix** (pull requests only): what changed and why, in at most three sentences, naming `laputa-systems/REPO@<40-hex commit>` when it is a fork candidate.
   5. **Tested**: that the shown reproduction ran unchanged against both commits, plus the project's own checks that passed. Add a benchmark table only when the change can affect performance, with method, sample count and spread.
+  6. End with the line `Regression bisection available upon request.` Do not bisect for the report.
 
 ## Wording
 
