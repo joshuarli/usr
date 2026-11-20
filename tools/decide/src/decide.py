@@ -1276,7 +1276,7 @@ def build_parser():
             text = super().format_help()
             marker = "Examples:\n"
             sections = []
-            for name, command in subcommands.choices.items():
+            for command in subcommands.choices.values():
                 sections.extend([command.format_usage().strip(), command.description or "", *(
                     f"  {', '.join(action.option_strings) or action.dest}: {action.help or action.dest}"
                     for action in command._actions if action.dest != "help"), ""])

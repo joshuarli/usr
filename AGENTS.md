@@ -44,3 +44,23 @@ watcher left overnight is a bug in your session, not someone else's problem
 to discover. Never kill, `pkill`, or `killall` processes you did not start;
 if someone else's work saturates the host, report the load and work around
 it instead of touching it.
+
+## Verification
+
+Run with `TMPDIR="$PWD/.work/tmp"` and Python 3.10+; this host uses Python 3.15 via `/opt/homebrew/bin`.
+- `make test`: first complete run 198s, warm 209s; `make lint`: 20s. Busy-host observations, not performance gates.
+- `sync` CLI, links and ownership formats: `tools/sync/test_main.py`, `test_links.py`, `test_integration.py`, `test_uninstall.py`.
+- `sync` installers, archives and companion configuration: `tools/sync/test_installer.py`, `test_ffmpeg_runtime.py`, `test_companions.py`.
+- `pinact` CLI, workflow YAML and action pins: `tools/pinact/test_pinact.py`, `tools/pinact/tests/`.
+- `mdtool` CLI and Markdown formats: `tools/mdtool/tests/mdtool-test.sh`; `decide` CLI and JSON: `tools/decide/tests/test_decide.py`.
+- `todo` CLI and backlog format: `tools/todo/tests/test_todo.py` (not in `make test`).
+- Pi bridge CLI, provider processes and session records: `tools/pi-subagent-bridge/test/`; full suite requires its documented development install.
+- Pi release and runtime formats: `tools/pi/test_release_install.py`, `test_offline.py`, `test_runtime_profiles.py`.
+- Policy generation and projections: `tools/policy/generate.test.ts`; skills metadata: `tools/skills/skills.test.ts`.
+- Alpine provisioner CLI and configuration: `host/alpine/tests/test_provision.py`, `test_tuning.py`; VM journey is separate.
+- macOS setup sequence: `host/macos/sync-test.py`; macOS utilities: `host/macos/macos-test.py`, `lean-test.py`.
+- `intercom-tailnet` CLI: `tools/intercom-tailnet/test_intercom_tailnet.py`; font utilities, `src/wol.py`, `src/su-exec.c`: none.
+- Network endpoints and live provider behavior: none; fixture checks do not establish live service behavior.
+- Performance workload: `cd tools/pi-subagent-bridge && npm run bench:runtime` compares local adapter/bridge samples; no repository-wide workload.
+- Vendored PyYAML revision and source: `tools/pinact/src/pinact/_vendor/yaml/PROVENANCE.txt`.
+- Further component commands, platform prerequisites and fixture limits: `docs/development.md`.

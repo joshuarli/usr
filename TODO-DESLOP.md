@@ -1,5 +1,5 @@
 Prefix: DSLP
-Next: 6
+Next: 7
 
 Deslop campaign backlog ([plan](https://github.com/laputa-systems/stuff/blob/main/docs/campaigns/deslop.md), tier C). One agent works this file with the `deslop` skill: take the lowest-numbered open ticket whose area does not start with `Needs owner ·`. After DSLP-5, work the open P1 and P2 findings, then fill in `## Report` below.
 
@@ -8,15 +8,6 @@ Deslop campaign backlog ([plan](https://github.com/laputa-systems/stuff/blob/mai
 Not started.
 
 ## Tickets
-
-### DSLP-1 · P2 · Ground: baseline, boundaries, and CI test entry point
-
-- **Area:** deslop · ground
-- **Where:** AGENTS.md, Makefile, .github/workflows/
-- **Problem:** Base d42bab9; code lines Python 34.1k, TypeScript 8.1k (fleet/loc/v1, vendored included); timings not yet measured. CI does not run make test: runs tests directly on pull requests; run make test or make test-ci instead so CI and local verification share one entry point. The root Makefile has no test target. Open fleet lint findings: mdtool 70, gha-syntax 4, gha-lint-workflow 1, language-tags 1, make-clean-target 1, make-lint-target 1, owned-tool-support 1, topics 1. Perf gate: decide in Ground whether a user-visible hot path needs a workload.
-- **Recommendation:** Run the deslop Ground step. Accept: CI runs make test and is green, and AGENTS.md has a Verification section.
-- **Fix with:** deslop
-- **Effort:** M
 
 ### DSLP-2 · P2 · Diagnose: ultrareview into this backlog
 
@@ -52,5 +43,14 @@ Not started.
 - **Problem:** No dead-code scan has run.
 - **Recommendation:** Run the deslop Dead code step. Accept: tools clean or allowlisted with reasons; walk-backs filed as Needs owner tickets.
 - **Fix with:** deslop
+- **Effort:** M
+
+### DSLP-6 · P2 · Investigate offline Pi Intercom initialization failure
+
+- **Area:** Needs environment · Pi offline acceptance
+- **Where:** tools/pi/test_offline.py, tools/pi/verify-extensions.mjs
+- **Problem:** On macOS the SDK offline initialization test reports missing intercom_send with Node 26.12.0 and the CI-pinned 26.13.1; the same failure reproduces at base 7f9e2af864dd9a7f5f4c6fbcce8c2cc05a5a7f62 and candidate with the same pinned release cache.
+- **Recommendation:** Inspect the pinned extension and SDK binding and reproduce in CI before changing the acceptance test.
+- **Fix with:** root-cause
 - **Effort:** M
 
