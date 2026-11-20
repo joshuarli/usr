@@ -38,6 +38,16 @@ A blocker means the task cannot be completed correctly without repairing the too
 
 If the broken tool is needed to repair itself, use a scoped escape (building kache without its wrapper, running `todo` with a known-good Python), record it, and restore the normal path afterwards. Do not chain repair campaigns. When access or evidence runs out, persist the reproduction and the precise blocker, finish independent work, and report what remains.
 
+## Third-party defects
+
+Repositories outside the `joshuarli` and `laputa-systems` namespaces are not ours to post in. Opening an issue, pull request, comment or review there needs Joshua's explicit consent for that post; a general grant such as "take your recommendations" or run-until-done authority is not consent. When a task finds a defect in a third-party project:
+
+1. Fork it into `laputa-systems` with `gh repo fork OWNER/REPO --org laputa-systems --clone=false`, or reuse the existing fork. Enable its issues if they are off.
+2. Fix it there from a worktree, on a branch based on the exact upstream revision the consumer uses, with a regression test, and run the project's own checks. Keep one branch per upstream candidate so each can be offered separately.
+3. Switch the consumer to the fork at the fixed commit through its normal pin (a Cargo `git` + `rev` dependency, a vendored tree recorded with the fork URL and revision, a lockfile entry), and verify the consumer.
+4. File an issue in the fork titled `Upstream draft: …` with the label `upstream-draft`. It holds the text that would go upstream, written with the `bug-report` skill, plus the fix branch and commit and whether an upstream issue or pull request is suggested. Link any related upstream issues instead of commenting on them.
+5. Report the draft. Joshua decides whether and how it goes upstream.
+
 ## Releases
 
 Release only when the blocked consumer cannot use the fix through a local build or the existing distribution path. Follow the repository's live release workflow and the consumer's pins; use `repomod release` where it applies. Verify the commit a dispatched workflow ran, wait for its real result, check artifact provenance and checksums, update only the relevant pins, install, and retry. A dispatch, tag, or asset name is not a successful release. Never publish to crates.io, npm, or PyPI because a manifest exists, and never mass-release the fleet.

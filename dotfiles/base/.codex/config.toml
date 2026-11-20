@@ -57,7 +57,7 @@ screen_reader_detection_done = true
 
 [tui.model_availability_nux]
 gpt-6-astra = 4
-"gpt-6.1-sol" = 1
+"gpt-6.1-sol" = 2
 "gpt-6.2-sol" = 4
 
 [model_providers.openrouter]
@@ -331,6 +331,12 @@ trusted_hash = "sha256:4aeeadc7be8a7a6004290c2fd1a324665b307ca52cb3aa034c47d75b7
 
 [hooks.state."/Users/josh/.codex/config.toml:subagent_start:0:0"]
 trusted_hash = "sha256:6addc2b76b0d03f8ccae0e34a8ed110d828d280eddb43ac59c326ad281a72602"
+
+[hooks.state."/Users/josh/.codex/config.toml:post_tool_use:0:0"]
+trusted_hash = "sha256:879bf979065acd4c39c88cb0ba5528fdf46e830681fdd6f3a5bfebf65125ae9b"
+
+[hooks.state."/Users/josh/.codex/config.toml:session_start:1:0"]
+trusted_hash = "sha256:de2123e185986d071fbd8e37fc599873fae2cb8dc612fc027d2ce5336871fb89"
 
 [desktop]
 followUpQueueMode = "steer"
