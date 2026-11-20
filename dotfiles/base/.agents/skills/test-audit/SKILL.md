@@ -5,7 +5,7 @@ description: "Apply when asked to review tests for weak, redundant, or implement
 
 # Test Audit
 
-Judge tests in a bounded scope one at a time, or reshape a whole suite when the scope is the suite. Few tests, wide reach, deterministic and isolated, protecting behavior at the boundary users and callers touch — not a mirror of the code. Optimize for confidence, not deletion count.
+Judge tests in a bounded scope, or reshape a suite when the scope is the suite. Few tests, wide reach, deterministic and isolated, protecting behavior at the boundary users and callers touch — not a mirror of the code. Optimize for confidence, not deletion count.
 
 ## Audit
 
@@ -20,7 +20,7 @@ Judge tests in a bounded scope one at a time, or reshape a whole suite when the 
 
 ## Keep, fix, or cut
 
-**Retain** tests that independently guard a public API, protocol, config, migration, storage, security, platform behavior, default, wire or prompt bytes, package or release boundary, observable call order, or a regression with a credible failure mode. Keep a source-inspection test only when it is the cheapest guard and survives identifier-only refactors. A failing baseline may be a product defect; understand it first. Static, slow, or refactor-sensitive tests are not deletable for those reasons alone. A unit survives only when it guards large-input-space logic (parsers, codecs, state machines, math) the boundary cannot reach cheaply, ideally as a property or table test.
+**Retain** tests that independently guard a public API, protocol, config, migration, storage, security, platform behavior, default, wire or prompt bytes, package or release boundary, observable call order, or a regression with a credible failure mode. Keep source inspection only as the cheapest guard that survives renames. A failing baseline may be a product defect; understand it first. Static, slow, or refactor-sensitive tests are not deletable for those reasons alone. A unit survives only when it guards large-input-space logic (parsers, codecs, state machines, math) the boundary cannot reach cheaply, ideally as a property or table test.
 
 **Cut.** Getters, constructors, wiring, config defaults no caller depends on, one-line delegations. Mock-heavy tests asserting calls rather than outcomes. Several tests for one contract across layers; keep the outermost that pins it. Snapshot or fixture files nobody reads; keep a snapshot only when a human reviews its diff. Ceremony: base classes, builders, helpers used by one or two tests, test-only exports or seams. Remove the seam when its last test goes.
 

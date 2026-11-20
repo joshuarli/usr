@@ -26,7 +26,7 @@ Review the requested path or change, or the repository when none is named, for l
 3. **Sweep every lens below.** Read code, not only search results. Dead-code checks go first; always cover the structural lenses. For a scope too broad to hold, use `orchestrate` with one read-only worker per subsystem and give it all lenses, the mechanism map, and the finding format. Use a native `expert` subagent for cross-cutting design.
 4. **Prove and rank.** Prove no supported caller depends on a proposed cut. For a walk-back, state the loss and judge whether it costs less than what goes. Rank by reader load removed times confidence, not effort; merge common causes and cap each tier at ten. Include the strongest structural findings. An empty structural list requires a complete sweep.
 5. **Confirm.** Present the findings and stop. The owner can accept all, select some, or reject them. File only deferred work to TODO.
-6. **Apply.** Change only confirmed items, one logical change at a time, running its narrowest check and reverting a removal that breaks it. Run no formatters, commits, or pushes. Stop for any contract change the owner did not approve.
+6. **Apply.** Change only confirmed items, one logical change at a time, running its narrowest check and reverting a removal that breaks it. Run no formatters. Stop for any contract change the owner did not approve.
 
 ## Lenses
 

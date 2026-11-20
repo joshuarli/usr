@@ -9,7 +9,7 @@ A dashboard is working when a reader can say within seconds what to do next, how
 
 ## Requirements
 
-- Build on `@laputa-systems/ui-dashboard`. Read the installed `README.md`, `dist/index.d.ts`, and `dist/styles.css` first, never memory. Solid apps use the components; static HTML emits the documented `ui-*` structure.
+- Build on `@laputa-systems/ui-dashboard`. Read the installed `README.md`, `dist/index.d.ts`, and `dist/styles.css` first. Solid apps use the components; static HTML emits the documented `ui-*` structure.
 - When the project does not have the package yet, follow [installing the package](references/install.md).
 - Write app CSS only for what the library lacks, and build it from `--ui-*` tokens. Add no second palette, type scale, or dark theme. Do not restyle `ui-*` internals; set documented input tokens instead, such as `--ui-side-width`.
 - Draw charts as small app SVG primitives; add no chart library for a few static series.
@@ -45,7 +45,7 @@ Tables are the last resort. Use one only on a lookup surface the reader searched
 
 Group first. Give each group a heading, a count, and a one-line note, named for the decision or outcome ("Fix now", "Decide"), not the analysis behind it.
 
-Then pick the form from the data's job. Label axes and series directly, start bar scales at zero, and keep one scale per comparison.
+Then pick the form from the data's job. Label series directly and start bars at zero.
 
 | The data | Use |
 | --- | --- |
@@ -62,7 +62,7 @@ Then pick the form from the data's job. Label axes and series directly, start ba
 Keep the page quiet: the owner wants minimal and tasteful ([visual restraint](references/owner-preferences.md#visual-restraint)). Clipped or awkwardly wrapped text is a defect ([text must fit](references/owner-preferences.md#text-must-fit)).
 
 - One or two facts per row; identifiers go in a tooltip or disclosure.
-- Check series colors for contrast against the background and for distinguishability under color-vision deficiency rather than trusting the library's defaults.
+- Check series colors for contrast and color-blind distinguishability; do not trust library defaults.
 - Print every charted value as text. Tooltips add detail but must not be the only way to read a value.
 
 ## Method

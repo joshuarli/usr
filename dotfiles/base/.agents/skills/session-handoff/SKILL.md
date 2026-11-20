@@ -13,7 +13,7 @@ Export the current task or one explicitly named local coding-agent session as a 
 
 ## Recover the work
 
-- For `/session-handoff <agent> <session-id>`, follow `resume-session`'s **Locate the exact session** procedure to resolve and inspect that session, including active branch ancestry. Read only the relevant events. Do not substitute another session or treat unverified summaries as facts. Stop and report if source evidence is unavailable.
+- For `/session-handoff <agent> <session-id>`, follow [`resume-session`'s session locator](../resume-session/references/locate.md) to resolve and inspect that session, including active branch ancestry. Read only the relevant events. Do not substitute another session or treat unverified summaries as facts. Stop and report if source evidence is unavailable.
 - For `/session-handoff current`, use the active conversation and current repository. If its project or changes are inaccessible, label those fields unverified rather than guessing.
 - Inspect the actual worktree when available (`git status`, HEAD, changed files, and focused tests). Reconcile session claims against live files and commits. A historical claim is not proof that a change landed.
 
