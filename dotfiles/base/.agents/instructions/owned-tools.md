@@ -55,11 +55,11 @@ A draft is short, exact and reproducible; every sentence is a verified fact. One
 - **Title**: `area: defect` in the project's own convention, lowercase, no trailing period.
 - **Body**, in this order, omitting any section with nothing verified to say:
   1. One paragraph: the defect and its consequence, pinned to `OWNER/REPO@<40-hex commit>` with `path:line` links at that commit. Name releases only alongside their commit.
-  2. `Reproduction`: the two commands, then a self-contained Dockerfile. Pin the base image by digest, fetch sources by full commit (`ADD https://codeload.github.com/OWNER/REPO/tar.gz/<sha>`), and make the final `RUN` or entrypoint assert the defect, so the build or run fails on the base commit and passes on the fix. Paste the decisive output lines verbatim.
+  2. `Reproduction`: the commands, then the smallest self-contained, pinned environment that exercises the defect. Default to a Dockerfile: base image pinned by digest, sources fetched by full commit (`ADD https://codeload.github.com/OWNER/REPO/tar.gz/<sha>`). When the defect depends on the CPU, kernel or devices, run it under QEMU instead (for example TCG with `-cpu Haswell,-bmi2`), with the QEMU version, machine and CPU flags exact and any guest image pinned by checksum; a Dockerfile that builds that QEMU run is fine. Either way the final step asserts the defect, failing on the base commit and passing on the fix. Paste the decisive output lines verbatim.
   3. `Fix` (pull requests only): what changed and why, in at most three sentences, naming `laputa-systems/REPO@<40-hex commit>`.
-  4. `Tested`: exact toolchain versions, host `uname -srvm`, and the statement that the shown Dockerfile was run unchanged against both commits. Add a benchmark table only when the change can affect performance.
-- No hedges or unverified scope: no "some", "may", "probably", "older versions", or CPU, OS or configuration classes the reproduction did not exercise. A claim the Dockerfile cannot show needs a `path:line` at the pinned commit, or it is cut.
-- Before filing, run the Dockerfile exactly as pasted on a clean build and confirm the outputs quoted.
+  4. `Tested`: exact toolchain versions, host `uname -srvm`, and the statement that the shown reproduction was run unchanged against both commits. Add a benchmark table only when the change can affect performance.
+- No hedges or unverified scope: no "some", "may", "probably", "older versions", or CPU, OS or configuration classes the reproduction did not exercise. A claim the reproduction cannot show needs a `path:line` at the pinned commit, or it is cut.
+- Before filing, run the reproduction exactly as pasted on a clean build and confirm the outputs quoted.
 
 ## Releases
 
