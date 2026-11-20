@@ -24,6 +24,7 @@ import sys
 import tarfile
 import tempfile
 from uuid import uuid4
+import zlib
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import pi_offline  # noqa: E402
@@ -304,7 +305,7 @@ def install_companion(pin: dict, cache: Path, destination: Path, name: str) -> b
         stage.mkdir()
         try:
             manifest = _extract(archive, stage)
-        except tarfile.TarError as exc:
+        except (tarfile.TarError, zlib.error) as exc:
             die(f"companion archive is not a valid tar.gz: {name}: {exc}")
         if manifest.get("name") != f"@dataforxyz/{name}" or manifest.get("version") != entry["version"]:
             die(f"companion archive identity mismatch: {name}")

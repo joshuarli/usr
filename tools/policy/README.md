@@ -32,7 +32,7 @@ Antigravity native agent tier selectors plus synchronized global instructions.
 `policy` prints that JSON without reading credentials or probing providers.
 Live availability belongs to `worker_model_check`.
 The installed `pi-subagent-bridge policy` command exposes the same pure export.
-`subagent-visualization` renders [`docs/subagents.md`](../docs/subagents.md), the
+`subagent-visualization` renders [`docs/subagents.md`](../../docs/subagents.md), the
 markdown decision graph of the delegation architecture, from the same typed
 export; `check-generated` verifies it stays current.
 

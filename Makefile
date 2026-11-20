@@ -4,7 +4,7 @@ SHELL := /bin/sh
 CF ?= cf
 NODE ?= node
 
-.PHONY: help deploy-setup.sh generate check-generated policy subagent-visualization skills-check skills-generate
+.PHONY: help deploy-setup.sh generate check-generated policy subagent-visualization skills-check skills-generate test lint
 
 help: ## List targets
 	@awk 'BEGIN {FS = ":.*## "} /^[a-z][a-z0-9.-]*:.*## / {printf "%-16s %s\n", $$1, $$2}' $(MAKEFILE_LIST) | sort
@@ -31,3 +31,18 @@ skills-check: ## Check skill metadata and generated adapters
 
 skills-generate: ## Refresh skill invocation adapters
 	@$(NODE) tools/skills/skills.ts generate
+
+test: ## Run the repository and policy test suites
+	@sh sync check
+	@python3 -I tools/pi/test_release_install.py
+	@python3 -I tools/pi/test_sync_bridge_offline.py
+	@python3 -I tools/sync/opencode-worker-test.py
+	@sh -n dotfiles/base/.local/bin/pk
+	@python3 -I dotfiles/pk-test.py
+	@$(NODE) --test tools/policy/generate.test.ts
+	@$(NODE) --experimental-strip-types --test tools/pi-subagent-bridge/test/devin-provider.test.ts
+	@python3 -I tools/pi/test_runtime_profiles.py
+	@python3 -I tools/pi/test_offline.py
+
+lint: ## Run repository lint checks
+	@./lint

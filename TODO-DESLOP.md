@@ -1,5 +1,5 @@
 Prefix: DSLP
-Next: 6
+Next: 9
 
 Deslop campaign backlog ([plan](https://github.com/laputa-systems/stuff/blob/main/docs/campaigns/deslop.md), tier C). One agent works this file with the `deslop` skill: take the lowest-numbered open ticket whose area does not start with `Needs owner ·`. After DSLP-5, work the open P1 and P2 findings, then fill in `## Report` below.
 
@@ -8,24 +8,6 @@ Deslop campaign backlog ([plan](https://github.com/laputa-systems/stuff/blob/mai
 Not started.
 
 ## Tickets
-
-### DSLP-1 · P2 · Ground: baseline, boundaries, and CI test entry point
-
-- **Area:** deslop · ground
-- **Where:** AGENTS.md, Makefile, .github/workflows/
-- **Problem:** Base d42bab9; code lines Python 34.1k, TypeScript 8.1k (fleet/loc/v1, vendored included); timings not yet measured. CI does not run make test: runs tests directly on pull requests; run make test or make test-ci instead so CI and local verification share one entry point. The root Makefile has no test target. Open fleet lint findings: mdtool 70, gha-syntax 4, gha-lint-workflow 1, language-tags 1, make-clean-target 1, make-lint-target 1, owned-tool-support 1, topics 1. Perf gate: decide in Ground whether a user-visible hot path needs a workload.
-- **Recommendation:** Run the deslop Ground step. Accept: CI runs make test and is green, and AGENTS.md has a Verification section.
-- **Fix with:** deslop
-- **Effort:** M
-
-### DSLP-2 · P2 · Diagnose: ultrareview into this backlog
-
-- **Area:** deslop · diagnose
-- **Where:** whole repository
-- **Problem:** No review has ranked this repository's risks for the deslop pass.
-- **Recommendation:** Run the deslop Diagnose step. Accept: the diff touches only docs, comments, and this file, and every finding names its Fix with.
-- **Fix with:** deslop
-- **Effort:** M
 
 ### DSLP-3 · P2 · Types: strict profile and typing findings
 
@@ -53,4 +35,31 @@ Not started.
 - **Recommendation:** Run the deslop Dead code step. Accept: tools clean or allowlisted with reasons; walk-backs filed as Needs owner tickets.
 - **Fix with:** deslop
 - **Effort:** M
+
+### DSLP-6 · P2 · Investigate offline Pi Intercom initialization failure
+
+- **Area:** Needs environment · Pi offline acceptance
+- **Where:** tools/pi/test_offline.py, tools/pi/verify-extensions.mjs
+- **Problem:** On macOS the SDK offline initialization test reports missing intercom_send with Node 26.12.0 and the CI-pinned 26.13.1; the same failure reproduces at base 7f9e2af864dd9a7f5f4c6fbcce8c2cc05a5a7f62 and candidate with the same pinned release cache.
+- **Recommendation:** Inspect the pinned extension and SDK binding and reproduce in CI before changing the acceptance test.
+- **Fix with:** root-cause
+- **Effort:** M
+
+### DSLP-7 · P2 · Offline bridge fixture mislabels the selected Node release
+
+- **Area:** Needs environment · Pi offline acceptance
+- **Where:** tools/pi/test_sync_bridge_offline.py:25, tools/pi/test_sync_bridge_offline.py:53
+- **Problem:** The fixture accepts any Node major 26 but places that executable in a 26.13.1 managed release; Node 26.12.0 fails sync bridge identity validation before the npm-free behavior is exercised. Reproduced by make test with Node 26.12.0; the same focused test passes with Node 26.13.1.
+- **Recommendation:** Make the fixture select and validate a matching pinned runtime or report the exact prerequisite before seeding the managed release.
+- **Fix with:** root-cause
+- **Effort:** S
+
+### DSLP-8 · P3 · Wake-on-LAN file input drops compact MAC addresses
+
+- **Area:** Wake-on-LAN · file input
+- **Where:** src/wol.py:18, src/wol.py:42
+- **Problem:** The parser accepts compact twelve-digit and dotted MAC addresses, but file input silently skips every line shorter than 17 characters before parsing. Running python3 -I src/wol.py -f FILE with 001122334455 exits 1 with no valid addresses; the same address passed positionally succeeds against loopback. Mixed files silently omit those hosts.
+- **Recommendation:** Pass each nonblank file line to the shared parser and cover compact, dotted, and separated addresses through the CLI.
+- **Fix with:** root-cause
+- **Effort:** S
 
