@@ -7,6 +7,8 @@ description: "Apply when writing a bug report, an issue, an `Upstream draft:` is
 
 A report is short, exact and reproducible. Every sentence is a verified fact. One defect per report.
 
+**The reproduction is self-contained.** A stranger on a clean machine with only Docker (or QEMU) and network access must get the same result by pasting it. It must not depend on anything local to us: no checkouts, worktrees, `.work/` or `.out/` paths, locally built binaries or images, caches, registries or mirrors only we can reach, environment variables, credentials, dotfiles, or files the report does not inline or fetch by pinned URL and checksum. If it needs a file, inline it (heredoc) or fetch it by full commit or checksum.
+
 ## Shape
 
 - **Title**: `area: defect` in the project's convention, lowercase, no trailing period.
@@ -29,7 +31,7 @@ A report is short, exact and reproducible. Every sentence is a verified fact. On
 
 ## Before filing
 
-1. Run the reproduction exactly as pasted, from a clean build, against the base and the fix. Confirm the quoted output matches.
+1. Run the reproduction exactly as pasted, against the base and the fix, from an empty directory with `docker build --no-cache` (or a fresh QEMU scratch directory) and no local build context beyond the pasted files. Confirm the quoted output matches.
 2. Check that every commit is 40 hex characters and every image is pinned by digest.
 3. Post only where you are allowed to. Repositories outside `joshuarli` and `laputa-systems` need Joshua's explicit consent per post; otherwise file it as an `Upstream draft:` issue in the `laputa-systems` fork (see `~/.agents/instructions/owned-tools.md`).
 
