@@ -45,15 +45,6 @@ Not started.
 - **Fix with:** root-cause
 - **Effort:** M
 
-### DSLP-7 · P2 · Offline bridge fixture mislabels the selected Node release
-
-- **Area:** Needs environment · Pi offline acceptance
-- **Where:** tools/pi/test_sync_bridge_offline.py:25, tools/pi/test_sync_bridge_offline.py:53
-- **Problem:** The fixture accepts any Node major 26 but places that executable in a 26.13.1 managed release; Node 26.12.0 fails sync bridge identity validation before the npm-free behavior is exercised. Reproduced by make test with Node 26.12.0; the same focused test passes with Node 26.13.1.
-- **Recommendation:** Make the fixture select and validate a matching pinned runtime or report the exact prerequisite before seeding the managed release.
-- **Fix with:** root-cause
-- **Effort:** S
-
 ### DSLP-8 · P3 · Wake-on-LAN file input drops compact MAC addresses
 
 - **Area:** Wake-on-LAN · file input
