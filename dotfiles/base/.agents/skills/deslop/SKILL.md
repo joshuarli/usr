@@ -53,7 +53,7 @@ Missing evidence leaves the PR unmerged. A purely static or documentary change r
 - Simplify code that only produces equivalent mutants instead of excluding them.
 - The completion review earns its cost (on srv it found unbounded connection threads no test or mutant saw). Test resource bounds wherever a change adds concurrency.
 - PRs target the default branch; some are `master`.
-- Merge only when every check, optional lanes too, has succeeded; `gh pr checks --watch` can return while checks are queued.
+- Merge when every required check has succeeded; advisory lanes are evidence, not gates. `gh pr checks --watch` can return early.
 
 **The test:** another agent can read `## Report` and the merged PRs and know what each step found, what it cost, and what still needs the owner.
 
