@@ -10,7 +10,7 @@ Learned from the owner's corrections while rebuilding dashboards. Each rule fixe
 - One sticky time bar drives every history chart: range presets, drag across any chart to zoom, pan, zoom out, reset, keyboard shortcuts (`z`, `Esc`, `[`, `]`), and the window kept in the URL.
 - Show totals for the visible window above the charts. Use finer buckets, such as monthly instead of quarterly, when the window narrows.
 - When zoomed, scale the y-axis to the visible points plus their nearest neighbours, so lines crossing the edge are not clipped.
-- Benchmark files: `~/d/stats/cloudflare/src/client/components/TimeBar.tsx` and `TimeChart.tsx`.
+- Benchmark files: `~/repos/stats/cloudflare/src/client/components/TimeBar.tsx` and `TimeChart.tsx`.
 
 ## Visual restraint
 

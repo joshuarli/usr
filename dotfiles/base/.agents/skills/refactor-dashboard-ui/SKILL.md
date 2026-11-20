@@ -1,6 +1,6 @@
 ---
 name: refactor-dashboard-ui
-description: "Apply when a dashboard or admin UI is overwhelming, hard to act on, or not yet built on @laputa-systems/ui-dashboard. Rebuild it around the reader's next action, using ~/d/stats as the conceptual benchmark. Skip single-component tweaks, chart-only work, and new dashboards with no existing UI to measure."
+description: "Apply when a dashboard or admin UI is overwhelming, hard to act on, or not yet built on @laputa-systems/ui-dashboard. Rebuild it around the reader's next action, using ~/repos/stats as the conceptual benchmark. Skip single-component tweaks, chart-only work, and new dashboards with no existing UI to measure."
 ---
 
 # Refactor Dashboard UI
@@ -16,7 +16,7 @@ A dashboard is working when a reader can say within seconds what to do next, how
 
 ## Learn from the benchmark
 
-Read `~/d/stats/cloudflare/src/client/pages/` (start with `FleetPage.tsx` and `ProjectsPage.tsx`) and the screenshots in `~/d/stats/cloudflare/test/ui/*-snapshots/` (`.webp`: use `sips`). Copy the ideas, not its components, data, or table density: stats shows live metrics read across columns, not lists a reader works through.
+Read `~/repos/stats/cloudflare/src/client/pages/` (start with `FleetPage.tsx` and `ProjectsPage.tsx`) and the screenshots in `~/repos/stats/cloudflare/test/ui/*-snapshots/` (`.webp`: use `sips`). Copy the ideas, not its components, data, or table density: stats shows live metrics read across columns, not lists a reader works through.
 
 - **Status strip first.** Tiles with an uppercase label, a status dot and word when state matters, one value, one line of context, and a sparkline. Each links to its detail.
 - **Trends and a time window.** Chart every quantity with history, project forward when the data supports it, and drive all history charts from one stats-style time window. Details: [owner preferences](references/owner-preferences.md#trends-and-time).

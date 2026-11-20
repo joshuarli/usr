@@ -1,6 +1,6 @@
 ---
 name: stats-improve
-description: "Use for /stats-improve: find a performance or cost win in a Cloudflare project that ~/d/stats observes (stuff, stats itself, stats-observe, nanoshop-storied, usr-memories, ...) from its production metrics, prove it locally, deploy it, and confirm the effect in the same metrics. Extend ~/d/stats when the evidence it collects is not enough."
+description: "Use for /stats-improve: find a performance or cost win in a Cloudflare project that ~/repos/stats observes (stuff, stats itself, stats-observe, nanoshop-storied, usr-memories, ...) from its production metrics, prove it locally, deploy it, and confirm the effect in the same metrics. Extend ~/repos/stats when the evidence it collects is not enough."
 disable-model-invocation: true
 metadata:
   opencode/autoinvoke: "false"
@@ -10,11 +10,11 @@ metadata:
 
 Production metrics choose the work, a local reproduction proves the change, and the same production metrics confirm it after deploy. This skill applies to one named project at a time. With no project named, ask which one; `statsctl projects` lists them.
 
-The skill grants deploy authority for the target project's Worker and for `~/d/stats` when the request asks for this workflow. It does not cover publishes, data deletion, or settings outside those Workers. Engineering method stays with [make-it-fast](../make-it-fast/SKILL.md) and [benchmark-checklist](../benchmark-checklist/SKILL.md); this skill owns the evidence loop around them.
+The skill grants deploy authority for the target project's Worker and for `~/repos/stats` when the request asks for this workflow. It does not cover publishes, data deletion, or settings outside those Workers. Engineering method stays with [make-it-fast](../make-it-fast/SKILL.md) and [benchmark-checklist](../benchmark-checklist/SKILL.md); this skill owns the evidence loop around them.
 
 ## 1. Orient
 
-Run commands from `~/d/stats` and read its `AGENTS.md`. `pnpm --dir cloudflare -s statsctl help workflow` is authoritative for `statsctl`.
+Run commands from `~/repos/stats` and read its `AGENTS.md`. `pnpm --dir cloudflare -s statsctl help workflow` is authoritative for `statsctl`.
 
 ```sh
 pnpm --dir cloudflare -s statsctl projects
@@ -23,7 +23,7 @@ pnpm --dir cloudflare -s statsctl cost --project P --window 24h --json > .work/t
 pnpm --dir cloudflare -s statsctl observe routes --project P --window 24h   # only for observed services
 ```
 
-Find the project's repository: the one whose `cloudflare.config.ts` (or Wrangler file) names the Worker. Read its instructions, deploy target, and tests before editing. When P is `stats`, the repository is `~/d/stats`, the Worker deploys with `make stats-deploy`, and the tail consumer deploys with `make observe-deploy`.
+Find the project's repository: the one whose `cloudflare.config.ts` (or Wrangler file) names the Worker. Read its instructions, deploy target, and tests before editing. When P is `stats`, the repository is `~/repos/stats`, the Worker deploys with `make stats-deploy`, and the tail consumer deploys with `make observe-deploy`.
 
 Read the cost ledger before choosing a target. Split each line into its requests, CPU, and storage parts. A project billed mostly by request count gets nothing from CPU work, and a CPU line can still hide a latency problem. If health is not healthy, fix collection first; every later number depends on it.
 
@@ -94,7 +94,7 @@ For an aggregate cost claim, use `statsctl compare` or `statsctl verify` with a 
 
 ## 6. Extend stats when the evidence is missing
 
-If a question needed raw SQL that `statsctl` should answer, or a stats number turned out wrong, change `~/d/stats`:
+If a question needed raw SQL that `statsctl` should answer, or a stats number turned out wrong, change `~/repos/stats`:
 
 - the fixed queries in `cloudflare/src/projects/queries.ts`;
 - the parsers in `cloudflare/src/cloudflare/projects/parse.ts`;
