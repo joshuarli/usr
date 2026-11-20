@@ -1,5 +1,5 @@
 Prefix: USR
-Next: 95
+Next: 99
 
 ### USR-83 · P2 · running sessions on two hosts cannot reach each other over intercom
 
@@ -109,6 +109,42 @@ Next: 95
 - **Fix with:** benchmark-checklist
 - **Effort:** S
 
+### USR-95 · P3 · Wake-on-LAN file input drops compact MAC addresses
+
+- **Area:** Wake-on-LAN · file input
+- **Where:** src/wol.py:18, src/wol.py:42
+- **Problem:** The parser accepts compact twelve-digit and dotted MAC addresses, but file input silently skips every line shorter than 17 characters before parsing. Running python3 -I src/wol.py -f FILE with 001122334455 exits 1 with no valid addresses; the same address passed positionally succeeds against loopback. Mixed files silently omit those hosts.
+- **Recommendation:** Pass each nonblank file line to the shared parser and cover compact, dotted, and separated addresses through the CLI.
+- **Fix with:** root-cause
+- **Effort:** S
+
+### USR-96 · P3 · Measure representative tool workflows
+
+- **Area:** Bench · repository workloads
+- **Where:** Makefile, tools/pi-subagent-bridge/experiment/fx/spike.mjs
+- **Problem:** The only declared performance workload compares a local FX bridge fixture; it does not measure representative sync, pinact, mdtool, or other shipped CLI workflows, leaving their performance regressions unmeasured.
+- **Recommendation:** Define reproducible edit and change workloads around representative CLI journeys, with validated inputs and resource measurements.
+- **Fix with:** refactor-benchmarks
+- **Effort:** M
+
+### USR-97 · P3 · Provide unavailable deslop audit tools
+
+- **Area:** Needs environment · deslop tools
+- **Where:** deslop Steps 4–6
+- **Problem:** The test-pyramid, debloat, and bench-pyramid commands are unavailable in this worker environment, so their dedicated audits could not run. The inventory and direct scanner results are recorded under docs/verification.
+- **Recommendation:** Make the audit tools available in an isolated environment and run them against this worktree without adding project dependencies.
+- **Fix with:** deslop
+- **Effort:** S
+
+### USR-98 · P3 · Reject a null companion archive mapping
+
+- **Area:** Pi release · pin validation
+- **Where:** tools/sync/pi_release.py:76, tools/sync/pi_release.py:95
+- **Problem:** A release pin with companions set to null passes _is_pin, but companions then raises TypeError rather than the missing-archives OfflinePiError. A local reproduction using the tracked pin with companions replaced by null printed validation True and TypeError.
+- **Recommendation:** Define the supported absent and null pin states, validate them consistently, and cover loading and companion selection with a failing-first test.
+- **Fix with:** root-cause
+- **Effort:** S
+
 ### USR-90 · P4 · Muse and Devin Pi routes have no FX-side replacement design
 
 - **Area:** Delegation
@@ -144,4 +180,3 @@ Next: 95
 - **Recommendation:** If wanted, package pi-web-access through a pinned release, re-verify its source revision, supply it as a per-tool-granted ACP MCP server for approved roles only, and prove search, fetch, citation and restart offline before any live check.
 - **Fix with:** none
 - **Effort:** L
-
