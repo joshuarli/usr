@@ -7,7 +7,7 @@ Deslop campaign backlog ([plan](https://github.com/laputa-systems/stuff/blob/mai
 
 The tooling pass is incomplete. DSLP-3 and DSLP-5 remain open: the existing ty profile reports 175 first-party diagnostics after excluding vendored PyYAML, and Vulture and Knip findings remain untriaged. [Scanner observations](docs/verification/deslop-scans.md) record the candidates and scope. The [test inventory](docs/verification/deslop-test-inventory.md) records fixture boundaries and unverified live and platform cases.
 
-- **Types:** no new strict settings adopted; Python and TypeScript matching escape-hatch lines are 75 and 201. Full bridge typechecking needs its development environment.
+- **Types:** no new strict settings adopted; Python and TypeScript matching escape-hatch lines are 75 and 201. The full bridge profile passed with pinned declarations supplied in scratch.
 - **Tests:** the inventory is complete. No mutation lane was added. The pinned offline fixture changes have failing-first checks. Branch coverage and a repeat flake baseline were not measured.
 - **Dead code:** eight lines of unreferenced private pinact helpers removed; no dependency removed. Scanner triage is incomplete.
 - **Bench outcomes:** the existing FX fixture entrypoint passed its numeric edit and numeric-string correction workloads with Node 26.13.1. It uses a loopback provider and cannot establish live runtime performance. Gate checks exited 0, but reported a hot external process; timing conclusions are deferred. DSLP-9 tracks missing representative CLI workloads. The `bench-pyramid` tool is unavailable (DSLP-10).
