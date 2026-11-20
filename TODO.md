@@ -1,23 +1,6 @@
 Prefix: USR
 Next: 94
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 ### USR-83 · P2 · running sessions on two hosts cannot reach each other over intercom
 
 - **Area:** Delegation
@@ -26,7 +9,6 @@ Next: 94
 - **Recommendation:** Keep the trust model: enrolled, tailnet-only, credential per host. Remove the per-session ceremony. (1) Run the hub on one always-on host under its existing supervisor, from one documented command. (2) Enroll once per host, not per session, storing the credential at a fixed private path. (3) Have the normal claude/codex/pi launchers join the hub automatically whenever that host credential exists, so every ordinary session is reachable without relaunching through `intercom-tailnet run`. (4) Give `intercom_list` a fleet scope that shows remote sessions by host. (5) Make `intercom-tailnet` find the pinned Node the same way the other usr tools do, so `doctor` works over non-login SSH. Acceptance: two ordinary sessions started normally on the Mac and on threadripper can `intercom_list` each other and exchange `intercom_ask`.
 - **Fix with:** none
 - **Effort:** M
-
 
 ### USR-73 · P3 · The refactor-web-ui skill has only been applied to agentctl
 
@@ -37,7 +19,6 @@ Next: 94
 - **Fix with:** none
 - **Effort:** L
 
-
 ### USR-74 · P3 · Designed UIs lack the required make preview and shared golden dataset
 
 - **Area:** Skills
@@ -46,7 +27,6 @@ Next: 94
 - **Recommendation:** Per repo, on its own request: extract the fixture its browser tests seed into one dataset module, serve it with `make preview`, and add a semantic golden over the same dataset. For stats, check that preview and tests share one dataset before changing anything.
 - **Fix with:** none
 - **Effort:** M
-
 
 ### USR-75 · P3 · clang plus mold host links intermittently segfault and leave truncated artifacts
 
@@ -57,7 +37,6 @@ Next: 94
 - **Fix with:** A reproduced crash with a core or backtrace and the mold/clang versions
 - **Effort:** M
 
-
 ### USR-80 · P3 · Bridge snapshots omit the admitting parent's explicit identity
 
 - **Area:** Delegation
@@ -66,7 +45,6 @@ Next: 94
 - **Recommendation:** Accept an optional explicit admitting-parent identity at admission, persist it in the versioned session record, and expose it unchanged in read-only snapshots and owner status. Keep absent legacy values unknown. Prove round-trip identity, legacy absence and no guessed lineage with fixture tests. Preserve routing, leases, retries and acceptance in usr.
 - **Fix with:** durable-state
 - **Effort:** M
-
 
 ### USR-82 · P3 · todo cannot read backlogs whose tickets carry extra fields
 
@@ -77,7 +55,6 @@ Next: 94
 - **Fix with:** none
 - **Effort:** S
 
-
 ### USR-84 · P3 · bridge MCP worker_start rejects a scope that the client sends as a JSON string
 
 - **Area:** Delegation
@@ -86,7 +63,6 @@ Next: 94
 - **Recommendation:** In worker_start (and other tools with object parameters), accept a string argument that parses to an object of the declared schema, then validate as today; add a test that dispatches the stringified form.
 - **Fix with:** none
 - **Effort:** S
-
 
 ### USR-86 · P3 · Qualify optional copy-on-write worktree and cache seeding
 
@@ -97,7 +73,6 @@ Next: 94
 - **Fix with:** none
 - **Effort:** M
 
-
 ### USR-87 · P3 · FX ACP worker has no live-inference proof on the intended Go DeepSeek route
 
 - **Area:** Delegation
@@ -106,7 +81,6 @@ Next: 94
 - **Recommendation:** After the Go reset run npm run spike:fx -- --live opencode-go (ACP transport, bounded six jobs plus one correction), independently check results, record usage including compaction, then the Contributor Spark scout/mechanic cells.
 - **Fix with:** none
 - **Effort:** M
-
 
 ### USR-88 · P3 · FX 0.0.17 built-in web_fetch cannot be prevented, giving read-only FX tiers public-URL egress
 
@@ -117,7 +91,6 @@ Next: 94
 - **Fix with:** security
 - **Effort:** M
 
-
 ### USR-89 · P3 · FX pin carries workarounds for three 0.0.17 upstream defects that need requalification on upgrade
 
 - **Area:** Delegation
@@ -126,7 +99,6 @@ Next: 94
 - **Recommendation:** When adopting a newer FX release, update pin.json per target, rerun npm run spike:fx -- --local plus experiment/fx/linux.sh arm64 and amd64, and drop each workaround only with a reproduction showing it is fixed.
 - **Fix with:** none
 - **Effort:** M
-
 
 ### USR-90 · P4 · Muse and Devin Pi routes have no FX-side replacement design
 
@@ -137,7 +109,6 @@ Next: 94
 - **Fix with:** architect
 - **Effort:** L
 
-
 ### USR-91 · P4 · FX worker budgets remain at experiment caps of 15 minutes and 20 steps
 
 - **Area:** Delegation
@@ -147,7 +118,6 @@ Next: 94
 - **Fix with:** none
 - **Effort:** S
 
-
 ### USR-92 · P4 · Retiring pi-build would also orphan the agent-intercom companion artifacts
 
 - **Area:** Sync
@@ -156,7 +126,6 @@ Next: 94
 - **Recommendation:** Before any pi-build retirement, move companion packaging and pinning to another pinned release source and verify sync installs them unchanged.
 - **Fix with:** none
 - **Effort:** M
-
 
 ### USR-93 · P4 · FX workers lack the planned pinned research tools (pi-web-access MCP)
 
