@@ -97,6 +97,7 @@ Repo upkeep and getting work merged.
 | `upgrade` | Explicit | Bump dependencies and pins to the newest stable versions, then run focused checks. |
 | `docs-refresh` | Explicit | Bring docs up to date with the code and make them shorter. Edits docs and comments, never behavior. |
 | `settle` | Explicit | Before moving to another computer: find unmerged and local-only work and separate what must travel from what regenerates. |
+| `linux-capsule` | Explicit | Prove a fresh Linux host can set up the repo from scratch: run its bootstrap and full checks in a pristine container from a clean clone, and fix what breaks. |
 
 ## Keep the skills themselves honest
 
