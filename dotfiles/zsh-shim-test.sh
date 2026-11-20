@@ -51,5 +51,20 @@ for shell in "${PWD}/darwin/.local/bin/zsh" "${PWD}/base/.local/bin/bash"; do
     fi
 done
 
+# The shared config must replace TERM values that have no terminfo entry.
+expect_term () {
+    description=$1 given=$2 wanted=$3
+    out=$(HOME="$scratch/home" TERM="$given" sh -c '. "$1"; printf %s "${TERM-}"' sh "${PWD}/base/.config/sh/config.sh")
+    if [ "$out" = "$wanted" ]; then
+        printf 'ok: %s\n' "$description"
+    else
+        printf 'FAIL: %s (wanted %s, got %s)\n' "$description" "$wanted" "$out"
+        nfailed=$((nfailed + 1))
+    fi
+}
+
+expect_term 'network is replaced with a usable terminal' network xterm-256color
+expect_term 'a valid terminal is left alone' xterm-256color xterm-256color
+
 echo "testing finished."
 [ "$nfailed" -eq 0 ]
