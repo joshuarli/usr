@@ -32,6 +32,7 @@ process.env.PI_CODING_AGENT_DIR = join(agentDir, ".pi", "agent");
 const intercomConfig = join(process.env.PI_CODING_AGENT_DIR, "intercom");
 mkdirSync(intercomConfig, { recursive: true });
 writeFileSync(join(intercomConfig, "config.json"), JSON.stringify({ enabled: false, confirmSend: true, inboundTrigger: "never" }));
+for (const name of ["PI_SUBAGENT_CHILD", "USR_SCOPED_WORKER", "USR_REQUIRED_CHILD_EXTENSIONS_JSON"]) delete process.env[name];
 process.env.PI_OFFLINE = "1";
 process.env.PI_SKIP_VERSION_CHECK = "1";
 process.env.PI_MUSE_SDK_MUSE_PATH = muse;

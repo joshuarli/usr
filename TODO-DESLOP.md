@@ -36,15 +36,6 @@ Not started.
 - **Fix with:** deslop
 - **Effort:** M
 
-### DSLP-6 · P2 · Investigate offline Pi Intercom initialization failure
-
-- **Area:** Needs environment · Pi offline acceptance
-- **Where:** tools/pi/test_offline.py, tools/pi/verify-extensions.mjs
-- **Problem:** On macOS the SDK offline initialization test reports missing intercom_send with Node 26.12.0 and the CI-pinned 26.13.1; the same failure reproduces at base 7f9e2af864dd9a7f5f4c6fbcce8c2cc05a5a7f62 and candidate with the same pinned release cache.
-- **Recommendation:** Inspect the pinned extension and SDK binding and reproduce in CI before changing the acceptance test.
-- **Fix with:** root-cause
-- **Effort:** M
-
 ### DSLP-8 · P3 · Wake-on-LAN file input drops compact MAC addresses
 
 - **Area:** Wake-on-LAN · file input
