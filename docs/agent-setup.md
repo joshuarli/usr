@@ -72,6 +72,9 @@ Harnesses use native skill metadata and discovery paths. The checker at [`skills
 
 ## Harness configuration
 
+The [lean harness policy](harness-lean.md) removes unneeded built-in browser/computer-use integrations where supported, without replacing coding tools, MCP, subagents, session hooks, or agent-browser. Do not install generic PATH shims over sync-managed binaries: most harnesses need native tool-surface controls, and a wrapper that only forwards arguments does not reduce model context.
+
+
 Codex session defaults remain in its tracked configuration. Delegated work follows the generated policy above. Multi-agent V2 has eight resident-thread slots including the parent; `agents.max_depth` is a V1 setting and does not impose V2 nesting limits. The orchestration contract requires CLI workers to remain leaves.
 
 Devin's user config (`~/.config/devin/config.json`) and its `pi-bridge-guard` PreToolUse hook are dotfiles-managed links; the config disables Claude and Devin Cloud imports and selects bypass permissions. The tracked configs are under [`dotfiles/base`](../dotfiles/base/). Review changes after a harness writes its own config. Claude may rewrite `settings.json`, Codex may append trusted projects to `config.toml`. Antigravity CLI owns `~/.gemini/antigravity-cli/settings.json` outright, rewriting model selection and `trustedWorkspaces` on launch, so that file is untracked and left in place. Direct Antigravity model selection follows the approved policy in `orchestrate` and requires a successful `agy models` check. OpenCode restores its `cli.json` when missing, so install its tracked symlink while the client is stopped.
