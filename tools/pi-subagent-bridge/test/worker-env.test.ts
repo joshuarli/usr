@@ -1,5 +1,5 @@
 import assert from "node:assert/strict"
-import { spawnSync } from "node:child_process"
+import { execFileSync, spawnSync } from "node:child_process"
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -100,6 +100,7 @@ test("explicit privacy marker and environment deny contributor-backed routes", (
   const cwd = join(root, ".work/wt/worker")
   try {
     mkdirSync(cwd, { recursive: true })
+    execFileSync("git", ["init", "-q", root])
     assert.equal(contributorAllowed(cwd, {}), true)
     assert.equal(contributorAllowed(cwd, { USR_CONTRIBUTOR_MODE: "deny" }), false)
     mkdirSync(join(root, ".agents"), { recursive: true })

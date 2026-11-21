@@ -1,5 +1,6 @@
+import { execFileSync } from "node:child_process"
 import { existsSync } from "node:fs"
-import { resolve } from "node:path"
+import { basename, dirname, join } from "node:path"
 import { ADMITTING_PARENT_ENV } from "./session.ts"
 
 /** Coordinator enrollment and transport settings never enter scoped worker processes. */
@@ -23,7 +24,18 @@ export function stripIntercomEnvironment(env: NodeJS.ProcessEnv): void {
  */
 export function contributorAllowed(workerDirectory: string, env: NodeJS.ProcessEnv = process.env): boolean {
   if (env.USR_CONTRIBUTOR_MODE === "deny") return false
-  return !existsSync(resolve(workerDirectory, "../../..", ".agents/no-contributor"))
+  try {
+    // Git's common dir points to the primary repository even from linked worktrees.
+    const common = execFileSync("git", ["-C", workerDirectory, "rev-parse",
+      "--path-format=absolute", "--git-common-dir"], {
+      encoding: "utf8", timeout: 2000, stdio: ["ignore", "pipe", "ignore"],
+    }).trim()
+    if (basename(common) !== ".git") return false
+    return !existsSync(join(dirname(common), ".agents/no-contributor"))
+  } catch {
+    // Unknown repository provenance cannot authorize uploading private code.
+    return false
+  }
 }
 
 export function contributorModel(provider: string, model: string): boolean {
