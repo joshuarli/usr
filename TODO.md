@@ -64,12 +64,12 @@ Next: 128
 - **Fix with:** isolate-effects
 - **Effort:** S
 
-### USR-127 · P2 · Live Codex bridge workers die silently while the bridge test suite runs
+### USR-127 · P2 · Live Codex bridge workers die silently on this Mac
 
 - **Area:** pi-subagent-bridge · test isolation
 - **Where:** tools/pi-subagent-bridge/test/ (npm test); test/codex.test.ts:126-132; test/command.test.ts:195-269
-- **Problem:** On 2026-11-20 on this Mac, every live Codex bridge worker started after about 18:02:12, while a bridge test run (node --test test/bounded-log.test.ts test/bridge.test.ts test/campaign.test.ts ..., pid 25124) was active, exited after a few events with no turn.completed, turn.failed or error event and stderr only Reading additional input from stdin: four sessions in another checkout (usrw_de2f41eb, usrw_ae450e43, usrw_b0273670, usrw_593cd847) and two docs workers here (usrw_ff4bc30e, usrw_32520f9d). The bridge reported interrupted with no fallback. Workers started earlier ran for an hour. The cause is unestablished: candidates are a test's process-group SIGKILL cleanup reaching a reused or shared group, or tests reading or acting on shared real bridge or Codex state.
-- **Recommendation:** Reproduce by running a long fake or real Codex worker through the bridge in a scratch repository while npm test runs, then bisect test files to find the process or state that ends it, and make tests unable to signal or mutate anything they did not create. Acceptance: a regression check keeps an unrelated detached worker process group alive across the full suite.
+- **Problem:** On 2026-11-20 on this Mac, Codex bridge workers started after about 18:02 local exited mid-run with no turn.completed, turn.failed or error event and stderr only Reading additional input from stdin; the bridge reported interrupted with no fallback. Affected: usrw_de2f41eb, usrw_ae450e43, usrw_b0273670, usrw_593cd847 and usrw_47289e45 in another checkout, and usrw_ff4bc30e and usrw_32520f9d here. The first deaths overlapped a bridge test run (pid 25124), but usrw_47289e45 died at about 02:08:50Z after 21 completed items with no node --test process running, no jetsam or memorystatus log entries, 71% free memory and 686 of 8000 user processes. Workers started before 18:02 ran for an hour. The cause is unestablished: candidates include a test or tool signalling a process group it did not create, an external reaper, and Codex CLI itself exiting.
+- **Recommendation:** Reproduce with a long Codex worker while recording the exit status and signal of the codex process (for example by having the bridge launcher record wait status) and process accounting around the exit, then fix the killer or, if Codex exits on its own, classify a silent exit before edits as a provider failure eligible for fallback. Acceptance: a recorded death names its signal or exit status, and a regression check keeps an unrelated detached worker process group alive across the full bridge test suite.
 - **Fix with:** root-cause
 - **Effort:** M
 
@@ -80,15 +80,6 @@ Next: 128
 - **Problem:** On 2026-11-15 several XSH cargo test builds failed with linking with clang failed: signal 11 (SIGSEGV), with 48 GiB free and under heavy unrelated host load; a retry usually succeeds, but one crash left an 18 KiB build_script_build that cargo treated as fresh, so every later build failed until the target directory was deleted.
 - **Recommendation:** Capture a crashing link (RUSTC_LOG or -Clink-arg=-v plus a core dump) to tell a mold crash from a clang driver crash, then report upstream or pin a mold release; meanwhile document deleting the target directory after a crashed link.
 - **Fix with:** A reproduced crash with a core or backtrace and the mold/clang versions
-- **Effort:** M
-
-### USR-80 · P3 · Bridge snapshots omit the admitting parent's explicit identity
-
-- **Area:** Delegation
-- **Where:** tools/pi-subagent-bridge/src/session.ts, inspect.ts, owner.ts; agentctl ACTL-28
-- **Problem:** At installed usr 6a203c459fe32dd82b75c4d7efd6d45f8da11fef, read-only campaign snapshots and owner_protocol 1 carry job and owner identities but no admitting parent session identity. Agentctl cannot link delegated jobs to their coordinator without guessing from worktrees or process trees.
-- **Recommendation:** Accept an optional explicit admitting-parent identity at admission, persist it in the versioned session record, and expose it unchanged in read-only snapshots and owner status. Keep absent legacy values unknown. Prove round-trip identity, legacy absence and no guessed lineage with fixture tests. Preserve routing, leases, retries and acceptance in usr.
-- **Fix with:** durable-state
 - **Effort:** M
 
 ### USR-86 · P3 · Qualify optional copy-on-write worktree and cache seeding
