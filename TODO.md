@@ -1,5 +1,5 @@
 Prefix: USR
-Next: 127
+Next: 128
 
 ### USR-83 · P2 · running sessions on two hosts cannot reach each other over intercom
 
@@ -63,6 +63,15 @@ Next: 127
 - **Recommendation:** Run registry sh checks with /bin/sh or with ~/.local/bin removed from PATH, and have config.sh keep XDG values that are already set. Acceptance: sh dotfiles/dsh-launcher-test.sh passes through the shim on this host, and a fixture proves a preset XDG_DATA_HOME survives a shim-invoked child.
 - **Fix with:** isolate-effects
 - **Effort:** S
+
+### USR-127 · P2 · Live Codex bridge workers die silently while the bridge test suite runs
+
+- **Area:** pi-subagent-bridge · test isolation
+- **Where:** tools/pi-subagent-bridge/test/ (npm test); test/codex.test.ts:126-132; test/command.test.ts:195-269
+- **Problem:** On 2026-11-20 on this Mac, every live Codex bridge worker started after about 18:02:12, while a bridge test run (node --test test/bounded-log.test.ts test/bridge.test.ts test/campaign.test.ts ..., pid 25124) was active, exited after a few events with no turn.completed, turn.failed or error event and stderr only Reading additional input from stdin: four sessions in another checkout (usrw_de2f41eb, usrw_ae450e43, usrw_b0273670, usrw_593cd847) and two docs workers here (usrw_ff4bc30e, usrw_32520f9d). The bridge reported interrupted with no fallback. Workers started earlier ran for an hour. The cause is unestablished: candidates are a test's process-group SIGKILL cleanup reaching a reused or shared group, or tests reading or acting on shared real bridge or Codex state.
+- **Recommendation:** Reproduce by running a long fake or real Codex worker through the bridge in a scratch repository while npm test runs, then bisect test files to find the process or state that ends it, and make tests unable to signal or mutate anything they did not create. Acceptance: a regression check keeps an unrelated detached worker process group alive across the full suite.
+- **Fix with:** root-cause
+- **Effort:** M
 
 ### USR-75 · P3 · clang plus mold host links intermittently segfault and leave truncated artifacts
 
@@ -185,7 +194,7 @@ Next: 127
 
 - **Area:** pi-subagent-bridge · tests
 - **Where:** tools/pi-subagent-bridge/src/codex.ts:68; test/hybrid.test.ts (Codex fallback tests)
-- **Problem:** Every Codex fallback test injects status() directly; rg turn.failed test src matches only src/codex.ts:68. The mapping from a Codex event stream to failed plus error is unchecked, and a refusal that arrives only as an error event without turn.failed is classified interrupted (codex.ts:69), which never falls back, so provider-refusal fallbacks such as the cybersecurity refusal may not fire on real output. Unproven: what real Codex emits for that refusal.
+- **Problem:** Every Codex fallback test injects status() directly; rg turn.failed test src matches only src/codex.ts:68. The mapping from a Codex event stream to failed plus error is unchecked, and a refusal that arrives only as an error event without turn.failed is classified interrupted (codex.ts:69), which never falls back, so provider-refusal fallbacks such as the cybersecurity refusal may not fire on real output. Unproven: what real Codex emits for that refusal. On 2026-11-20 a docs-only worker run (session usrw_ff4bc30e) exited after eight command_execution events with no turn.completed, turn.failed or error event and an empty stderr apart from Reading additional input from stdin; the bridge reported interrupted with no fallback, so the parent had to relaunch by hand.
 - **Recommendation:** Add a fake Codex in test/codex.test.ts that emits thread.started, error and turn.failed with refusal text, asserting failed and fallback to command-code, plus a captured real refusal stream when available.
 - **Fix with:** test-audit
 - **Effort:** S
