@@ -21,7 +21,7 @@ Size the layout to the repo. A small repo, with under about 200 lines of docs or
 
 ## Scope
 
-Default to every doc surface in the repo: README, AGENTS.md and CLAUDE.md, `docs/`, contributing notes, `--help` text, config examples, and public API doc comments. When asked to refresh only a change, cover just the docs that change made stale or should have updated, and the public API doc comments it touched. Delete any other comment it added or changed.
+Default to every doc surface in the repo: README, AGENTS.md and CLAUDE.md, `docs/`, the `TODO.md` backlog with its RFCs and campaign docs, contributing notes, `--help` text, config examples, and public API doc comments. When asked to refresh only a change, cover just the docs that change made stale or should have updated, and the public API doc comments it touched. Delete any other comment it added or changed.
 
 ## Rules
 
@@ -31,12 +31,13 @@ Default to every doc surface in the repo: README, AGENTS.md and CLAUDE.md, `docs
 - **Point at code, do not copy it.** A list that mirrors one file, such as the env vars one function reads or a route table, becomes a pointer to that file. Setup steps the product already shows, on a home page or in `--help`, become a link.
 - **A doc code reads is load-bearing.** Before you move, split, rename, or cut a doc, search source and build files for its path: embeds such as `include_str!`, tests that read or compile it, hashes, and checks of its layout. Report what you find to every writer, and leave such a doc's structure to the code that reads it.
 - **Comments** go through `comment-cleanup` in its review mode. Only public API contract doc comments are doc surface; every other comment is a defect, not documentation. Rationale a deleted comment carried lands once in the `docs/` topic that owns it, never back in source.
-- **Leave dated records alone** (changelog, ADRs, release notes), marking a superseded one rather than rewriting it. A completed RFC is not one of these: delete it per `todo`. For generated docs, edit the source and the generator input, not the output.
+- **Clear done work.** Check each open ticket in scope against the code, its commit history, and any recorded release. Close one that is done or obsolete with `todo close`, citing the commit or record that shows it. Narrow a partly done ticket to what remains. A completed RFC or campaign doc is not a dated record: per `todo`, land each fact a reader still needs in the topic doc that owns it, drop links to it, and delete it in the same change. Run `todo check` afterwards.
+- **Leave dated records alone** (changelog, ADRs, release notes), marking a superseded one rather than rewriting it. For generated docs, edit the source and the generator input, not the output.
 - **One writer** per file, so edits do not overlap. Create a doc file only for a topic that has no home and would make its nearest existing doc too long to scan.
 - **Verify narrowly:** every `path:line` and link you kept resolves, and any doc check the repo has (a link checker, a doctest) runs on the files you touched.
 
 When `mdtool` is installed, run one `mdtool check PATH...` for the refresh scope (`--untracked` for drafts, `--since HEAD` for new findings only). It covers links, refs, consumers, pointers, duplicates, and routing. Add `--verbose` or `--json` only for full occurrence details, and `mdtool anchors FILE...` for a heading inventory. Without `mdtool`, use `rg -n '\[[^]]+\]\('` for links, `rg -n '^#{1,6} '` for headings, `rg` for backticked paths, and a source search for each changed doc path to find consumers. Inspect AGENTS.md links and README headings by hand.
 
-**The test:** an end user can install and use the thing from README alone, a developer reaches any topic in one hop from AGENTS.md, a newcomer can follow every command and reach the code each doc points to, no sentence is there only because it used to be true, and the docs are shorter than before unless a missing topic needed new text.
+**The test:** an end user can install and use the thing from README alone, a developer reaches any topic in one hop from AGENTS.md, a newcomer can follow every command and reach the code each doc points to, no sentence is there only because it used to be true, no open ticket describes finished work, and the docs are shorter than before unless a missing topic needed new text.
 
-**Report:** the Markdown line count before and after, the files changed, moved, or removed and what was cut, claims you could not verify, and places where the code looks wrong rather than the doc.
+**Report:** the Markdown line count before and after, the tickets closed or narrowed with their evidence, the files changed, moved, or removed and what was cut, claims you could not verify, and places where the code looks wrong rather than the doc.
