@@ -131,11 +131,11 @@ def gitlinks(cwd: Path) -> list[tuple[str, str]]:
             continue
         try:
             meta, rel = block.split("\t", 1)
-            mode, _oid, _stage = meta.split(" ", 2)
+            mode, oid, _stage = meta.split(" ", 2)
         except ValueError:
             continue
         if mode == "160000":
-            found.append((_oid, rel))
+            found.append((oid, rel))
     return found
 
 
@@ -162,10 +162,6 @@ def collect_submodule_worktrees(path: Path, primary: Path, discard_ignored: bool
     collected: list[tuple[Path, Path]] = []
     for _oid, rel in gitlinks(path):
         sub = path / rel
-        try:
-            sub.exists()
-        except OSError:
-            continue
         dirs = submodule_gitdirs(sub)
         if dirs is None:
             continue
@@ -210,14 +206,8 @@ def collect_submodule_worktrees(path: Path, primary: Path, discard_ignored: bool
         if ignored and not discard_ignored:
             raise Kept(f"kept {path}: submodule {rel} has ignored files, pass --discard-ignored: " + ", ".join(ignored))
         for _nested_oid, nested_rel in gitlinks(sub):
-            nested = sub / nested_rel
-            try:
-                if submodule_gitdirs(nested) is not None:
-                    raise Kept(f"kept {path}: submodule {rel} contains nested submodule {nested_rel}; refusing")
-            except Kept:
-                raise
-            except OSError:
-                continue
+            if submodule_gitdirs(sub / nested_rel) is not None:
+                raise Kept(f"kept {path}: submodule {rel} contains nested submodule {nested_rel}; refusing")
         head = match["HEAD"]
         branch = match.get("branch", "")
         if not branch and not submodule_survives(common, head):
@@ -349,13 +339,9 @@ def retire(request: Path, into: str | None, discard_ignored: bool = False, dry_r
     else:
         for sub, common in submodules:
             git(common, "worktree", "remove", str(sub))
-        if submodules:
-            # Removing a submodule worktree leaves its gitlink deleted in the parent,
-            # so the parent is no longer clean; --force is safe here because every
-            # check for the parent and all submodules already passed before the first removal.
-            git(primary, "worktree", "remove", "--force", str(path))
-        else:
-            git(primary, "worktree", "remove", str(path))
+            # An empty directory is an unpopulated gitlink, which keeps the parent clean for git worktree remove.
+            sub.mkdir()
+        git(primary, "worktree", "remove", str(path))
         lines = [f"removed {sub} (submodule worktree)" for sub, _common in submodules]
         lines.append(f"removed {path}{detail}")
     if branch and (into is not None or branch.startswith("refs/heads/worktree-")):
