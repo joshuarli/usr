@@ -343,6 +343,17 @@ class WorktreeRetireTests(unittest.TestCase):
         self.assertFalse(path.exists())
         self.assertNotIn("sublane", self.branches())
 
+    def test_unpopulated_submodule_lane_retires(self):
+        origin = self.submodule_origin()
+        self.add_submodule(origin)
+        path = self.lane("unpopulated")
+        sub = path / "asterinas"
+        sub.mkdir(exist_ok=True)
+        self.assertEqual(list(sub.iterdir()), [])
+        result = self.retire(path)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(path.exists())
+
     def test_dirty_submodule_keeps_both(self):
         origin = self.submodule_origin()
         self.add_submodule(origin)
