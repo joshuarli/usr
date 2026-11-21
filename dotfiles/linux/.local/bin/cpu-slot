@@ -111,17 +111,23 @@ def acquire(cpus: int, reserve: int | None, label: str) -> dict[int, int]:
     delay = 0.1
     while True:
         held: dict[int, int] = {}
-        for cpu in candidates:
-            fd = try_lock(cpu)
-            if fd is not None:
-                held[cpu] = fd
-                if len(held) == cpus:
-                    record = {"pid": os.getpid(), "label": label, "since": time.time(), "cpus": sorted(held)}
-                    for granted in held:
-                        meta_path(granted).write_text(json.dumps(record) + "\n")
-                    return held
-        for fd in held.values():
-            os.close(fd)
+        # One scan at a time, so concurrent waiters cannot each hold part of what they need.
+        scan = os.open(state_dir() / "scan.lock", os.O_RDWR | os.O_CREAT | os.O_CLOEXEC, 0o600)
+        try:
+            fcntl.flock(scan, fcntl.LOCK_EX)
+            for cpu in candidates:
+                fd = try_lock(cpu)
+                if fd is not None:
+                    held[cpu] = fd
+                    if len(held) == cpus:
+                        record = {"pid": os.getpid(), "label": label, "since": time.time(), "cpus": sorted(held)}
+                        for granted in held:
+                            meta_path(granted).write_text(json.dumps(record) + "\n")
+                        return held
+            for fd in held.values():
+                os.close(fd)
+        finally:
+            os.close(scan)
         time.sleep(delay)
         delay = min(delay * 2, 2.0)
 
