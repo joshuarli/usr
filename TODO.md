@@ -1,5 +1,5 @@
 Prefix: USR
-Next: 126
+Next: 127
 
 ### USR-83 · P2 · running sessions on two hosts cannot reach each other over intercom
 
@@ -116,15 +116,6 @@ Next: 126
 - **Problem:** FX 0.0.17 fails ACP session/new with -32603 whenever --provider is passed, its shell tool cannot snapshot busybox ash on Alpine, and web_fetch is ungated; the adapter works around each, and a release upgrade could change any of them silently.
 - **Recommendation:** When adopting a newer FX release, update pin.json per target, rerun npm run spike:fx -- --local plus experiment/fx/linux.sh arm64 and amd64, and drop each workaround only with a reproduction showing it is fixed.
 - **Fix with:** none
-- **Effort:** M
-
-### USR-96 · P3 · Measure representative tool workflows
-
-- **Area:** Bench · repository workloads
-- **Where:** Makefile, tools/pi-subagent-bridge/experiment/fx/spike.mjs
-- **Problem:** The only declared performance workload compares a local FX bridge fixture; it does not measure representative sync, pinact, mdtool, or other shipped CLI workflows, leaving their performance regressions unmeasured.
-- **Recommendation:** Define reproducible edit and change workloads around representative CLI journeys, with validated inputs and resource measurements.
-- **Fix with:** refactor-benchmarks
 - **Effort:** M
 
 ### USR-102 · P3 · Reusable Tailscale auth key leaks into argv and installer children
@@ -359,5 +350,14 @@ Next: 126
 - **Problem:** sh sync check-parallel runs pytest over tools, dotfiles and host/macos through uvx with a pinned plugin and Python 3.15; it covers Python only but picks up suites the registry omits, and no Makefile target or CI job uses it, so the repository has two disagreeing definitions of the full suite. Unproven: not run.
 - **Recommendation:** Decide whether check-parallel becomes the documented full tier or is removed once the registry covers every suite. Acceptance: one documented full-suite entrypoint.
 - **Fix with:** debloat
+- **Effort:** S
+
+### USR-126 · P4 · sync links --json mixes LINK lines into its JSON output
+
+- **Area:** Sync · CLI output
+- **Where:** tools/sync/main.py (links --json)
+- **Problem:** sh sync links --json prints LINK: progress lines on stdout before the JSON object, so stdout is not one JSON document; tools/bench/bench.py reads only the last line to work around it.
+- **Recommendation:** Send progress lines to stderr, or suppress them under --json. Acceptance: stdout of sh sync links --json into a scratch TARGET parses as one JSON value.
+- **Fix with:** design-cli
 - **Effort:** S
 
