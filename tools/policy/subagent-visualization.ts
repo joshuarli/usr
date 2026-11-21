@@ -19,6 +19,14 @@ const LANES: Record<LaneKind, { label: string; accent: string; fills: readonly s
   pilot: { label: "Pilot / opt-in", accent: "#735a9a", fills: ["#fcfbfd", "#f8f5fb", "#f3eef8", "#ece5f4", "#e5dbef"] },
 }
 
+const EFFORTS: Record<string, { tone: string; fill: string }> = {
+  low: { tone: "#64748b", fill: "#f3f4f6" },
+  medium: { tone: "#3b5b9c", fill: "#f1f5fd" },
+  high: { tone: "#2f6f5e", fill: "#f0f7f4" },
+  xhigh: { tone: "#9a6a2f", fill: "#fbf5eb" },
+  max: { tone: "#735a9a", fill: "#f7f3fb" },
+}
+
 const TIER_ACCENTS: Record<Tier, string> = {
   scout: "#0f766e",
   mechanic: "#4338a0",
@@ -59,6 +67,16 @@ function laneStyle(kind: LaneKind, strength: number): string {
   return `--accent:${spec.accent};--fill:${spec.fills[index]}`
 }
 
+function modelPill(value: string): string {
+  return `<span class="model">${esc(value)}</span>`
+}
+
+function effortChip(value: string | undefined): string {
+  if (!value) return ""
+  const spec = EFFORTS[value] ?? EFFORTS.low!
+  return `<span class="effort" style="--tone:${spec.tone};--fill:${spec.fill}">${esc(value)}</span>`
+}
+
 function tierLabel(tier: Tier): string {
   return `<span class="tier" style="--tone:${TIER_ACCENTS[tier]}">${tier}</span>`
 }
@@ -73,8 +91,10 @@ type LaneOptions = {
   title: string
   tier?: Tier
   rank?: number
+  model?: string
+  models?: readonly string[]
+  effort?: string
   detail?: string
-  note?: string
 }
 
 function heading(option: LaneOptions): string {
@@ -82,15 +102,21 @@ function heading(option: LaneOptions): string {
     (option.tier ? tierLabel(option.tier) : "") + `<strong>${esc(option.title)}</strong>`
 }
 
+function meta(option: LaneOptions): string {
+  const parts: string[] = []
+  if (option.model) parts.push(modelPill(option.model))
+  if (option.models) parts.push(option.models.map(modelPill).join('<span class="sep">→</span>'))
+  if (option.effort) parts.push(effortChip(option.effort))
+  if (option.detail) parts.push(`<span class="detail">${inline(option.detail)}</span>`)
+  return parts.length ? `<div class="meta">${parts.join(" ")}</div>` : ""
+}
+
 function laneRow(option: LaneOptions): string {
-  const body = option.detail ? `<div class="detail">${inline(option.detail)}</div>` : ""
-  const note = option.note ? `<div class="detail">${inline(option.note)}</div>` : ""
-  return `<div class="lane" style="${laneStyle(option.kind, option.strength)}">${heading(option)}${body}${note}</div>`
+  return `<div class="lane" style="${laneStyle(option.kind, option.strength)}">${heading(option)}${meta(option)}</div>`
 }
 
 function mapCell(option: LaneOptions): string {
-  const detail = option.detail ? `<div class="detail">${inline(option.detail)}</div>` : ""
-  return `<td class="cell" style="${laneStyle(option.kind, option.strength)}">${heading(option)}${detail}</td>`
+  return `<td class="cell" style="${laneStyle(option.kind, option.strength)}">${heading(option)}${meta(option)}</td>`
 }
 
 function modelOf(route: Route): string {
@@ -124,15 +150,29 @@ p{margin:6px 0;color:var(--muted)}
 code{font:12.5px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;background:#f4f5f7;border-radius:4px;padding:1px 4px;color:#374151}
 a{color:#2563eb;text-decoration:none}
 a:hover{text-decoration:underline}
-.legend{display:flex;flex-wrap:wrap;gap:4px 16px;font-size:12px;color:var(--muted)}
+.legend{display:flex;flex-wrap:wrap;align-items:center;gap:4px 16px;font-size:12px;color:var(--muted)}
 .dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--accent);margin-right:5px;vertical-align:1px}
+.thinking{display:inline-flex;flex-wrap:wrap;align-items:center;gap:4px}
+.graph-scroll{overflow-x:auto;border-bottom:1px solid var(--line);padding-bottom:8px}
+.graph-scroll svg{display:block;min-width:1000px}
+.edge{fill:none;stroke:#b9c0cc;stroke-width:.9;marker-end:url(#g-arrow)}
+.edge-label{font-size:10px;fill:#6b7280}
+.g-node{height:100%;border-top:1px solid var(--accent);padding:5px 7px;overflow:hidden}
+.g-node strong{display:block;font-size:11px;line-height:1.25}
+.g-node .meta{margin-top:2px}
+.g-node .detail{font-size:10px;line-height:1.25}
+.g-node .model{font-size:9.5px;padding:0 4px}
 .cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(330px,1fr));gap:26px}
 .lane{padding:7px 11px;border-left:2px solid var(--accent);background:var(--fill);border-radius:4px;margin:5px 0}
 .lane strong,.cell strong{font-weight:600;font-size:13px}
 .kind{font-size:11px;color:var(--accent);font-weight:600;margin-right:6px}
 .rank{font-size:11px;color:var(--accent);font-weight:600;margin-right:6px}
 .tier{font-size:11px;color:var(--tone);font-weight:600;margin-right:6px}
-.detail{font-size:12px;color:var(--muted);margin-top:2px}
+.meta{display:flex;flex-wrap:wrap;align-items:center;gap:4px 6px;margin-top:4px}
+.model{font:11px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;background:#f6f7f9;border:1px solid #e6e8ec;border-radius:5px;padding:1px 6px;color:#374151;white-space:nowrap}
+.effort{font-size:11px;font-weight:600;color:var(--tone);background:var(--fill);border-radius:5px;padding:1px 6px;white-space:nowrap}
+.sep{color:#9ca3af;font-size:11px}
+.detail{font-size:12px;color:var(--muted)}
 .table-scroll{overflow-x:auto;border:1px solid var(--line);border-radius:6px}
 table{border-collapse:collapse;width:100%;min-width:1040px;font-size:12px}
 th,td{border-bottom:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top}
@@ -149,16 +189,93 @@ footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--line);font-si
 }
 
 function legend(): string {
-  const items = (Object.keys(LANES) as LaneKind[]).map(kind =>
+  const kinds = (Object.keys(LANES) as LaneKind[]).map(kind =>
     `<span><i class="dot" style="--accent:${LANES[kind].accent}"></i>${LANES[kind].label}</span>`).join("")
+  const efforts = ["low", "medium", "high", "xhigh", "max"].map(effortChip).join("")
   return [
     '<div class="legend">',
-    items,
-    '<span>Tint depth = model effort (low → max)</span>',
+    kinds,
+    '<span class="thinking">Thinking: ' + efforts + '</span>',
+    '<span>Tint depth = thinking level</span>',
     '<span>Route rank: P1 primary, P2+ fallbacks</span>',
     '<span>Tier labels = assignment tier</span>',
     '</div>',
   ].join("\n")
+}
+
+type GraphNode = { id: string; x: number; y: number; w: number; h: number; option: LaneOptions }
+type GraphEdge = { from: string; to: string; label?: string; path?: string; labelAt?: { x: number; y: number } }
+
+function graphNodes(): GraphNode[] {
+  const claude = POLICY.nativeFallback.claudeModels
+  return [
+    { id: "start", x: 400, y: 16, w: 200, h: 42, option: { kind: "primary", strength: 2, title: "Parent wants a subagent" } },
+    { id: "tier", x: 400, y: 86, w: 200, h: 42, option: { kind: "primary", strength: 3, title: "Which tier?" } },
+    { id: "expert", x: 80, y: 160, w: 220, h: 52, option: { kind: "native", strength: 4, tier: "expert", title: "Native expert", detail: "native in every harness" } },
+    { id: "lower", x: 700, y: 160, w: 220, h: 52, option: { kind: "primary", strength: 3, title: "scout / mechanic / worker" } },
+    { id: "harness", x: 40, y: 250, w: 270, h: 100, option: { kind: "native", strength: 3, title: "Harness-native expert lanes", detail: "OpenCode · Antigravity · Command Code · Devin · Codex · Pi · Claude Code · other" } },
+    { id: "cwd", x: 700, y: 250, w: 220, h: 52, option: { kind: "primary", strength: 2, title: "Top-level native parent?", detail: "OpenCode · Devin · Command Code · Antigravity" } },
+    { id: "native", x: 500, y: 345, w: 220, h: 72, option: { kind: "native", strength: 3, title: "Native tier lanes", detail: "native usr-* / run_subagent agents; never the bridge" } },
+    { id: "bridge", x: 760, y: 345, w: 200, h: 60, option: { kind: "primary", strength: 3, title: "pi-subagent-bridge", detail: "worker_model_check → worker_start" } },
+    { id: "plan", x: 760, y: 440, w: 200, h: 100, option: { kind: "primary", strength: 3, title: "Admitted ordered plan", models: POLICY.rootRoutes.worker.map(modelOf) } },
+    { id: "available", x: 760, y: 580, w: 200, h: 46, option: { kind: "primary", strength: 2, title: "First route available?" } },
+    { id: "admitted", x: 480, y: 660, w: 220, h: 70, option: { kind: "native", strength: 3, title: "worker_start: one scoped assignment", detail: "clean worktree · bounded attempts · scope enforced" } },
+    { id: "next", x: 770, y: 660, w: 180, h: 60, option: { kind: "fallback", strength: 2, title: "Next admitted route", detail: "only before edits" } },
+    { id: "watch", x: 480, y: 760, w: 220, h: 50, option: { kind: "native", strength: 3, title: "watch / worker_status", detail: "parent verifies proof and diff" } },
+    { id: "fallback", x: 180, y: 760, w: 250, h: 80, option: { kind: "native", strength: 2, title: "Tier-matched native subagents", models: POLICY.nativeFallback.tiers.map(tier => claude[tier as "scout"]), detail: "Claude Code; same brief and scope" } },
+  ]
+}
+
+function graphEdges(): GraphEdge[] {
+  return [
+    { from: "start", to: "tier" },
+    { from: "tier", to: "expert", label: "expert" },
+    { from: "tier", to: "lower", label: "lower tiers" },
+    { from: "expert", to: "harness" },
+    { from: "lower", to: "cwd" },
+    { from: "cwd", to: "native", label: "yes" },
+    { from: "cwd", to: "bridge", label: "otherwise" },
+    { from: "bridge", to: "plan" },
+    { from: "plan", to: "available" },
+    { from: "available", to: "admitted", label: "yes" },
+    { from: "available", to: "next", label: "no" },
+    { from: "admitted", to: "watch" },
+    { from: "next", to: "available", label: "retry", path: "M 950 690 H 978 V 603 H 960", labelAt: { x: 968, y: 642 } },
+    { from: "available", to: "fallback", label: "exhausted", path: "M 760 603 H 305 V 760", labelAt: { x: 425, y: 596 } },
+  ]
+}
+
+function svgEdge(edge: GraphEdge, nodes: readonly GraphNode[]): string {
+  const source = nodes.find(node => node.id === edge.from)
+  const target = nodes.find(node => node.id === edge.to)
+  if (!source || !target) throw new Error(`Unknown graph edge ${edge.from} → ${edge.to}`)
+  const sx = source.x + source.w / 2, sy = source.y + source.h
+  const tx = target.x + target.w / 2, ty = target.y
+  const mid = (sy + ty) / 2
+  const path = edge.path ?? `M ${sx} ${sy} C ${sx} ${mid} ${tx} ${mid} ${tx} ${ty}`
+  const label = edge.label
+    ? `<text class="edge-label" x="${edge.labelAt?.x ?? (sx + tx) / 2}" y="${edge.labelAt?.y ?? mid - 4}">${esc(edge.label)}</text>`
+    : ""
+  return `<path class="edge" d="${path}"/>${label}`
+}
+
+function svgNode(node: GraphNode): string {
+  const option = node.option
+  const headingText = rankLabel(option.rank) +
+    (option.tier ? tierLabel(option.tier) : "") + `<strong>${esc(option.title)}</strong>`
+  return `<foreignObject x="${node.x}" y="${node.y}" width="${node.w}" height="${node.h}">` +
+    `<div xmlns="http://www.w3.org/1999/xhtml" class="g-node" style="${laneStyle(option.kind, option.strength)}">` +
+    `${headingText}${meta(option)}</div></foreignObject>`
+}
+
+function graph(): string {
+  const nodes = graphNodes()
+  return '<div class="graph-scroll"><svg viewBox="0 0 1000 830" width="1000" height="830" role="img" aria-label="Subagent delegation decision graph">' +
+    '<defs><marker id="g-arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="4" markerHeight="4" orient="auto-start-reverse">' +
+    '<path d="M 0 0 L 8 4 L 0 8 z" fill="#aeb6c4"/></marker></defs>' +
+    '<g>' + graphEdges().map(edge => svgEdge(edge, nodes)).join("") + '</g>' +
+    '<g>' + nodes.map(svgNode).join("") + '</g>' +
+    '</svg></div>'
 }
 
 function decisionGraph(): string {
@@ -169,34 +286,32 @@ function decisionGraph(): string {
   const piExpert = POLICY.nativePi.goModels.expert
 
   const expertLanes: LaneOptions[] = [
-    { kind: "native", strength: level(opencode.efforts.expert), tier: "expert", title: "OpenCode native expert", detail: `${opencode.model} · effort ${opencode.efforts.expert}` },
-    { kind: "native", strength: level(agy.tiers.expert.effort), tier: "expert", title: "Antigravity native expert", detail: `${agy.tiers.expert.name} · ${agy.tiers.expert.model} · selector ${agy.tiers.expert.selector}` },
-    { kind: "native", strength: level(command.expert.effort), tier: "expert", title: "Command Code native expert", detail: `${command.expert.name} · ${command.expert.model}, ${command.expert.effort}` },
+    { kind: "native", strength: level(opencode.efforts.expert), tier: "expert", title: "OpenCode native expert", model: opencode.model, effort: opencode.efforts.expert },
+    { kind: "native", strength: level(agy.tiers.expert.effort), tier: "expert", title: "Antigravity native expert", model: agy.tiers.expert.model, effort: agy.tiers.expert.effort, detail: `${agy.tiers.expert.name} · selector ${agy.tiers.expert.selector}` },
+    { kind: "native", strength: level(command.expert.effort), tier: "expert", title: "Command Code native expert", model: command.expert.model, effort: command.expert.effort, detail: command.expert.name },
     { kind: "native", strength: 1, tier: "expert", title: "Devin native run_subagent", detail: "subagent_general or subagent_explore · no per-tier pin" },
     { kind: "native", strength: 1, tier: "expert", title: "Codex native subagent", detail: "session-config model · no per-tier pin" },
-    { kind: "native", strength: level(piExpert.variant), tier: "expert", title: "Pi native expert profile", detail: `${piExpert.providerID}/${piExpert.id}, ${piExpert.variant}` },
-    { kind: "native", strength: level(POLICY.nativeFallback.claudeEffort.expert), tier: "expert", title: "Claude Code native subagent", detail: `${claude.expert}, ${POLICY.nativeFallback.claudeEffort.expert} effort` },
+    { kind: "native", strength: level(piExpert.variant), tier: "expert", title: "Pi native expert profile", model: `${piExpert.providerID}/${piExpert.id}`, effort: piExpert.variant },
+    { kind: "native", strength: level(POLICY.nativeFallback.claudeEffort.expert), tier: "expert", title: "Claude Code native subagent", model: claude.expert, effort: POLICY.nativeFallback.claudeEffort.expert },
     { kind: "undefined", strength: 1, title: "Any other harness", detail: "No defined lane in this contract — report to the owner before delegating" },
   ]
 
   const nativeLanes: LaneOptions[] = []
   for (const tier of ["scout", "mechanic", "worker"] as const) {
-    nativeLanes.push({ kind: "native", strength: level(opencode.efforts[tier]), tier, title: "OpenCode native tier agent", detail: `${opencode.model}#${opencode.efforts[tier]}` })
-    nativeLanes.push({ kind: "native", strength: level(commandEffort(tier)), tier, title: "Command Code native agent", detail: `${command[tier].name} · ${command[tier].model}, ${commandEffort(tier)}` })
+    nativeLanes.push({ kind: "native", strength: level(opencode.efforts[tier]), tier, title: "OpenCode native tier agent", model: opencode.model, effort: opencode.efforts[tier] })
+    nativeLanes.push({ kind: "native", strength: level(commandEffort(tier)), tier, title: "Command Code native agent", model: command[tier].model, effort: commandEffort(tier), detail: command[tier].name })
     const agyTier = agy.tiers[tier]
-    nativeLanes.push({ kind: "native", strength: level(agyTier.effort), tier, title: "Antigravity native agent", detail: `${agyTier.name} → ${agyTier.model} · selector ${agyTier.selector}; verify actual model and effort` })
+    nativeLanes.push({ kind: "native", strength: level(agyTier.effort), tier, title: "Antigravity native agent", model: agyTier.model, effort: agyTier.effort, detail: `${agyTier.name} · selector ${agyTier.selector}; verify actual model and effort` })
   }
   nativeLanes.push({ kind: "native", strength: 1, tier: "scout", title: "Devin subagent_explore", detail: "read-only inventory" })
   nativeLanes.push({ kind: "native", strength: 1, title: "Devin subagent_general", detail: "writes; no per-tier pin" })
-  nativeLanes.push({ kind: "pilot", strength: 2, tier: "worker", title: "HY4-medium worker pilot", detail: `${command.pilot.name} · ${command.pilot.model}, ${command.pilot.effort} — explicit comparison only` })
-
-  const plan = POLICY.rootRoutes.worker.map(route => modelOf(route)).join(" → ")
-  const quota = POLICY.nativeFallback.tiers.map(tier => `${tier} ${claude[tier as "scout"]}`).join(" · ")
+  nativeLanes.push({ kind: "pilot", strength: 2, tier: "worker", title: "HY4-medium worker pilot", model: command.pilot.model, effort: command.pilot.effort, detail: `${command.pilot.name} — explicit comparison only` })
 
   return [
     '<section>',
     '<h2>Decision graph</h2>',
-    '<p>Parent agent wants a coding subagent → choose a tier.</p>',
+    graph(),
+    '<h3>Lane details</h3>',
     '<div class="cols">',
     '<div><h3>' + tierLabel("expert") + 'native in every harness</h3>',
     expertLanes.map(laneRow).join("\n"),
@@ -204,10 +319,7 @@ function decisionGraph(): string {
     '<div><h3>scout / mechanic / worker — top-level native parents</h3>',
     '<p>OpenCode, Devin, Command Code and Antigravity parents never use the bridge.</p>',
     nativeLanes.map(laneRow).join("\n"),
-    '<h3>otherwise → pi-subagent-bridge</h3>',
-    laneRow({ kind: "primary", strength: 3, title: "Admitted ordered plan per tier", detail: "command-code → ordered Pi fallback → codex; `worker` ladder: " + plan }),
-    '<p>First route available → admitted → watch / worker_status; parent verifies proof and diff. No route before edits → next route. No approved backend → tier-matched native subagents (Claude Code), then back to bridge when capacity recovers.</p>',
-    '<p>Quota fallback: ' + inline(quota) + '</p>',
+    laneRow({ kind: "primary", strength: 3, title: "Admitted ordered plan per tier", detail: "command-code → ordered Pi fallback → codex; worker ladder", models: POLICY.rootRoutes.worker.map(modelOf) }),
     '</div></div>',
     '</section>',
   ].join("\n")
@@ -222,27 +334,27 @@ function laneMap(): string {
   const rows: string[] = []
 
   rows.push("<tr><th>expert</th>" + [
-    mapCell({ kind: "native", strength: level(opencode.efforts.expert), title: "native expert", detail: `${opencode.model}#${opencode.efforts.expert}` }),
+    mapCell({ kind: "native", strength: level(opencode.efforts.expert), title: "native expert", model: opencode.model, effort: opencode.efforts.expert }),
     mapCell({ kind: "native", strength: 1, title: "run_subagent", detail: "unpinned" }),
-    mapCell({ kind: "native", strength: level(command.expert.effort), title: command.expert.name, detail: `${command.expert.model}, ${command.expert.effort}` }),
+    mapCell({ kind: "native", strength: level(command.expert.effort), title: command.expert.name, model: command.expert.model, effort: command.expert.effort }),
     mapCell({ kind: "native", strength: 1, title: "native subagent", detail: "unpinned" }),
-    mapCell({ kind: "native", strength: level(POLICY.nativePi.goModels.expert.variant), title: "native expert profile", detail: `${POLICY.nativePi.goModels.expert.providerID}/${POLICY.nativePi.goModels.expert.id}, ${POLICY.nativePi.goModels.expert.variant}` }),
-    mapCell({ kind: "native", strength: level(POLICY.nativeFallback.claudeEffort.expert), title: "native subagent", detail: `${claude.expert}, ${POLICY.nativeFallback.claudeEffort.expert} effort` }),
-    mapCell({ kind: "native", strength: level(agy.tiers.expert.effort), title: agy.tiers.expert.name, detail: agy.tiers.expert.model }),
+    mapCell({ kind: "native", strength: level(POLICY.nativePi.goModels.expert.variant), title: "native expert profile", model: `${POLICY.nativePi.goModels.expert.providerID}/${POLICY.nativePi.goModels.expert.id}`, effort: POLICY.nativePi.goModels.expert.variant }),
+    mapCell({ kind: "native", strength: level(POLICY.nativeFallback.claudeEffort.expert), title: "native subagent", model: claude.expert, effort: POLICY.nativeFallback.claudeEffort.expert }),
+    mapCell({ kind: "native", strength: level(agy.tiers.expert.effort), title: agy.tiers.expert.name, model: agy.tiers.expert.model, effort: agy.tiers.expert.effort }),
   ].join("") + "</tr>")
 
   for (const tier of ["scout", "mechanic", "worker"] as const) {
     const agyTier = agy.tiers[tier]
-    const bridge = `bridge → ${tier} ladder`
-    const bridgeStrength = level(POLICY.rootRoutes[tier][0]!.effort)
+    const bridge = POLICY.rootRoutes[tier][0]!
+    const bridgeStrength = level(bridge.effort)
     rows.push(`<tr><th>${tier}</th>` + [
-      mapCell({ kind: "native", strength: level(opencode.efforts[tier]), title: "native tier agent", detail: `${opencode.model}#${opencode.efforts[tier]}` }),
+      mapCell({ kind: "native", strength: level(opencode.efforts[tier]), title: "native tier agent", model: opencode.model, effort: opencode.efforts[tier] }),
       mapCell({ kind: "native", strength: 1, title: "run_subagent", detail: tier === "scout" ? "subagent_explore (read-only)" : "subagent_general" }),
-      mapCell({ kind: "native", strength: level(commandEffort(tier)), title: command[tier].name, detail: `${command[tier].model}, ${commandEffort(tier)}` }),
-      mapCell({ kind: "primary", strength: bridgeStrength, title: "bridge", detail: bridge }),
-      mapCell({ kind: "primary", strength: bridgeStrength, title: "bridge", detail: bridge }),
-      mapCell({ kind: "primary", strength: bridgeStrength, title: "bridge", detail: bridge }),
-      mapCell({ kind: "native", strength: level(agyTier.effort), title: agyTier.name, detail: `${agyTier.model} · selector ${agyTier.selector}; verify` }),
+      mapCell({ kind: "native", strength: level(commandEffort(tier)), title: command[tier].name, model: command[tier].model, effort: commandEffort(tier) }),
+      mapCell({ kind: "primary", strength: bridgeStrength, title: "bridge", model: modelOf(bridge), effort: bridge.effort, detail: `→ ${tier} ladder` }),
+      mapCell({ kind: "primary", strength: bridgeStrength, title: "bridge", model: modelOf(bridge), effort: bridge.effort, detail: `→ ${tier} ladder` }),
+      mapCell({ kind: "primary", strength: bridgeStrength, title: "bridge", model: modelOf(bridge), effort: bridge.effort, detail: `→ ${tier} ladder` }),
+      mapCell({ kind: "native", strength: level(agyTier.effort), title: agyTier.name, model: agyTier.model, effort: agyTier.effort, detail: `selector ${agyTier.selector}; verify` }),
     ].join("") + "</tr>")
   }
 
@@ -252,7 +364,7 @@ function laneMap(): string {
     mapCell({ kind: "undefined", strength: 1, title: "never uses the bridge", detail: "do not silently switch native models" }),
     mapCell({ kind: "undefined", strength: 1, title: "not defined", detail: "report rather than substitute" }),
     mapCell({ kind: "undefined", strength: 1, title: "not defined", detail: "report rather than substitute" }),
-    mapCell({ kind: "native", strength: 2, title: "native subagents", detail: POLICY.nativeFallback.tiers.map(tier => `${tier} ${claude[tier as "scout"]}`).join(" · ") + "; same brief, worktree and scope" }),
+    mapCell({ kind: "native", strength: 2, title: "native subagents", models: POLICY.nativeFallback.tiers.map(tier => claude[tier as "scout"]), detail: "scout / mechanic / worker; same brief, worktree and scope" }),
     mapCell({ kind: "undefined", strength: 1, title: "never uses bridge", detail: "block mismatched model" }),
   ].join("") + "</tr>")
 
@@ -272,8 +384,8 @@ function bridgeRoutes(): string {
       const kind = index === 0 ? "primary" : "fallback"
       return `<div class="route" style="${laneStyle(kind, level(route.effort))}">` +
         `${rankLabel(index + 1)}<span class="kind">${LANES[kind].label}</span>${tierLabel(tier)}` +
-        `<div><strong>${esc(executorLabel(route))} · ${esc(modelOf(route))}</strong></div>` +
-        `<div class="detail">effort ${esc(route.effort)}</div></div>`
+        `<div><strong>${esc(executorLabel(route))}</strong> ${modelPill(modelOf(route))}</div>` +
+        `<div class="meta">${effortChip(route.effort)}</div></div>`
     }).join("<span>→</span>")
     return `<h3>${tier}</h3><div class="chain">${chain}</div>`
   }).join("\n")
