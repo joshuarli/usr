@@ -26,6 +26,7 @@ Run the narrowest check that covers the change. `sh sync check-parallel` runs th
 | `sync` Pi auth wiring | `python3 -I tools/sync/test_pi_auth.py` |
 | Alpine provisioner (`host/alpine`) | `python3 -I host/alpine/tests/test_tuning.py` and `TMPDIR="$PWD/.work/tmp" python3 -I host/alpine/tests/test_provision.py`; run `sh host/alpine/tests/vm.sh` for behavior changes |
 | `cpu-guard` | `python3 -I dotfiles/cpu-guard-test.py` |
+| `cpu-slot` | on Linux `TMPDIR="$PWD/.work/tmp" python3 -I dotfiles/cpu-slot-test.py` |
 | Private tool installer | `python3 -I tools/sync/test_installer.py`, `python3 -I tools/sync/test_ffmpeg_runtime.py`, `sh tools/sync/bootstrap-test.sh`, `sh -n tools/sync/bootstrap.sh`, and `shellcheck -s sh tools/sync/bootstrap.sh` |
 | `sync uninstall` | `python3 -I tools/sync/test_uninstall.py` |
 | owned shell tool help | `sh dotfiles/owned-help-test.sh` |

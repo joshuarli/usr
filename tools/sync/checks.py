@@ -55,6 +55,7 @@ DOCTOR = Area("`sync doctor` and default tool inventory")
 GUARD = Area("Pi Git tool-call guard")
 PI_RELEASE = Area("Pi release pin, installer, launcher, or SDK closure")
 CPUGUARD = Area("`cpu-guard`")
+CPUSLOT = Area("`cpu-slot`")
 ALPINE = Area("Alpine provisioner (`host/alpine`)", "run `sh host/alpine/tests/vm.sh` for behavior changes")
 PI_AUTH = Area("`sync` Pi auth wiring")
 PI_BRIDGE_INSTALL = Area("Pi bridge installation or MCP registration")
@@ -139,6 +140,7 @@ REGISTRY: tuple[Check, ...] = (
     Check("alpine-tuning", (ALPINE,), py("host/alpine/tests/test_tuning.py"), ("host/alpine/tuning.py", "host/alpine/config/sysctl.conf", "host/alpine/tests/test_tuning.py")),
     Check("alpine-provision", (ALPINE,), py("host/alpine/tests/test_provision.py"), ("host/alpine/*.py", "host/alpine/*.txt", "host/alpine/config/*", "tools/sync/dag.py", "tools/sync/report.py", "host/alpine/tests/test_provision.py"), tmpdir=True),
     Check("cpu-guard", (CPUGUARD,), py("dotfiles/cpu-guard-test.py"), ("dotfiles/base/.local/bin/cpu-guard", "dotfiles/cpu-guard-test.py")),
+    Check("cpu-slot", (CPUSLOT,), py("dotfiles/cpu-slot-test.py"), ("dotfiles/linux/.local/bin/cpu-slot", "dotfiles/cpu-slot-test.py", "docs/cpu-slot.md"), tmpdir=True, platform="linux"),
     Check("sync-dag", (DAG,), py("tools/sync/test_dag.py"), ("tools/sync/dag.py", "tools/sync/test_dag.py")),
     Check("sync-hosts", (DAG,), py("tools/sync/test_fleet.py"), ("tools/sync/fleet.py", "tools/sync/report.py", "tools/sync/test_fleet.py", "tailscale/policy.json")),
     Check("sync-sh-syntax", (DAG,), ("sh", "-n", "sync"), ("sync",)),

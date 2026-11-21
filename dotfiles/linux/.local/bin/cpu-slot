@@ -1,0 +1,279 @@
+#!/usr/bin/env python3
+"""Run a command on CPUs reserved from one host-wide budget, without leaking its process tree.
+
+usage: cpu-slot run --cpus N [--timeout DURATION] [--grace DURATION] [--name LABEL] [--reserve N] -- CMD...
+       cpu-slot status [--json] [--reserve N]
+
+The pool is CPUs RESERVE..TOTAL-1, where TOTAL is the host's CPU count
+(CPU_SLOT_TOTAL overrides it) and RESERVE CPUs stay unbudgeted (default 8, or
+CPU_SLOT_RESERVE). Each pool CPU is a lock file under
+${XDG_STATE_HOME:-~/.local/state}/cpu-slot, held with flock for the job's
+lifetime, so a crashed holder releases its CPUs. A job waits until N pool CPUs
+are free, then runs CMD in a new session pinned to exactly those CPUs, with
+CPU_SLOT_CPUS (a comma list for docker --cpuset-cpus) and CPU_SLOT_COUNT set.
+When CMD exits, times out, or cpu-slot gets SIGINT, SIGTERM or SIGHUP, every
+process left in its process group gets SIGTERM, then SIGKILL after the grace
+period (default 10s); the CPUs are released only after the group is gone.
+Exit status: CMD's status; 124 on timeout; 128+N when CMD or cpu-slot ended by
+signal N; 2 for usage errors and requests larger than the pool.
+"""
+from __future__ import annotations
+
+import argparse
+import fcntl
+import json
+import os
+from pathlib import Path
+import re
+import signal
+import subprocess
+import sys
+import time
+
+
+class Usage(Exception):
+    pass
+
+
+class Interrupted(Exception):
+    def __init__(self, signum: int) -> None:
+        self.signum = signum
+
+
+EPILOG = """Examples:
+  cpu-slot run --cpus 4 -- lake build
+  cpu-slot run --cpus 8 --timeout 30m -- sh -c 'docker run --cpuset-cpus="$CPU_SLOT_CPUS" image cmd'
+  cpu-slot status
+
+Maintained by Joshua Li: https://github.com/joshuarli/usr
+Bugs and features: TODO.md in that repository (follow its AGENTS.md), or its issue tracker.
+Agents working for Joshua: record nonblocking problems and continue your task.
+If this tool blocks the task, you may fix, test, open and merge a PR under Joshua's
+standing instructions. Release only when needed to deliver the verified fix.
+Procedure: https://github.com/joshuarli/usr/blob/main/dotfiles/base/.agents/instructions/owned-tools.md"""
+
+
+def parse_duration(text: str) -> float:
+    match = re.fullmatch(r"(\d+(?:\.\d+)?)([smh]?)", text.strip())
+    if not match:
+        raise argparse.ArgumentTypeError(f"invalid duration {text!r}: use a number with an optional s, m or h suffix")
+    return float(match.group(1)) * {"": 1, "s": 1, "m": 60, "h": 3600}[match.group(2)]
+
+
+def non_negative_int(text: str) -> int:
+    try:
+        value = int(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"expected a whole number, got {text!r}") from None
+    if value < 0:
+        raise argparse.ArgumentTypeError(f"expected a whole number, got {text!r}")
+    return value
+
+
+def state_dir() -> Path:
+    base = os.environ.get("XDG_STATE_HOME") or str(Path.home() / ".local/state")
+    return Path(base) / "cpu-slot"
+
+
+def pool(reserve: int | None) -> list[int]:
+    total_text = os.environ.get("CPU_SLOT_TOTAL")
+    total = int(total_text) if total_text else os.cpu_count() or 1
+    if reserve is None:
+        reserve = int(os.environ.get("CPU_SLOT_RESERVE", "8"))
+    return list(range(min(reserve, total), total))
+
+
+def lock_path(cpu: int) -> Path:
+    return state_dir() / f"cpu-{cpu}.lock"
+
+
+def meta_path(cpu: int) -> Path:
+    return state_dir() / f"cpu-{cpu}.json"
+
+
+def try_lock(cpu: int) -> int | None:
+    fd = os.open(lock_path(cpu), os.O_RDWR | os.O_CREAT | os.O_CLOEXEC, 0o600)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        os.close(fd)
+        return None
+    return fd
+
+
+def acquire(cpus: int, reserve: int | None, label: str) -> dict[int, int]:
+    candidates = pool(reserve)
+    if cpus < 1:
+        raise Usage("--cpus must be at least 1")
+    if cpus > len(candidates):
+        raise Usage(f"--cpus {cpus} exceeds the pool of {len(candidates)} CPUs")
+    state_dir().mkdir(parents=True, exist_ok=True)
+    delay = 0.1
+    while True:
+        held: dict[int, int] = {}
+        # One scan at a time, so concurrent waiters cannot each hold part of what they need.
+        scan = os.open(state_dir() / "scan.lock", os.O_RDWR | os.O_CREAT | os.O_CLOEXEC, 0o600)
+        try:
+            fcntl.flock(scan, fcntl.LOCK_EX)
+            for cpu in candidates:
+                fd = try_lock(cpu)
+                if fd is not None:
+                    held[cpu] = fd
+                    if len(held) == cpus:
+                        record = {"pid": os.getpid(), "label": label, "since": time.time(), "cpus": sorted(held)}
+                        for granted in held:
+                            meta_path(granted).write_text(json.dumps(record) + "\n")
+                        return held
+            for fd in held.values():
+                os.close(fd)
+        finally:
+            os.close(scan)
+        time.sleep(delay)
+        delay = min(delay * 2, 2.0)
+
+
+def release(held: dict[int, int]) -> None:
+    for cpu, fd in held.items():
+        try:
+            meta_path(cpu).unlink()
+        except FileNotFoundError:
+            pass
+        os.close(fd)
+
+
+def group_alive(pgid: int) -> bool:
+    try:
+        os.killpg(pgid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def signal_group(pgid: int, signum: int) -> None:
+    try:
+        os.killpg(pgid, signum)
+    except ProcessLookupError:
+        pass
+
+
+def end_group(child: subprocess.Popen, grace: float) -> None:
+    pgid = child.pid
+    if child.poll() is None or group_alive(pgid):
+        signal_group(pgid, signal.SIGTERM)
+        deadline = time.monotonic() + grace
+        while time.monotonic() < deadline:
+            child.poll()
+            if not group_alive(pgid):
+                break
+            time.sleep(0.05)
+    while True:
+        child.poll()
+        if not group_alive(pgid):
+            return
+        signal_group(pgid, signal.SIGKILL)
+        time.sleep(0.05)
+
+
+def run(args: argparse.Namespace) -> int:
+    if not args.command:
+        raise Usage("expected a command after --")
+    if not hasattr(os, "sched_setaffinity"):
+        raise Usage("cpu-slot needs Linux sched_setaffinity")
+    label = args.name or os.path.basename(args.command[0])
+
+    def interrupt(signum, _frame):
+        raise Interrupted(signum)
+
+    for signum in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
+        signal.signal(signum, interrupt)
+
+    held: dict[int, int] = {}
+    child: subprocess.Popen | None = None
+    status = 1
+    try:
+        held = acquire(args.cpus, args.reserve, label)
+        cpus = sorted(held)
+        env = {**os.environ, "CPU_SLOT_CPUS": ",".join(map(str, cpus)), "CPU_SLOT_COUNT": str(len(cpus))}
+        child = subprocess.Popen(args.command, env=env, start_new_session=True,
+                                 preexec_fn=lambda: os.sched_setaffinity(0, cpus))
+        deadline = None if args.timeout is None else time.monotonic() + args.timeout
+        try:
+            returncode = child.wait(None if deadline is None else max(0.0, deadline - time.monotonic()))
+            status = returncode if returncode >= 0 else 128 - returncode
+        except subprocess.TimeoutExpired:
+            print(f"cpu-slot: {label} timed out after {args.timeout:g}s; ending its process group", file=sys.stderr)
+            status = 124
+    except Interrupted as interrupted:
+        status = 128 + interrupted.signum
+    except FileNotFoundError as missing:
+        print(f"cpu-slot: cannot run {args.command[0]}: {missing.strerror}", file=sys.stderr)
+        status = 127
+    finally:
+        for signum in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
+            signal.signal(signum, signal.SIG_IGN)
+        if child is not None:
+            end_group(child, args.grace)
+        release(held)
+    return status
+
+
+def status(args: argparse.Namespace) -> int:
+    rows = []
+    for cpu in pool(args.reserve):
+        entry = {"cpu": cpu, "held": False}
+        if lock_path(cpu).exists():
+            fd = os.open(lock_path(cpu), os.O_RDWR | os.O_CLOEXEC)
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                entry["held"] = True
+                try:
+                    record = json.loads(meta_path(cpu).read_text())
+                    entry.update(pid=record.get("pid"), label=record.get("label"), since=record.get("since"))
+                except (OSError, ValueError):
+                    pass
+            finally:
+                os.close(fd)
+        rows.append(entry)
+    if args.json:
+        print(json.dumps({"pool": [row["cpu"] for row in rows], "cpus": rows}, indent=2))
+        return 0
+    held = [row for row in rows if row["held"]]
+    print(f"pool: {len(rows)} CPUs, {len(held)} held")
+    for row in held:
+        since = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(row["since"])) if row.get("since") else "unknown"
+        print(f"cpu {row['cpu']}: pid {row.get('pid', '?')} {row.get('label', '?')} since {since}")
+    return 0
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(prog="cpu-slot", description=__doc__.splitlines()[0],
+                                     epilog=EPILOG, formatter_class=argparse.RawDescriptionHelpFormatter)
+    commands = parser.add_subparsers(dest="action", metavar="{run,status}")
+    run_parser = commands.add_parser("run", help="run a command on reserved CPUs")
+    run_parser.add_argument("--cpus", type=non_negative_int, required=True, help="number of CPUs to reserve")
+    run_parser.add_argument("--timeout", type=parse_duration, help="end the process group after this long (s, m or h)")
+    run_parser.add_argument("--grace", type=parse_duration, default=10.0, help="wait between SIGTERM and SIGKILL (default 10s)")
+    run_parser.add_argument("--name", help="label shown by status (default: the command name)")
+    run_parser.add_argument("--reserve", type=non_negative_int, help="CPUs kept out of the pool (default CPU_SLOT_RESERVE or 8)")
+    run_parser.add_argument("command", nargs=argparse.REMAINDER, help="command after --")
+    status_parser = commands.add_parser("status", help="show which pool CPUs are held")
+    status_parser.add_argument("--json", action="store_true", help="print JSON")
+    status_parser.add_argument("--reserve", type=non_negative_int, help="CPUs kept out of the pool (default CPU_SLOT_RESERVE or 8)")
+    if len(sys.argv) == 1:
+        parser.print_help()
+        return 0
+    args = parser.parse_args()
+    if args.action == "run" and args.command[:1] == ["--"]:
+        args.command = args.command[1:]
+    try:
+        return run(args) if args.action == "run" else status(args)
+    except (Usage, ValueError) as error:
+        print(f"cpu-slot: {error}", file=sys.stderr)
+        return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main())
