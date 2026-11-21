@@ -43,7 +43,8 @@ def show_record(path, identifier):
     following = re.search(r'^### ', text[matches[0].end():], re.M)
     end = matches[0].end() + following.start() if following else len(text)
     try:
-        _, _, _, records = parse(header.group() + '\n' + text[start:end])
+        prefix = header.group() + '\n'
+        _, _, _, records = parse(prefix + text[start:end], text.count('\n', 0, start) - prefix.count('\n'))
     except ValueError as error:
         raise ValueError(f'{path}: {error}') from error
     return {key: value for key, value in records[0].items() if not key.startswith('_')}
@@ -96,7 +97,37 @@ def show_ticket(identifier, filename):
     print(json.dumps({'repository_root': str(root), **record}, indent=2))
 
 
-def parse(text):
+FIELD_START = re.compile(r'- \*\*([^*]+?):\*\*')
+
+
+def field_block_error(text, start, end):
+    line = text.count('\n', 0, start) + 1
+    lines = text[start:end].split('\n')
+    if lines[0] != '':
+        return f'line {line}: expected a blank line after the heading'
+    index = 1
+    while index < len(lines) and lines[index].startswith('- **'):
+        current = lines[index]
+        label = FIELD_START.match(current)
+        if label is None or label.group(1) not in NAMES:
+            name = label.group(1) if label else current[:40]
+            return f'line {line + index}: unknown field "{name}"'
+        if not FIELD.fullmatch(current + '\n'):
+            return f'line {line + index}: expected "- **{label.group(1)}:** value"'
+        index += 1
+    present = {found.group(1) for current in lines[1:index] if (found := FIELD_START.match(current))}
+    missing = {label for label, name in NAMES.items() if name in REQUIRED} - present
+    for offset, current in enumerate(lines[1:index], 1):
+        embedded = [found.group(1) for found in FIELD_START.finditer(current, 1) if found.group(1) in missing]
+        if embedded:
+            return f'line {line + offset}: field "{embedded[0]}" must start its own line'
+    for offset, current in enumerate(lines[index:], index):
+        if found := FIELD.fullmatch(current + '\n'):
+            return f'line {line + offset}: field "{found.group(1)}" outside the field block'
+    return None
+
+
+def parse(text, line_offset=0):
     header = HEADER.match(text)
     if not header:
         raise ValueError('expected Prefix and Next header')
@@ -115,6 +146,10 @@ def parse(text):
                 raise ValueError(f'{match.group(1)}: duplicate {key}')
             values[key] = field.group(2)
         identifier, priority, title = match.groups()
+        error = field_block_error(text, match.end(), end)
+        if error is not None:
+            line, _, detail = error.partition(': ')
+            raise ValueError(f'{identifier}: line {int(line.split()[1]) + line_offset}: {detail}')
         if identifier in seen or not identifier.startswith(prefix + '-'):
             raise ValueError(f'{identifier}: duplicate ID or wrong prefix')
         seen.add(identifier)

@@ -171,7 +171,23 @@ class TodoTests(unittest.TestCase):
         self.assertEqual(json.loads(self.cli('show', 'CHB-10').stdout)['id'], 'CHB-10')
         result = self.cli('show', 'CHB-9', ok=False)
         self.assertIn('CHB-9', result.stderr)
-        self.assertIn('missing fields', result.stderr)
+        self.assertIn('unknown field "Status"', result.stderr)
+
+    def test_check_names_the_line_and_field_that_break_a_ticket(self):
+        self.cli('add', '--json', '-', data=ITEM)
+        original = self.path.read_text()
+        lines = original.split('\n')
+        effort = lines.index('- **Effort:** S') + 1
+        cases = [
+            (original.replace('- **Effort:** S\n', '- **Effort:** S\n- **Acceptance:** passes\n'),
+             f'ABC-1: line {effort + 1}: unknown field "Acceptance"'),
+            (original.replace('- **Fix with:** none\n- **Effort:** S\n', '- **Fix with:** none - **Effort:** S\n'),
+             f'ABC-1: line {effort - 1}: field "Effort" must start its own line'),
+        ]
+        for text, message in cases:
+            self.path.write_text(text)
+            self.assertIn(message, json.loads(self.cli('check', '--json', ok=False).stdout)['errors'][0])
+            self.assertIn(message, self.cli('show', 'ABC-1', ok=False).stderr)
 
     def test_show_rejects_ambiguous_global_ids_and_skips_worktrees(self):
         first = self.remote_backlog('one')
