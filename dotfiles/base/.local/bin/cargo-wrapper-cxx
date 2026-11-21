@@ -1,0 +1,9 @@
+#!/bin/sh
+
+if command -v kache >/dev/null 2>&1 && command -v clang++ >/dev/null 2>&1; then
+    exec kache clang++ "$@"
+fi
+if command -v clang++ >/dev/null 2>&1; then
+    exec clang++ "$@"
+fi
+exec c++ "$@"

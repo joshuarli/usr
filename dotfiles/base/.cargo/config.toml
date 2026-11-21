@@ -1,10 +1,15 @@
 [build]
-rustc-wrapper = "kache"
+# The wrapper keeps the file name kache: cc-rs reuses RUSTC_WRAPPER as the C
+# compiler wrapper only for known cache names, which caches cross-target C
+# builds that set no TARGET_CC. It runs rustc directly when kache is absent.
+rustc-wrapper = ".local/lib/cargo-kache/kache"
 
 [env]
+# kache init adds this key when it is missing. cc-rs reads it only when a
+# compiler value is several words, so it does not affect the wrappers below.
 CC_KNOWN_WRAPPER_CUSTOM = "kache"
-HOST_CXX = "kache clang++"
-HOST_CC = "kache clang"
+HOST_CXX = "cargo-wrapper-cxx"
+HOST_CC = "cargo-wrapper-cc"
 
 # Link with the installed mold. /usr/local/libexec/mold/ld is a symlink to
 # /usr/local/bin/mold, and -B makes the C compiler driver use it as `ld`.
@@ -16,4 +21,3 @@ rustflags = ["-Clink-arg=-B/usr/local/libexec/mold"]
 [target.aarch64-unknown-linux-musl]
 linker = "clang"
 rustflags = ["-Clink-arg=-B/usr/local/libexec/mold"]
-

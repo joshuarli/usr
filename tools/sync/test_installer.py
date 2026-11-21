@@ -731,7 +731,7 @@ sys.exit(1)
     def test_musl_builds_are_refused_without_the_musl_loader(self):
         inst = self.make(os_name="linux", arch="aarch64")
         inst.musl_loader = False
-        for install in (inst.install_python3, inst.install_ffmpeg):
+        for install in (inst.install_ffmpeg,):
             with self.assertRaises(SkipInstall) as ctx:
                 install()
             self.assertIn("/lib/ld-musl-aarch64.so.1 is missing", str(ctx.exception))
@@ -1329,14 +1329,88 @@ sys.exit(1)
         self.assertIn("gluon", linux_arm)
         self.assertIn("lz", default_tools("linux", "x86_64", ""))
         glibc = default_tools("linux", "x86_64", "", musl_loader=False)
-        for tool in ("python3", "ffmpeg", "player"):
+        for tool in ("ffmpeg", "player"):
             self.assertNotIn(tool, glibc)
+        self.assertIn("python3", glibc)
         self.assertEqual([t for t in default_tools("linux", "x86_64", "", musl_loader=True)
-                          if t not in ("python3", "ffmpeg", "player")], glibc)
-        self.assertIn("python3", default_tools("linux", "x86_64", "", musl_loader=True))
+                          if t not in ("ffmpeg", "player")], glibc)
+        musl = default_tools("linux", "x86_64", "", musl_loader=True)
+        for tool in ("python3", "ffmpeg", "player"):
+            self.assertIn(tool, musl)
+        for tool in ("python3", "ffmpeg"):
+            self.assertIn(tool, default_tools("darwin", "aarch64", ""))
         server_file = self.root / "server.txt"
         server_file.write_text("fd\nrg\n")
         self.assertEqual(default_tools("linux", "x86_64", "server", server_file), ["fd", "rg"])
+
+    def fake_uv(self, directory=None):
+        directory = directory or self.bin
+        script = directory / "uv"
+        script.write_text("""#!/bin/sh
+printf '%s|' "$@" >> "$UV_TEST_LOG"
+printf '\\n' >> "$UV_TEST_LOG"
+case "$1:$2" in
+    python:install)
+        printf 'root=%s\\n' "$UV_PYTHON_INSTALL_DIR" >> "$UV_TEST_LOG"
+        bin_dir="$UV_PYTHON_INSTALL_DIR/cpython-3.15.1-linux-x86_64-gnu/bin"
+        mkdir -p "$bin_dir"
+        printf '#!/bin/sh\\nexit 0\\n' > "$bin_dir/python3.15"
+        chmod +x "$bin_dir/python3.15"
+        ;;
+    python:find)
+        printf '%s\\n' "$UV_PYTHON_INSTALL_DIR/cpython-3.15.1-linux-x86_64-gnu/bin/python3.15"
+        ;;
+    *)
+        exit 1
+        ;;
+esac
+""")
+        script.chmod(0o755)
+        return script
+
+    def test_python3_without_the_musl_loader_installs_cpython_with_uv(self):
+        self.fake_uv()
+        inst = self.make()
+        inst.musl_loader = False
+        inst.env["UV_TEST_LOG"] = str(self.root / "uv.log")
+        inst.install_python3()
+        uv_root = self.home / ".local/share/uv-python"
+        interpreter = uv_root / "cpython-3.15.1-linux-x86_64-gnu/bin/python3.15"
+        self.assertTrue(interpreter.is_file())
+        for name in ("python3", "python3.15"):
+            self.assertEqual(os.readlink(self.dest_path(name)), str(interpreter))
+        self.assertEqual(self.state("python3"), f"uv:3.15:{interpreter}")
+        self.assertTrue(inst.changed)
+        self.assertEqual((self.root / "uv.log").read_text().splitlines(), [
+            "python|install|3.15|",
+            f"root={uv_root}",
+            "python|find|--managed-python|3.15|",
+        ])
+        fresh = self.make()
+        fresh.musl_loader = False
+        fresh.env["UV_TEST_LOG"] = str(self.root / "uv-second.log")
+        fresh.install_python3()
+        self.assertFalse(fresh.changed)
+        fresh.record_managed_installs()
+        lines = {f"{kind}\t{path}" for kind, path in fresh.claims}
+        self.assertIn(f"D\t{uv_root}", lines)
+        self.assertIn(f"F\t{self.dest_path('python3')}", lines)
+        self.assertIn(f"F\t{self.dest_path('python3.15')}", lines)
+        self.assertIn(f"F\t{self.home}/.local/state/dl/python3", lines)
+
+    def test_python3_fallback_installs_uv_when_it_is_missing(self):
+        inst = self.make()
+        inst.musl_loader = False
+        inst.env["UV_TEST_LOG"] = str(self.root / "uv.log")
+
+        def install_uv():
+            self.fake_uv(self.dest_path("uv").parent)
+            inst.changed = True
+
+        with patch.object(inst, "install_uv", side_effect=install_uv) as install:
+            inst.install_python3()
+        install.assert_called_once_with()
+        self.assertTrue(self.dest_path("python3").is_symlink())
 
     def test_record_managed_installs(self):
         inst = self.make()
