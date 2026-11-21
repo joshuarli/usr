@@ -1,5 +1,5 @@
 Prefix: USR
-Next: 128
+Next: 129
 
 ### USR-83 · P2 · running sessions on two hosts cannot reach each other over intercom
 
@@ -71,6 +71,15 @@ Next: 128
 - **Problem:** On 2026-11-20 on this Mac, Codex bridge workers started after about 18:02 local exited mid-run with no turn.completed, turn.failed or error event and stderr only Reading additional input from stdin; the bridge reported interrupted with no fallback. Affected: usrw_de2f41eb, usrw_ae450e43, usrw_b0273670, usrw_593cd847 and usrw_47289e45 in another checkout, and usrw_ff4bc30e and usrw_32520f9d here. The first deaths overlapped a bridge test run (pid 25124), but usrw_47289e45 died at about 02:08:50Z after 21 completed items with no node --test process running, no jetsam or memorystatus log entries, 71% free memory and 686 of 8000 user processes. Workers started before 18:02 ran for an hour. The cause is unestablished: candidates include a test or tool signalling a process group it did not create, an external reaper, and Codex CLI itself exiting.
 - **Recommendation:** Reproduce with a long Codex worker while recording the exit status and signal of the codex process (for example by having the bridge launcher record wait status) and process accounting around the exit, then fix the killer or, if Codex exits on its own, classify a silent exit before edits as a provider failure eligible for fallback. Acceptance: a recorded death names its signal or exit status, and a regression check keeps an unrelated detached worker process group alive across the full bridge test suite.
 - **Fix with:** root-cause
+- **Effort:** M
+
+### USR-128 · P2 · sh sync on Ubuntu 24.04 leaves the agent control plane incomplete
+
+- **Area:** Sync · Linux hosts
+- **Where:** sync (entry shim); tools/sync/installer.py:1703 (Node npm check); tools/sync/main.py:393 (kache goal); dotfiles/base/.cargo/config.toml (rustc-wrapper)
+- **Problem:** A pristine ubuntu:24.04 arm64 container (2026-11-21, usr deee8dc2, clone at ~/usr, run as root) cannot set up the agent control plane. (1) `sh sync plan` exits 1: 'no working Python 3.9+'; glibc Linux has no bootstrap, so python3 must preinstall. (2) With python3 and curl installed, `sh sync` fails tool:nodejs with 'Node.js archive does not contain a working bundled npm': the official linux-arm64 node needs libatomic.so.1, which the image lacks and sync never names. Nine tasks block on it, including tool:pi, pnpm, cmd, cf, pi-auth, claude-mcp and pi-mcp, so `pi-subagent-bridge` exits 'node: not found'. (3) tool:python3 and tool:ffmpeg fail with FileNotFoundError on their musl binaries (python-build#19; Ubuntu 24.04 musl is 1.2.4). (4) kache is a default goal only when ~/.cargo/bin/rustup exists at sync time, yet the linked ~/.cargo/config.toml always sets rustc-wrapper = "kache", so cargo fails in every Rust repository until rustup is installed and sync reruns. todo, worktree-retire, mdtool, fastermod, fd, rg and the skills install correctly. jaq is not in the Linux default tool list.
+- **Recommendation:** State the Debian/Ubuntu prerequisites (python3, curl, libatomic1, and rustup before sync) in README and agent-setup, and have sync report a missing libatomic instead of 'no working bundled npm'. Fall back to a verified uv CPython where python-build cannot run (the buildlib shim's fallback). Keep the kache wrapper from breaking cargo when kache is absent, by linking the cargo config only once kache is installed. Acceptance: a fresh ubuntu:24.04 container that follows the documented commands gets todo, pi-subagent-bridge --help, node, pnpm and a working cargo build.
+- **Fix with:** none
 - **Effort:** M
 
 ### USR-75 · P3 · clang plus mold host links intermittently segfault and leave truncated artifacts
