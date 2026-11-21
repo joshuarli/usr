@@ -1,6 +1,6 @@
 import { registerSubagentCapabilityCeiling, type SubagentCapabilityCeilingHandle } from "pi-subagents/capability-ceiling"
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent"
-import { DELEGATION, isDevinTier, isMuseTier, MUSE_DELEGATION, DEVIN_DELEGATION, type Tier } from "./tier-policy.ts"
+import { DELEGATION, isDevinTier, DEVIN_DELEGATION, type Tier } from "./tier-policy.ts"
 
 type Block = { block: true; reason: string }
 const DENIED_FIELDS = new Set([
@@ -16,7 +16,7 @@ const CONTROL_FIELDS = new Set(["action", "id", "index", "message", "mode", "vie
 const START_FIELDS = new Set(["agent", "task", "async", "options"])
 
 /** Reject model-controlled attempts to escape the typed tier graph or reconfigure a nested launch. */
-export type GuardFamily = "go" | "muse" | "devin"
+export type GuardFamily = "go" | "devin"
 export function nestedCallRefusal(parent: Tier, toolName: string, input: unknown, family: GuardFamily = "go"): string | undefined {
   if (toolName === "subagent_launch") return "Nested workflow scripts are not permitted by usr tier policy"
   if (toolName !== "subagent") return undefined
@@ -40,9 +40,8 @@ export function nestedCallRefusal(parent: Tier, toolName: string, input: unknown
     return "Nested delegation requires options.agentScope=user with no other options"
   if (typeof request.task !== "string" || !request.task.trim() || request.task.length > 32_000)
     return "Nested delegation requires a nonempty bounded task"
-  const allowed: readonly string[] = family === "muse"
-    ? (isMuseTier(parent) ? MUSE_DELEGATION[parent] : [])
-    : family === "devin" ? (isDevinTier(parent) ? DEVIN_DELEGATION[parent] : [])
+  const allowed: readonly string[] = family === "devin"
+    ? (isDevinTier(parent) ? DEVIN_DELEGATION[parent] : [])
     : DELEGATION[parent]
   if (typeof request.agent !== "string" || !allowed.includes(request.agent))
     return `Tier ${parent} cannot delegate to ${String(request.agent)}`
@@ -55,11 +54,10 @@ export function nestedCallRefusal(parent: Tier, toolName: string, input: unknown
  * capability ceilings intersect monotonically and survive nested + async runs.
  */
 export function registerTierGuard(parent: Tier, family: GuardFamily = "go"): (pi: ExtensionAPI) => void {
-  const special = family === "muse" ? isMuseTier(parent) : family === "devin" ? isDevinTier(parent) : false
+  const special = family === "devin" ? isDevinTier(parent) : false
   if (family !== "go" && !special) throw new Error("Special provider cannot execute this tier")
-  const children: readonly string[] = family === "muse"
-    ? MUSE_DELEGATION.worker
-    : family === "devin" ? (isDevinTier(parent) ? DEVIN_DELEGATION[parent] : []) : DELEGATION[parent]
+  const children: readonly string[] = family === "devin"
+    ? (isDevinTier(parent) ? DEVIN_DELEGATION[parent] : []) : DELEGATION[parent]
   return (pi: ExtensionAPI) => {
     let ceiling: SubagentCapabilityCeilingHandle | undefined
     pi.on("session_start", (_event, ctx) => {

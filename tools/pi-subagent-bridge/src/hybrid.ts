@@ -11,8 +11,7 @@ import { activeWorktreeOwner, claimWorktree, ensureWorktree, releaseWorktree } f
 import { releaseOwnTerminalLease } from "./inspect.ts"
 
 import { DELEGATION, isBridgeTier, type BridgeTier } from "./tier-policy.ts"
-import { piInstalled, diagnoseGoModel } from "./optional-pi.ts"
-import { musePreflight, museVersion } from "./muse-subscription.ts"
+import { diagnoseGoModel } from "./optional-pi.ts"
 import { devinPreflight } from "./devin-provider.ts"
 import { changes, currentBranch, git, laneHead, outside, readStateDir, stateDir } from "./git.ts"
 import {
@@ -254,7 +253,6 @@ export function makeHybridBridge(api: PiAdapter, command = {
     for (let index = from; index < plan.pi.length; index++) {
       const candidate = plan.pi[index]
       if (contributorModel(candidate.providerID, candidate.id) && !contributorAllowed(cwd)) continue
-      if (candidate.providerID === "muse-sdk") process.env.PI_MUSE_SDK_CONTRIBUTOR = "on"
       try {
         if ((await api(candidate).modelCheck(cwd)).available) return { selection: candidate, next: index + 1 }
       } catch { }
@@ -436,18 +434,8 @@ export function makeHybridBridge(api: PiAdapter, command = {
       const plan = resolvePolicy(tierInput)
       if (plan.kind === "leaf") return { primary: { backend: plan.target.executor, ...plan.target.selection, available: targetAvailable(plan.target) }, fallback: null }
       const [firstPi] = plan.pi
-      const museModel = plan.pi.find(pin => pin.providerID === "muse-sdk")
       const goModel = plan.pi.find(pin => pin.providerID === "opencode-go")
       const devinModel = plan.pi.find(pin => pin.providerID === "devin")
-      let museAvailable = false, museIssue: string | null = null
-      if (museModel && !contributorAllowed(dir)) museIssue = "Contributor models disallowed by repository or environment policy"
-      else if (museModel) {
-        try {
-          museAvailable = (await api(museModel).modelCheck(dir)).available
-        } catch (e) { museIssue = String(e) }
-        if (!museAvailable && !museIssue)
-          museIssue = musePreflight().issue ?? "Muse subscription model unavailable; check Muse Code login"
-      }
       let goAvailable = false, goIssue: string | null = null
       if (goModel && contributorModel(goModel.providerID, goModel.id) && !contributorAllowed(dir))
         goIssue = "Contributor models disallowed by repository or environment policy"
@@ -464,11 +452,10 @@ export function makeHybridBridge(api: PiAdapter, command = {
           devinIssue = devinPreflight().issue ?? "Devin SWE-2 Flash is not authenticated in the Pi SDK"
       }
       const devinInfo = { available: devinAvailable, issue: devinIssue }
-      const museInfo = museModel ? { available: museAvailable, issue: museIssue, version: piInstalled() ? museVersion() : null } : { available: false, issue: null, version: null }
       const goInfo = { available: goAvailable, issue: goIssue }
       const piLane = { backend: "pi", model: firstPi,
-        available: firstPi.providerID === "muse-sdk" ? museInfo.available : firstPi.providerID === "devin" ? devinInfo.available : goInfo.available,
-        issue: firstPi.providerID === "muse-sdk" ? museInfo.issue : firstPi.providerID === "devin" ? devinInfo.issue : goInfo.issue }
+        available: firstPi.providerID === "devin" ? devinInfo.available : goInfo.available,
+        issue: firstPi.providerID === "devin" ? devinInfo.issue : goInfo.issue }
       const commandLane = { backend: "command-code", ...plan.command, available: command.available() }
       const codexLane = { backend: "codex", ...plan.codex, available: codex.available() }
       return {
@@ -479,7 +466,6 @@ export function makeHybridBridge(api: PiAdapter, command = {
         command_code: commandLane,
         codex: codexLane,
         pi_fallback: piLane,
-        muse: museModel ? { backend: "pi", model: museModel, available: museInfo.available, issue: museInfo.issue, version: museInfo.version } : undefined,
         opencode_go: goModel ? { backend: "pi", model: goModel, available: goInfo.available, issue: goInfo.issue } : null,
         devin: devinModel ? { backend: "pi", model: devinModel, available: devinInfo.available, issue: devinInfo.issue } : null,
       }

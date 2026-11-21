@@ -50,12 +50,6 @@
       },
       {
         "executor": "pi",
-        "providerID": "muse-sdk",
-        "model": "muse-spark-1.3",
-        "effort": "xhigh"
-      },
-      {
-        "executor": "pi",
         "providerID": "opencode-go",
         "model": "deepseek-v4.1-flash",
         "effort": "high"
@@ -96,22 +90,12 @@
         "variant": "max"
       }
     },
-    "museModels": {
-      "worker": {
-        "providerID": "muse-sdk",
-        "id": "muse-spark-1.3",
-        "variant": "xhigh"
-      }
-    },
     "devinModels": {
       "worker": {
         "providerID": "devin",
         "id": "swe-2-flash",
         "variant": "medium"
       }
-    },
-    "agentNames": {
-      "worker": "muse-worker"
     },
     "devinAgentNames": {
       "worker": "devin-worker"
@@ -134,13 +118,6 @@
         "mechanic",
         "worker",
         "expert"
-      ]
-    },
-    "museDelegation": {
-      "worker": [
-        "scout",
-        "mechanic",
-        "muse-worker"
       ]
     },
     "devinDelegation": {
@@ -197,7 +174,6 @@
     "modelAllowlist": [
       "opencode-go/deepseek-v4.1-flash",
       "opencode-go/muse-spark-1.3-contributor",
-      "muse-sdk/muse-spark-1.3",
       "devin/swe-2-flash"
     ]
   },

@@ -39,5 +39,5 @@ export function contributorAllowed(workerDirectory: string, env: NodeJS.ProcessE
 }
 
 export function contributorModel(provider: string, model: string): boolean {
-  return provider === "muse-sdk" || model.toLowerCase().includes("contributor")
+  return model.toLowerCase().includes("contributor")
 }

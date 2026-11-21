@@ -9,8 +9,7 @@ import { fileURLToPath } from "node:url"
 import type { ModelRef, OpenCodePort } from "./bridge.ts"
 import { readStateDir, stateDir } from "./git.ts"
 import { ensureOpenCodeApiKey } from "./opencode-auth.ts"
-import { GO_TIER_MODELS, MUSE_TIER_MODELS, DEVIN_TIER_MODELS, MAX_SUBAGENT_DEPTH } from "./tier-policy.ts"
-import { musePreflight } from "./muse-subscription.ts"
+import { GO_TIER_MODELS, DEVIN_TIER_MODELS, MAX_SUBAGENT_DEPTH } from "./tier-policy.ts"
 import { devinPreflight } from "./devin-provider.ts"
 import { workerEnvironment } from "./worker-env.ts"
 
@@ -135,12 +134,6 @@ export function piPort(): OpenCodePort {
           id, providerID: config.providerID, enabled: true, status: "active",
           variants: [...config.variants].map((variant) => ({ id: variant })),
         }))
-      if (musePreflight().available) {
-        available.push({
-          id: MUSE_TIER_MODELS.worker.id, providerID: "muse-sdk", enabled: true, status: "active",
-          variants: [{ id: MUSE_TIER_MODELS.worker.variant }],
-        })
-      }
       if (devinPreflight().available) {
         available.push({
           id: DEVIN_TIER_MODELS.worker.id, providerID: "devin", enabled: true, status: "active",

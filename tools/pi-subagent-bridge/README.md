@@ -10,19 +10,19 @@ Bridge tiers: `scout`, `mechanic`, `worker`. Native-only tier: `expert`, which a
 | --- | --- | --- |
 | scout | Command Code `meta/muse-ember` (`medium`) | Pi `opencode-go/muse-spark-1.3-contributor` (`medium`); Codex `gpt-6-luna` (`medium`) |
 | mechanic | Command Code `meta/muse-ember` (`xhigh`) | Pi `opencode-go/muse-spark-1.3-contributor` (`high`); Codex `gpt-6-luna` (`high`) |
-| worker | Command Code `deepseek/deepseek-v4.1-flash` (`high`) | Pi `muse-sdk/muse-spark-1.3` (`xhigh`); Pi `opencode-go/deepseek-v4.1-flash` (`high`); Pi `devin/swe-2-flash` (`medium`); Codex `gpt-6.1-terra` (`high`) |
+| worker | Command Code `deepseek/deepseek-v4.1-flash` (`high`) | Pi `opencode-go/deepseek-v4.1-flash` (`high`); Pi `devin/swe-2-flash` (`medium`); Codex `gpt-6.1-terra` (`high`) |
 <!-- policy:end routing-summary -->
 
 Expert assignments never enter the bridge. Antigravity, Command Code, OpenCode and Devin top-level sessions delegate only through native subagents; Codex uses its configured native subagents (no per-tier pin); Claude Code pins `opus` at `xhigh` effort for expert work; Pi launches its native `expert` profile. `scope-check CWD SCOPE_JSON_FILE [BRANCH] --register TITLE` records a native lane, and `scope-check --lane ID` from its repository records its latest Git scope check. `campaign list` includes these lanes. `scope-check` applies the bridge's Git scope check to such a native lane (see `pi-subagent-bridge scope-check -h`). See [orchestrate](../../dotfiles/base/.agents/skills/orchestrate/SKILL.md).
 
 ## Setup
 
-`sh sync` installs Node.js and Command Code as usual, but installs the Pi 1.5.0 CLI/SDK plus pinned subagents/Muse/intercom dependencies **exclusively from the pinned, SHA-256-verified `pi-build` release archive** named in `tools/pi/runtime.pin.json`. It links the bridge to the same selected dependency closure (no npm install). The bridge MCP is registered for Claude and Pi; OpenCode never registers it (`sh sync` removes an owned OpenCode registration instead). Codex uses tracked config. `sh sync bridge` reconciles MCP registrations; foreign servers are preserved.
+`sh sync` installs Node.js and Command Code as usual, but installs the Pi 1.5.0 CLI/SDK plus pinned subagents/intercom dependencies **exclusively from the pinned, SHA-256-verified `pi-build` release archive** named in `tools/pi/runtime.pin.json`. It links the bridge to the same selected dependency closure (no npm install). The bridge MCP is registered for Claude and Pi; OpenCode never registers it (`sh sync` removes an owned OpenCode registration instead). Codex uses tracked config. `sh sync bridge` reconciles MCP registrations; foreign servers are preserved.
 
 `sh sync plan`
 `sh sync doctor`
 
-The explicit CLI shim is installed at `~/.local/bin/pi-subagent-bridge`. No OpenCode service or `pi -p` is needed. A scoped SDK host loads only pi-subagents and calls its `spawn`/`resume` RPC. The package owns detached child execution, session continuation, and completion artifacts. Interactive Pi loads locally bundled subagents and intercom extensions through its managed launcher; no `pi install`, `pi update`, npm or npx runs on the Pi setup path. The scoped SDK bridge continues to load only subagents and (when needed) Muse, never unrestricted intercom tools.
+The explicit CLI shim is installed at `~/.local/bin/pi-subagent-bridge`. No OpenCode service or `pi -p` is needed. A scoped SDK host loads only pi-subagents and calls its `spawn`/`resume` RPC. The package owns detached child execution, session continuation, and completion artifacts. Interactive Pi loads locally bundled subagents and intercom extensions through its managed launcher; no `pi install`, `pi update`, npm or npx runs on the Pi setup path. The scoped SDK bridge continues to load only subagents and (when needed) the Devin provider, never unrestricted intercom tools.
 
 ## Core-only installation and checks
 
@@ -37,7 +37,7 @@ From this directory:
 - `npm run test:core` checks core types and runs offline core fixtures without the optional adapter suites.
 - `npm run test:no-pi` copies the source into a private fixture without runtime packages. It checks core registration, CLI admission, completion, continuation, MCP model checking, owner RPC, steering and command replay against a deterministic Codex executable. It traps Pi module loading, credential reads and Pi/npm/npx subprocesses.
 - `npm run test:runtime-contract -- --adapter codex` runs the Codex, owner, session and no-Pi fixtures. Supported adapter selections are `codex`, `command-code` and `pi`. Without a selection it runs shared lifecycle fixtures for the subprocess adapters.
-- `npm test` retains the full typecheck and fixture suite, including optional Pi adapter tests. The live Muse smoke test requires its existing explicit opt-in.
+- `npm test` retains the full typecheck and fixture suite, including optional Pi adapter tests.
 
 Fake executors prove bridge lifecycle behavior, not live provider entitlement. The core-only fixture does not qualify Linux binaries or agentctl integration.
 
@@ -66,8 +66,8 @@ New ordinary sessions write schema 4 (`codex-last`); sessions admitted under the
 
 `devin/swe-2-flash` at **medium** effort is an explicitly pinned **last**
 Pi fallback for the `worker` tier and a dedicated interactive
-`devin-worker` profile; the default Codex/Command/Muse/OpenCode routes
-and the worker-tier Muse route are unchanged — no other tier
+`devin-worker` profile; the default Codex/Command/OpenCode routes
+and other worker-tier Pi routes are unchanged — no other tier
 routes to Devin. The provider is supplied by a hash-verified `pi-build` release, never a
 local `pi install`. See [pi-build PR #5](https://github.com/joshuarli/pi-build/pull/5).
 Only the admitted `medium` variant is allowed by the typed tier policy.
@@ -110,7 +110,7 @@ The Pi fallback is a real subagent runtime, not a prompt-only coordination promi
 
 ## MCP tools
 
-`worker_model_check(cwd, tier)` reports the approved routes and current availability for the requested tier. When the Muse route is probed it also reports the `Muse Code` version of the installed `muse` binary it was qualified against. `make policy` exports the approved policy offline without probing account availability.
+`worker_model_check(cwd, tier)` reports the approved routes and current availability for the requested tier. `make policy` exports the approved policy offline without probing account availability.
 
 `worker_start(cwd, title, tier, scope, brief)` admits exactly one scoped assignment in a **clean linked worktree** at `<repo>/.work/wt/<name>`. It returns `usrw_*`; this means **admitted**, not complete. Its scope:
 
@@ -230,40 +230,6 @@ python3 -I tools/sync/opencode-worker-test.py
 ```
 
 `npm test` covers inspection, `watch` and `campaign` (fixture logs and fake `sleep` executors; no real provider). It is an explicit developer check requiring a supported Node; the production archive does not supply that test toolchain, so `./dev-install.sh` installs the exact-pinned dev dependencies (and the pinned runtime closure, for type declarations) into the ignored `.dev/` directory, leaving the runtime `node_modules` symlink untouched. Mock tests cover scope, fallback, locking, resumes, and protocol shape but do not prove live account access or SDK catalog compatibility. Before unattended use, complete a disposable one-file worktree test of each tier, pre-edit model/quota fallback, post-edit quota refusal, same-session resume and restart recovery. Never claim these checks passed without executing them.
-
-## Muse Code subscription
-
-The bridge uses the exact-pinned
-[`pi-muse-subscription`](https://github.com/jkeskikangas/pi-muse-subscription) extension
-as the Pi fallback listed in the generated routing table, after earlier approved routes
-are unavailable or fail conclusively before edits. Expert has no Muse route. The provider is
-loaded only inside Muse SDK workers, never globally into ordinary Pi sessions.
-This is subscription usage via the official Muse Code SDK, **not** the metered Meta API.
-
-- Install Muse Code >=1.4.14, launch `muse`, and sign in with `/login`.
-- Run `sh sync`; it links the bridge to the local pinned SDK/Muse archive, without npm. No environment flag
-  selects the Muse route, and `USR_PI_MUSE_SUBSCRIPTION` is ignored. `sh sync bridge`
-  reconciles the bridge.
-- On a clean *linked* worktree, run `pi-subagent-bridge model-check CWD scout`
-  and a disposable scout task using `worker_start` / `worker_status`. The model
-  check proves the local extension and the OpenCode Go credential exist, **not** entitlement
-  or available quota. The real run verifies both.
-- Monitor `muse usage`. The bridge sets `PI_MUSE_SDK_CONTRIBUTOR=on` for its Muse
-  workers, so Meta may use prompts, code and outputs for training in exchange for
-  more usage; do not route material you cannot share under those terms through the
-  Muse worker lane. Keep `META_API_KEY` unset: it would otherwise select metered
-  API billing (the extension also strips it from its Muse Code subprocess).
-
-Dedicated `muse-worker` profile restricts nested tasks to the Muse subscription
-provider, with immutable equal-or-weaker tier ceilings and max depth 2; scout and
-mechanic children run the pinned Contributor Spark agents instead. The SDK host explicitly loads
-the pinned provider and requires it in each detached child, even when ambient
-extensions are disabled. Admitted sessions retain their pinned provider; uncertain
-admissions retain their lease under [Safety and durability](#safety-and-durability).
-
-This is a community adapter using a developer-preview Muse Code SDK.
-Live account compatibility and network behavior must be tested locally before
-unattended use.
 
 A parent may extend a session by one or two attempts using `worker_resume` fields `extend_attempts` and `extension_reason`, or the corresponding CLI flags. The lifetime extension cap is two; status reports the total.
 

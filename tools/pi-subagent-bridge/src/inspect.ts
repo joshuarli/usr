@@ -143,8 +143,7 @@ function stopCondition(text: string | null, scope: string): { stopped_on: string
 function continuedOn(s: Session): string {
   const target = targetOf(s)
   if (target.executor === "pi")
-    return target.selection.providerID === "muse-sdk" ? "Muse subscription via the Pi SDK" :
-      target.selection.providerID === "devin" ? "Devin via the Pi SDK" : "OpenCode Go via the Pi SDK"
+    return target.selection.providerID === "devin" ? "Devin via the Pi SDK" : "OpenCode Go via the Pi SDK"
   return { codex: "Codex", "command-code": "Command Code", fx: "FX" }[target.executor]
 }
 
@@ -289,8 +288,7 @@ function inheritedNotice(s: Session, state: string): string | null {
     return "The Pi run reached its pinned run deadline and was stopped; the worktree may hold partial work and the bridge will not re-dispatch automatically. Inspect changed_paths, then resume with worker_resume (same scope) or preserve the work before dispatching again."
   }
   if (target.executor === "pi" && ["failed", "interrupted", "cancelled", "canceled"].includes(state)) {
-    const provider = target.selection.providerID === "muse-sdk" ? "the pinned Muse SDK fallback" :
-      target.selection.providerID === "devin" ? "the pinned Devin fallback" : "the pinned OpenCode Go fallback"
+    const provider = target.selection.providerID === "devin" ? "the pinned Devin fallback" : "the pinned OpenCode Go fallback"
     return "The task was admitted to " + provider + " after earlier approved lanes failed or were unavailable, but that Pi run ended in " + state +
       " (see error; it may have left partial edits). The worktree is retained and the lease is released. No automatic retry will occur: a fresh dispatch" +
       " re-admits with the best available lane, and a provider usage-limit error (for example 429) means every pinned lane is exhausted —" +

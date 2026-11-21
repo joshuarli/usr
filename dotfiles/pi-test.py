@@ -14,7 +14,6 @@ from release_cache import seed  # noqa: E402
 PROFILE = ROOT / "dotfiles/base/.pi/agent"
 MODEL = "opencode-go/muse-spark-1.3-contributor"
 GO = "opencode-go/deepseek-v4.1-flash"
-MUSE = "muse-sdk/muse-spark-1.3"
 DEVIN = "devin/swe-2-flash"
 WRITER_TOOLS = ["read", "bash", "edit", "write", "grep", "find", "ls", "subagent", "subagent_supervisor"]
 
@@ -136,13 +135,12 @@ class PiTests(unittest.TestCase):
         depth_settings = json.loads((PROFILE / "extensions/subagent/config.json").read_text())
         self.assertEqual(depth_settings["maxSubagentDepth"], 2)
         self.assertTrue(sub["modelScope"]["strict"])
-        self.assertEqual(set(sub["modelScope"]["allow"]), {GO, MODEL, MUSE, DEVIN})
+        self.assertEqual(set(sub["modelScope"]["allow"]), {GO, MODEL, DEVIN})
         expected = {
             "scout": (MODEL, "medium", ["scout"], ["read", "grep", "find", "ls", "subagent", "subagent_supervisor"]),
             "mechanic": (MODEL, "high", ["scout", "mechanic"], WRITER_TOOLS),
             "worker": (GO, "high", ["scout", "mechanic", "worker"], WRITER_TOOLS),
             "expert": (GO, "max", ["scout", "mechanic", "worker", "expert"], WRITER_TOOLS),
-            "muse-worker": (MUSE, "xhigh", ["scout", "mechanic", "muse-worker"], WRITER_TOOLS),
             "devin-worker": (DEVIN, "medium", ["scout", "mechanic", "devin-worker"], WRITER_TOOLS),
         }
         for name, (model, effort, children, tools) in expected.items():
@@ -157,12 +155,10 @@ class PiTests(unittest.TestCase):
             ])
             self.assertIn(block + "\n# policy:end native-profile", agent)
             self.assertNotIn("  - god\n", agent)
-        for deleted in ("muse-scout", "muse-mechanic"):
-            self.assertFalse((PROFILE / "agents" / (deleted + ".md")).exists(),
-                             "Muse scout/mechanic profiles are retired")
+        self.assertFalse((PROFILE / "agents/muse-worker.md").exists(), "Muse worker profile is retired")
         self.assertFalse((PROFILE / "models.json").exists(),
                          "No custom OpenCode Zen catalog is permitted for delegated workers")
-        self.assertTrue(all(name.startswith(("opencode-go/", "muse-sdk/", "devin/")) for name in sub["modelScope"]["allow"]))
+        self.assertTrue(all(name.startswith(("opencode-go/", "devin/")) for name in sub["modelScope"]["allow"]))
         self.assertNotIn("god", sub["agentOverrides"])
         self.assertFalse((PROFILE / "agents/god.md").exists())
         self.assertEqual(os.readlink(PROFILE / "AGENTS.md"), "../../.codex/AGENTS.md")

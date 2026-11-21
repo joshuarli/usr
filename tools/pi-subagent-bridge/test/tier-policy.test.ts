@@ -4,8 +4,8 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync, existsSync } from "node:
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import {
-  assertDelegation, canDelegate, DELEGATION, GO_TIER_MODELS, MUSE_TIER_MODELS, MUSE_AGENT_NAMES,
-  MUSE_DELEGATION, museSubscriptionSelected, DEVIN_TIER_MODELS, DEVIN_AGENT_NAMES, DEVIN_DELEGATION,
+  assertDelegation, canDelegate, DELEGATION, GO_TIER_MODELS,
+  DEVIN_TIER_MODELS, DEVIN_AGENT_NAMES, DEVIN_DELEGATION,
   MAX_SUBAGENT_DEPTH, PI_MODEL_ALLOWLIST, PI_RUN_DEADLINE_MS,
   TIER_TOOLS, TIERS, tierForModel, type ChildOf, type Tier,
 } from "../src/tier-policy.ts"
@@ -28,13 +28,12 @@ if (false) {
   typechecked("expert", "god")
 }
 
-function profile(tier: Tier, family: "go" | "muse" | "devin" = "go"): string {
-  const muse = family === "muse"
+function profile(tier: Tier, family: "go" | "devin" = "go"): string {
   const devin = family === "devin"
   const devinTier = tier as keyof typeof DEVIN_TIER_MODELS
-  const pin = devin ? DEVIN_TIER_MODELS[devinTier] : muse ? MUSE_TIER_MODELS.worker : GO_TIER_MODELS[tier]
-  const name = devin ? DEVIN_AGENT_NAMES[devinTier] : muse ? MUSE_AGENT_NAMES.worker : tier
-  const children = devin ? DEVIN_DELEGATION[devinTier] : muse ? MUSE_DELEGATION.worker : DELEGATION[tier]
+  const pin = devin ? DEVIN_TIER_MODELS[devinTier] : GO_TIER_MODELS[tier]
+  const name = devin ? DEVIN_AGENT_NAMES[devinTier] : tier
+  const children = devin ? DEVIN_DELEGATION[devinTier] : DELEGATION[tier]
   return [
     "---", "name: " + name, "description: Fixed profile",
     "model: " + pin.providerID + "/" + pin.id,
@@ -52,9 +51,6 @@ function profileSettings(): object {
     agentOverrides: Object.fromEntries([
       ...TIERS.map((tier) => [tier, { model: GO_TIER_MODELS[tier].providerID + "/" + GO_TIER_MODELS[tier].id,
         thinking: GO_TIER_MODELS[tier].variant }]),
-      [MUSE_AGENT_NAMES.worker, {
-        model: MUSE_TIER_MODELS.worker.providerID + "/" + MUSE_TIER_MODELS.worker.id,
-        thinking: MUSE_TIER_MODELS.worker.variant }],
       ...Object.entries(DEVIN_TIER_MODELS).map(([tier, pin]) => [
         DEVIN_AGENT_NAMES[tier as keyof typeof DEVIN_AGENT_NAMES],
         { model: pin.providerID + "/" + pin.id, thinking: pin.variant }]),
@@ -63,7 +59,6 @@ function profileSettings(): object {
       allow: [...PI_MODEL_ALLOWLIST],
       agents: Object.fromEntries([
         ...TIERS.map((tier) => [tier, { allow: [GO_TIER_MODELS[tier].providerID + "/" + GO_TIER_MODELS[tier].id] }]),
-        [MUSE_AGENT_NAMES.worker, { allow: [MUSE_TIER_MODELS.worker.providerID + "/" + MUSE_TIER_MODELS.worker.id] }],
         ...Object.entries(DEVIN_TIER_MODELS).map(([tier, pin]) => [
           DEVIN_AGENT_NAMES[tier as keyof typeof DEVIN_AGENT_NAMES],
           { allow: [pin.providerID + "/" + pin.id] }]),
@@ -137,10 +132,8 @@ test("real YAML profiles are validated as runtime policy; drift fails before spa
     assert.throws(() => assertTierProfile(tier,
       profile(tier, family).replace("timeoutMs: " + PI_RUN_DEADLINE_MS + "\n", ""), family), /Unapproved/)
   }
-  assertTierProfile("worker", profile("worker", "muse"), "muse")
   assertTierProfile("worker", profile("worker", "devin"), "devin")
   assert.throws(() => assertTierProfile("expert", profile("expert"), "devin"), /Unapproved/)
-  assert.ok(existsSync(tierGuardPath("worker", { providerID: "muse-sdk" })))
   assert.ok(existsSync(tierGuardPath("worker", { providerID: "devin" })))
   assert.throws(() => tierGuardPath("scout", { providerID: "devin" }), /Devin cannot/)
   assert.throws(() => tierGuardPath("expert", { providerID: "devin" }), /Devin cannot/)
@@ -152,7 +145,6 @@ test("profile checks enforce one exact pinned scope and one max depth", () => {
   mkdirSync(agentDir)
   try {
     for (const tier of TIERS) writeFileSync(join(agentDir, tier + ".md"), profile(tier))
-    writeFileSync(join(agentDir, MUSE_AGENT_NAMES.worker + ".md"), profile("worker", "muse"))
     writeFileSync(join(agentDir, DEVIN_AGENT_NAMES.worker + ".md"), profile("worker", "devin"))
     const settings = profileSettings()
     writeFileSync(join(home, "settings.json"), JSON.stringify(settings))
@@ -196,22 +188,6 @@ test("installed child guard registers a real monotonic capability ceiling", () =
   }
   assert.equal(resolveCurrentSubagentCapabilityCeiling(sessionId), undefined)
 })
-
-test("Muse worker pins and nested tiers fail closed", () => {
-  assert.equal(museSubscriptionSelected("worker"), true)
-  assert.equal(museSubscriptionSelected("scout"), false)
-  assert.equal(museSubscriptionSelected("mechanic"), false)
-  assert.equal(museSubscriptionSelected("expert"), false)
-  assert.equal(tierForModel(MUSE_TIER_MODELS.worker, false), "worker")
-  assert.throws(() => tierForModel({ providerID: "muse-sdk", id: "muse-spark-1.3", variant: "max" }, false), /Unapproved/)
-  assert.equal(nestedCallRefusal("worker", "subagent", { agent: "scout", task: "Research",
-    options: { agentScope: "user" } }, "muse"), undefined)
-  assert.equal(nestedCallRefusal("worker", "subagent", { agent: "muse-worker", task: "Fix",
-    options: { agentScope: "user" } }, "muse"), undefined)
-  assert.ok(nestedCallRefusal("worker", "subagent", { agent: "worker", task: "Escalate",
-    options: { agentScope: "user" } }, "muse"))
-})
-
 
 test("Devin is pinned to SWE-2 Flash medium on worker only; escapes fail closed", () => {
   assert.equal(tierForModel(DEVIN_TIER_MODELS.worker, false), "worker")

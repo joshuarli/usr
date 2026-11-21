@@ -20,7 +20,7 @@ const run = { pid: 12345, output: "/tmp/worker.ndjson", errors: "/tmp/worker.std
 const scope = { base_revision: "a".repeat(40), writable_paths: ["README"], acceptance_proof: "Check the output", attempt_limit: 2, stop_on: "Scope expansion" }
 const CODEX = { model: "gpt-6.1-terra", effort: "medium" } as const
 const COMMAND = { model: "deepseek/deepseek-v4.1-flash", effort: "high" } as const
-const MUSE = { providerID: "muse-sdk", id: "muse-spark-1.3", variant: "xhigh" } as const
+const DEVIN_WORKER = { providerID: "devin", id: "swe-2-flash", variant: "medium" } as const
 const GO = { providerID: "opencode-go", id: "deepseek-v4.1-flash", variant: "high" } as const
 
 function record(overrides: Record<string, unknown> = {}): Record<string, unknown> {
@@ -36,7 +36,7 @@ function lower(overrides: Record<string, unknown> = {}): Record<string, unknown>
   return record({
     tier: "worker", backend: "command-code", execution_order: "codex-first",
     codex_model: CODEX.model, codex_effort: CODEX.effort, command_model: COMMAND.model, command_effort: COMMAND.effort,
-    pi_candidates: [MUSE, GO], ...overrides,
+    pi_candidates: [DEVIN_WORKER, GO], ...overrides,
   })
 }
 
@@ -50,7 +50,7 @@ test("v1 lower-tier records convert to a typed fallback plan on every executor",
   ]
   for (const { backend, executor, selection } of cases) for (const schema_version of [1, undefined]) {
     const parsed = roundTrip(lower({ backend, schema_version }))
-    assert.deepEqual(parsed.plan, { kind: "fallback", codex: CODEX, command: COMMAND, pi: [MUSE, GO] })
+    assert.deepEqual(parsed.plan, { kind: "fallback", codex: CODEX, command: COMMAND, pi: [DEVIN_WORKER, GO] })
     assert.deepEqual(parsed.execution, { kind: "process", executor, selection, run })
     assert.equal(backendOf(parsed), backend)
     assert.equal(encodeSession(parsed).schema_version, 2)
@@ -70,9 +70,9 @@ test("records admitted with the retired network scope flag still decode, and re-
 })
 
 test("a v1 Pi record keeps its selected destination first in the plan and its pending candidates after it", () => {
-  const parsed = roundTrip(lower({ backend: "pi", command_run: undefined, pi_id: "ses_fixture", primary_model: MUSE, pi_candidates: [GO] }))
-  assert.deepEqual(parsed.plan, { kind: "fallback", codex: CODEX, command: COMMAND, pi: [MUSE, GO] })
-  assert.deepEqual(parsed.execution, { kind: "pi", selection: MUSE, session_id: "ses_fixture" })
+  const parsed = roundTrip(lower({ backend: "pi", command_run: undefined, pi_id: "ses_fixture", primary_model: DEVIN_WORKER, pi_candidates: [GO] }))
+  assert.deepEqual(parsed.plan, { kind: "fallback", codex: CODEX, command: COMMAND, pi: [DEVIN_WORKER, GO] })
+  assert.deepEqual(parsed.execution, { kind: "pi", selection: DEVIN_WORKER, session_id: "ses_fixture" })
   const drained = roundTrip(lower({ backend: "pi", command_run: undefined, pi_id: "ses_fixture", primary_model: GO, pi_candidates: [] }))
   assert.deepEqual(drained.plan.kind === "fallback" ? drained.plan.pi : null, [GO])
   for (const backend of ["pi-transition", "pi-admitting"]) {
@@ -179,7 +179,7 @@ function current(overrides: Record<string, unknown> = {}): Record<string, unknow
 }
 
 test("v2 records are checked against their admitted plan", () => {
-  const plan = { kind: "fallback", codex: CODEX, command: COMMAND, pi: [MUSE, GO] }
+  const plan = { kind: "fallback", codex: CODEX, command: COMMAND, pi: [DEVIN_WORKER, GO] }
   assert.equal(decode(current()).plan.kind, "fallback")
   const sol = { model: "gpt-6.2-sol", effort: "xhigh" }
   const admitted = decode(current({ plan: { ...plan, codex: sol } })).plan

@@ -34,7 +34,7 @@ def dependency_versions():
     dependencies = json.loads((PROJECT / "package.json").read_text())
     dependencies = dependencies.get("optionalDependencies", dependencies.get("dependencies", {}))
     versions = {}
-    for name in ("@earendil-works/pi-coding-agent", "pi-subagents", "pi-muse-subscription"):
+    for name in ("@earendil-works/pi-coding-agent", "pi-subagents"):
         version = dependencies[name]
         if not isinstance(version, str) or not re.fullmatch(r"\d+\.\d+\.\d+", version):
             die(f"{name} must be pinned to an exact version")

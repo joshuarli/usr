@@ -9,8 +9,8 @@ import { GO_TIER_MODELS, PI_MODEL_ALLOWLIST, TIER_TOOLS, isTier, BRIDGE_TIERS } 
 test("root admission keeps ordered lower-tier fallback and no expert route", () => {
   assert.deepEqual(routesOf(ROOT_PLANS.scout).map(route => route.executor), ["command-code", "pi", "codex"])
   assert.deepEqual(routesOf(ROOT_PLANS.mechanic).map(route => route.executor), ["command-code", "pi", "codex"])
-  assert.deepEqual(routesOf(ROOT_PLANS.worker).map(route => route.executor), ["command-code", "pi", "pi", "pi", "codex"])
-  assert.deepEqual(ROOT_PLANS.worker.pi.map(pin => pin.providerID), ["muse-sdk", "opencode-go", "devin"])
+  assert.deepEqual(routesOf(ROOT_PLANS.worker).map(route => route.executor), ["command-code", "pi", "pi", "codex"])
+  assert.deepEqual(ROOT_PLANS.worker.pi.map(pin => pin.providerID), ["opencode-go", "devin"])
   assert.equal("expert" in ROOT_PLANS, false)
   assert.equal("expert" in POLICY.rootRoutes, false)
   assert.equal(isTier("god"), false)
@@ -58,12 +58,25 @@ test("prohibited model families include every effort variant but not unrelated n
 
 test("projection contains each native model once without widening read-only tools", () => {
   assert.deepEqual(PI_MODEL_ALLOWLIST, [
-    "opencode-go/deepseek-v4.1-flash", "opencode-go/muse-spark-1.3-contributor", "muse-sdk/muse-spark-1.3", "devin/swe-2-flash",
+    "opencode-go/deepseek-v4.1-flash", "opencode-go/muse-spark-1.3-contributor", "devin/swe-2-flash",
   ])
   assert.equal(new Set(PI_MODEL_ALLOWLIST).size, PI_MODEL_ALLOWLIST.length)
   for (const tool of ["bash", "edit", "write"]) assert.equal((TIER_TOOLS.scout as readonly string[]).includes(tool), false)
   assert.deepEqual(JSON.parse(JSON.stringify(POLICY)), POLICY)
   assert.deepEqual(Object.keys(POLICY.rootRoutes), POLICY.tiers)
+})
+
+test("only the Contributor Spark model is admitted from the Muse family", () => {
+  for (const tier of BRIDGE_TIERS)
+    for (const route of POLICY.rootRoutes[tier]) {
+      assert.notEqual(route.providerID, "muse-sdk")
+      assert.notEqual(route.model, "muse-spark-1.3")
+    }
+  assert.ok(PI_MODEL_ALLOWLIST.includes("opencode-go/muse-spark-1.3-contributor"))
+  for (const model of PI_MODEL_ALLOWLIST) {
+    assert.ok(!model.startsWith("muse-sdk/"))
+    assert.ok(!model.endsWith("/muse-spark-1.3"))
+  }
 })
 
 test("Antigravity uses native-only Neon and Hydrogen tiers", () => {

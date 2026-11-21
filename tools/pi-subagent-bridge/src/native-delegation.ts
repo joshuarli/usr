@@ -1,7 +1,6 @@
 import { basename, join } from "node:path"
 import { existsSync, readdirSync, readFileSync, renameSync, writeFileSync } from "node:fs"
-import { tierForModel, PI_RUN_DEADLINE_MS, MUSE_AGENT_NAMES, DEVIN_AGENT_NAMES, isDevinTier, isMuseTier, type Tier } from "./tier-policy.ts"
-import { MUSE_PROVIDER } from "./muse-subscription.ts"
+import { tierForModel, PI_RUN_DEADLINE_MS, DEVIN_AGENT_NAMES, isDevinTier, type Tier } from "./tier-policy.ts"
 import { DEVIN_PROVIDER } from "./devin-provider.ts"
 
 export type Job = {
@@ -138,8 +137,7 @@ export function dispatchParams(job: Job): Record<string, unknown> {
   if (job.priorRunId) return { id: job.priorRunId, message: job.prompt, ...deadline }
   const tier = role(job)
   let agent: string = tier
-  if (job.model.providerID === MUSE_PROVIDER && isMuseTier(tier)) agent = MUSE_AGENT_NAMES[tier]
-  else if (job.model.providerID === DEVIN_PROVIDER && isDevinTier(tier)) agent = DEVIN_AGENT_NAMES[tier]
+  if (job.model.providerID === DEVIN_PROVIDER && isDevinTier(tier)) agent = DEVIN_AGENT_NAMES[tier]
   return {
     agent, task: job.prompt, async: true, cwd: job.cwd, worktree: false,
     model: job.model.providerID + "/" + job.model.id + ":" + job.model.variant,

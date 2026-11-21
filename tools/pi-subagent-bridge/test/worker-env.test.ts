@@ -106,7 +106,6 @@ test("explicit privacy marker and environment deny contributor-backed routes", (
     mkdirSync(join(root, ".agents"), { recursive: true })
     writeFileSync(join(root, ".agents/no-contributor"), "")
     assert.equal(contributorAllowed(cwd, {}), false)
-    assert.equal(contributorModel("muse-sdk", "muse-spark-1.3"), true)
     assert.equal(contributorModel("opencode-go", "muse-spark-1.3-contributor"), true)
     assert.equal(contributorModel("gateway", "meta/muse-spark-1.3-contributor"), true)
     assert.equal(contributorModel("opencode-go", "deepseek-v4.1-flash"), false)

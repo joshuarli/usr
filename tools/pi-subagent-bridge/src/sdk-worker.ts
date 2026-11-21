@@ -6,7 +6,6 @@ import { createRequire } from "node:module"
 import { REQUEST, REPLY, COMPLETE, record, string, role, steerNative, unwrap, runDetails, terminal, deadlineExpiredError, dispatchParams, type Job, type Reply, type Result, type Rpc, artifactResult, executeJob, type Admission } from "./native-delegation.ts"
 import { ensureOpenCodeApiKey } from "./opencode-auth.ts"
 import { PI_RUN_DEADLINE_MS } from "./tier-policy.ts"
-import { MUSE_PROVIDER, museExtensionPath, musePreflight } from "./muse-subscription.ts"
 import { DEVIN_PROVIDER, devinExtensionPath, devinPreflight } from "./devin-provider.ts"
 import { stripIntercomEnvironment, contributorAllowed, contributorModel } from "./worker-env.ts"
 
@@ -95,20 +94,15 @@ async function run(job: Job, started: (admission: Admission) => void, dispatchin
   const tier = role(job)
   if (contributorModel(job.model.providerID, job.model.id) && !contributorAllowed(job.cwd))
     throw new Error("Contributor-model data-use policy forbids this worker; choose a non-contributor route")
-  const muse = job.model.providerID === MUSE_PROVIDER
   const devin = job.model.providerID === DEVIN_PROVIDER
-  if (muse) {
-    process.env.PI_MUSE_SDK_CONTRIBUTOR = "on"
-    const preflight = musePreflight()
-    if (!preflight.available) throw new Error(preflight.issue ?? "Muse Code is unavailable")
-  } else if (devin) {
+  if (devin) {
     const preflight = devinPreflight()
     if (!preflight.available) throw new Error(preflight.issue ?? "Devin SWE-2 medium is unavailable")
   } else ensureOpenCodeApiKey()
   const runtime = await ModelRuntime.create()
   // Extension providers register when the SDK host binds its extensions; it never calls the model itself.
-  const model = muse || devin ? undefined : runtime.getModel(job.model.providerID, job.model.id)
-  if (!muse && !devin && (!model || !runtime.hasConfiguredAuth(job.model.providerID)))
+  const model = devin ? undefined : runtime.getModel(job.model.providerID, job.model.id)
+  if (!devin && (!model || !runtime.hasConfiguredAuth(job.model.providerID)))
     throw new Error("Pinned Pi provider/model unavailable or credentials not configured")
   const manager = job.priorSessionFile
     ? SessionManager.open(job.priorSessionFile, job.sessionDir, job.cwd)
@@ -120,7 +114,6 @@ async function run(job: Job, started: (admission: Admission) => void, dispatchin
     sessionId,
     extensions: [
       { id: "usr-nested-tier-guard-v1", path: fileURLToPath(tierGuardPath(tier, job.model)) },
-      ...(muse ? [{ id: "usr-muse-subscription-v1", path: museExtensionPath() }] : []),
       ...(devin ? [{ id: "usr-devin-local-v1", path: devinExtensionPath() }] : []),
     ],
   })
@@ -153,7 +146,7 @@ async function run(job: Job, started: (admission: Admission) => void, dispatchin
   const loader = new DefaultResourceLoader({
     cwd: job.cwd, agentDir, settingsManager: settings,
     noExtensions: true, noSkills: true, noPromptTemplates: true, noThemes: true, noContextFiles: true,
-    additionalExtensionPaths: [subagentsExtensionPath, ...(muse ? [museExtensionPath()] : []),
+    additionalExtensionPaths: [subagentsExtensionPath,
       ...(devin ? [devinExtensionPath()] : []), requiredExtensionsExtensionPath],
     extensionFactories: [rpcExtension],
   })
@@ -168,7 +161,7 @@ async function run(job: Job, started: (admission: Admission) => void, dispatchin
   })
   try {
     await session.bindExtensions({})
-    if (muse || devin) {
+    if (devin) {
       // Extension-backed providers register only after bindExtensions.
       if (!runtime.getModel(job.model.providerID, job.model.id) ||
           !runtime.hasConfiguredAuth(job.model.providerID))

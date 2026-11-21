@@ -77,7 +77,6 @@ function fake(cwd: string) {
     models: async () => ({ data: [
       { id: "muse-spark-1.3-contributor", providerID: "opencode-go" },
       { id: "deepseek-v4.1-flash", providerID: "opencode-go" },
-      { id: "muse-spark-1.3", providerID: "muse-sdk" },
     ].map(({ id, providerID }) => ({
       id, providerID, variants: variants.map((variant) => ({ id: variant })),
       enabled: true, status: "active",
@@ -1117,7 +1116,7 @@ test("mechanic uses Command when Codex is unavailable and retains Contributor fa
 
 for (const edge of ["create", "prompt"] as const) {
   for (const route of ["initial", "status"] as const) {
-    test(`USR-41: uncertain Muse ${edge} on ${route} retains lease and never admits twice`, async () => {
+    test(`USR-41: uncertain first Pi ${edge} on ${route} retains lease and never admits twice`, async () => {
       const f = fixture()
       try {
         const m = fake(f.cwd)
@@ -1152,7 +1151,7 @@ for (const edge of ["create", "prompt"] as const) {
 
 for (const tier of ["scout", "mechanic", "worker"] as const) {
   for (const route of ["initial", "status"] as const) {
-    test(`USR-45: ${tier} ${route} skips unavailable Muse and persists exact Go pin`, async () => {
+    test(`USR-45: ${tier} ${route} persists the exact Go pin`, async () => {
       const { GO_TIER_MODELS } = await import("../src/tier-policy.ts")
       const f = fixture()
       try {
@@ -1181,7 +1180,7 @@ for (const tier of ["scout", "mechanic", "worker"] as const) {
 }
 
 for (const route of ["initial", "status"] as const) {
-  test(`USR-41/45: ${route} Muse loss before create can advance to Go`, async () => {
+  test(`USR-41/45: ${route} first Pi loss before create stays on the approved pin`, async () => {
     const f = fixture()
     try {
       const m = fake(f.cwd)

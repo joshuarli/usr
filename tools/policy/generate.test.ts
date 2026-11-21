@@ -129,7 +129,6 @@ test("retired roles cannot silently survive in native profiles or harness config
       Reflect.deleteProperty(record, "mechanic")
     for (const [tier, children] of Object.entries(policy.nativePi.delegation))
       Reflect.set(policy.nativePi.delegation, tier, children.filter(child => child !== "mechanic"))
-    Reflect.set(policy.nativePi.museDelegation, "worker", policy.nativePi.museDelegation.worker.filter(child => child !== "mechanic"))
     Reflect.set(policy.nativePi.devinDelegation, "worker", policy.nativePi.devinDelegation.worker.filter(child => child !== "mechanic"))
     Reflect.set(policy.nativeFallback, "tiers", policy.nativeFallback.tiers.filter(tier => tier !== "mechanic"))
     const before = f.paths.map(path => readFileSync(join(f.root, path), "utf8"))
@@ -206,8 +205,8 @@ type Pin = { providerID: string; id: string; variant: string }
 type MutablePolicy = {
   rootRoutes: Record<string, Array<{ executor: string; providerID?: string; model: string; effort: string }>>
   nativePi: {
-    goModels: Record<string, Pin>; museModels: Record<string, Pin>
-    delegation: Record<string, string[]>; museDelegation: Record<string, string[]>; tools: Record<string, string[]>
+    goModels: Record<string, Pin>
+    delegation: Record<string, string[]>; tools: Record<string, string[]>
     maxSubagentDepth: number; modelAllowlist: string[]
   }
   opencode: { model: string; efforts: Record<string, string> }
@@ -294,15 +293,10 @@ const dimensions: Dimension[] = [
   { name: "native expert model", mutate: p => { p.nativePi.goModels.expert.id = FIXTURE_MODEL } },
   { name: "native expert variant", mutate: p => { p.nativePi.goModels.expert.variant = "low" } },
   { name: "native banned model", mutate: p => { p.nativePi.goModels.worker.id = "gemini-4-argon-high" }, rejects: /Prohibited model in active policy/ },
-  { name: "muse worker model", mutate: p => { p.nativePi.museModels.worker.id = FIXTURE_MODEL } },
-  { name: "muse worker provider", mutate: p => { p.nativePi.museModels.worker.providerID = "fixture-provider" } },
-  { name: "muse worker variant", mutate: p => { p.nativePi.museModels.worker.variant = "low" } },
-
   { name: "scout delegation", mutate: p => { p.nativePi.delegation.scout.push("mechanic") } },
   { name: "mechanic delegation", mutate: p => { p.nativePi.delegation.mechanic = ["mechanic"] } },
   { name: "worker delegation", mutate: p => { p.nativePi.delegation.worker.pop() } },
   { name: "expert delegation", mutate: p => { p.nativePi.delegation.expert.shift() } },
-  { name: "muse worker delegation", mutate: p => { p.nativePi.museDelegation.worker.splice(1, 1) } },
   { name: "delegation to an unknown profile", mutate: p => { p.nativePi.delegation.scout.push("unknown-profile") }, rejects: /Unknown descendant in scout/ },
 
   { name: "scout tools", mutate: p => { p.nativePi.tools.scout.push("fixture-tool") } },

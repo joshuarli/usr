@@ -826,7 +826,7 @@ test("CLI start never becomes an owner and MCP server + owner CLI work end-to-en
   const fakeBin = join(scratch, "bin")
   mkdirSync(fakeBin, { recursive: true })
   const fakeCmd = join(fakeBin, "cmd")
-  writeFileSync(fakeCmd, "#!/bin/sh\nexec /bin/sleep 30\n", { mode: 0o755 })
+  writeFileSync(fakeCmd, "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo 'cmd 1.0'; exit 0; fi\nexec /bin/sleep 30\n", { mode: 0o755 })
   chmodSync(fakeCmd, 0o755)
   const env = {
     ...process.env,

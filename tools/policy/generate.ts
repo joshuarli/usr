@@ -168,18 +168,10 @@ function openCodeTiers(policy: Policy): Tier[] {
 }
 
 function profiles(policy: Policy) {
-  const names: Partial<Record<Tier, string>> = policy.nativePi.agentNames
-  const children: Partial<Record<Tier, readonly string[]>> = policy.nativePi.museDelegation
   return [
     ...Object.entries(policy.nativePi.goModels).map(([name, pin]) => {
       const tier = policyTier(name)
       return { name, tier, pin, allowed: policy.nativePi.delegation[tier] }
-    }),
-    ...Object.entries(policy.nativePi.museModels).map(([key, pin]) => {
-      const tier = policyTier(key)
-      const name = names[tier], allowed = children[tier]
-      if (!name || !allowed) throw new Error(`Missing Muse profile mapping: ${tier}`)
-      return { name, tier, pin, allowed }
     }),
     ...Object.entries(policy.nativePi.devinModels).map(([key, pin]) => {
       const tier = policyTier(key)
@@ -282,7 +274,7 @@ export function renderOutputs(root: string, policy: Policy = POLICY): Output[] {
     if (previous.schema_version !== 1) throw new Error("Unsupported previous policy snapshot schema")
     const native = object(previous.nativePi, "previous nativePi")
     const oldNames = [...Object.keys(object(native.goModels, "previous goModels")),
-      ...Object.values(object(native.agentNames, "previous agentNames")),
+      ...Object.values(object(native.agentNames ?? {}, "previous agentNames")),
       ...Object.values(object(native.devinAgentNames ?? {}, "previous devinAgentNames"))]
     const oldOpenCode = Object.keys(object(object(previous.opencode, "previous opencode").efforts, "previous OpenCode efforts"))
     if (oldNames.some(name => typeof name !== "string" || !/^[a-z][a-z0-9-]*$/.test(name)) ||

@@ -25,7 +25,6 @@ export type AllowedChild = { readonly [P in Tier]: ChildOf<P> }
 const PI_MODELS = {
   goDeepSeek: { providerID: "opencode-go", id: "deepseek-v4.1-flash" },
   goSpark: { providerID: "opencode-go", id: "muse-spark-1.3-contributor" },
-  museSpark: { providerID: "muse-sdk", id: "muse-spark-1.3" },
   devinFlash: { providerID: "devin", id: "swe-2-flash" },
 } as const
 export const PI_MODEL_ALLOWLIST = Object.values(PI_MODELS).map(({ providerID, id }) => `${providerID}/${id}`)
@@ -42,11 +41,6 @@ export const GO_TIER_MODELS = {
   readonly variant: Effort
 } }
 
-export const MUSE_TIER_MODELS = {
-  worker: { ...PI_MODELS.museSpark, variant: "xhigh" },
-} as const satisfies {
-  readonly worker: { readonly providerID: "muse-sdk"; readonly id: string; readonly variant: Effort }
-}
 /** Devin Local worker. Only the medium SWE-2 Flash variant is admitted. */
 export const DEVIN_TIER_MODELS = {
   worker: { ...PI_MODELS.devinFlash, variant: "medium" },
@@ -59,17 +53,6 @@ export const DEVIN_DELEGATION = {
 } as const satisfies { readonly worker: readonly string[] }
 export function isDevinTier(tier: Tier): tier is "worker" {
   return tier === "worker"
-}
-
-export const MUSE_AGENT_NAMES = { worker: "muse-worker" } as const
-export const MUSE_DELEGATION = {
-  worker: DELEGATION.worker.map(tier => tier === "worker" ? MUSE_AGENT_NAMES.worker : tier),
-} as const satisfies { readonly worker: readonly string[] }
-export function isMuseTier(tier: Tier): tier is "worker" {
-  return tier === "worker"
-}
-export function museSubscriptionSelected(tier: Tier, _enabled?: boolean): tier is "worker" {
-  return isMuseTier(tier)
 }
 
 const DISCOVERY_TOOLS = ["grep", "find", "ls", "subagent", "subagent_supervisor"] as const
@@ -103,10 +86,6 @@ export function tierForModel(model: GoModelRef, readOnly: boolean): Tier {
   if (model.providerID === DEVIN_TIER_MODELS.worker.providerID &&
       model.id === DEVIN_TIER_MODELS.worker.id &&
       model.variant === DEVIN_TIER_MODELS.worker.variant && !readOnly)
-    return "worker"
-  if (model.providerID === MUSE_TIER_MODELS.worker.providerID &&
-      model.id === MUSE_TIER_MODELS.worker.id &&
-      model.variant === MUSE_TIER_MODELS.worker.variant && !readOnly)
     return "worker"
   const tier = TIERS.find((candidate) => {
     const expected = GO_TIER_MODELS[candidate]
