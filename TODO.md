@@ -1,5 +1,5 @@
 Prefix: USR
-Next: 133
+Next: 134
 
 ### USR-83 · P2 · running sessions on two hosts cannot reach each other over intercom
 
@@ -72,6 +72,15 @@ Next: 133
 - **Recommendation:** Reproduce with a long Codex worker while recording the exit status and signal of the codex process (for example by having the bridge launcher record wait status) and process accounting around the exit, then fix the killer or, if Codex exits on its own, classify a silent exit before edits as a provider failure eligible for fallback. Acceptance: a recorded death names its signal or exit status, and a regression check keeps an unrelated detached worker process group alive across the full bridge test suite.
 - **Fix with:** root-cause
 - **Effort:** M
+
+### USR-133 · P2 · worktree-retire leaves a half-removed worktree when a delete fails
+
+- **Area:** Worktree lifecycle
+- **Where:** worktree-retire submodule and main worktree removal
+- **Problem:** On 2026-11-21 retiring laputa's `.work/wt/kernel-rebase` hit root-owned build outputs (written by Docker builds) and read-only Go module cache directories. `git worktree remove` deregistered the submodule worktree, then failed to delete its files with "Permission denied", and later did the same for the main worktree. Each rerun then refused with `gitfile does not point to a valid repository`, so the lane could only be finished by hand: chown through a container, chmod u+w, recreate the empty submodule directory, and remove the deregistered leftovers.
+- **Recommendation:** Before removing anything, check that every path under the worktree is owned by the caller and writable, and refuse with the offending paths (and the container chown that fixes them) when not. Treat a worktree whose registration is already gone but whose directory remains as resumable rather than as an error. Acceptance: a fixture worktree with a root-owned file and a read-only directory is refused before any deregistration, and a fixture left half-removed is finished by a rerun.
+- **Fix with:** none
+- **Effort:** S
 
 ### USR-132 · P3 · worktree-retire keeps lanes whose commits master carries as equal patches
 
