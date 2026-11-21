@@ -8,6 +8,7 @@ set -u
 script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 repo_root=$(CDPATH='' cd -- "$script_dir/.." && pwd)
 wrappers="$script_dir/base/.local/bin"
+rustc_wrapper="$script_dir/base/.local/lib/cargo-kache/kache"
 work_root="$repo_root/.work/tmp"
 mkdir -p "$work_root"
 scratch=$(mktemp -d "$work_root/cargo-wrappers.XXXXXX") || exit 1
@@ -49,7 +50,7 @@ run_wrapper() {
     shift 3
     : > "$wrapper_log"
     PATH="$wrapper_dir" CARGO_WRAPPER_TEST_LOG="$wrapper_log" \
-        /bin/sh "$wrappers/$wrapper_name" "$@"
+        /bin/sh "$(case $wrapper_name in */*) printf '%s' "$wrapper_name" ;; *) printf '%s' "$wrappers/$wrapper_name" ;; esac)" "$@"
 }
 
 expect_argv() {
@@ -68,20 +69,21 @@ expect_argv() {
 
 case_config_names_the_wrappers() {
     config="$script_dir/base/.cargo/config.toml"
-    grep -Fx 'rustc-wrapper = "cargo-wrapper-rustc"' "$config" >/dev/null
+    grep -Fx 'rustc-wrapper = ".local/lib/cargo-kache/kache"' "$config" >/dev/null
+    [ "$(basename "$rustc_wrapper")" = kache ] && [ -x "$rustc_wrapper" ]
     grep -Fx 'HOST_CC = "cargo-wrapper-cc"' "$config" >/dev/null
     grep -Fx 'HOST_CXX = "cargo-wrapper-cxx"' "$config" >/dev/null
     if grep -Eq 'CC_KNOWN_WRAPPER_CUSTOM|kache clang' "$config"; then
         return 1
     fi
-    for wrapper in cargo-wrapper-rustc cargo-wrapper-cc cargo-wrapper-cxx; do
+    for wrapper in cargo-wrapper-cc cargo-wrapper-cxx; do
         [ -x "$wrappers/$wrapper" ]
     done
 }
 
 case_kache_wraps_every_compiler() {
     log="$scratch/full.log"
-    run_wrapper "$full" cargo-wrapper-rustc "$log" "$full/rustc" --edition 2024
+    run_wrapper "$full" "$rustc_wrapper" "$log" "$full/rustc" --edition 2024
     expect_argv "$log" "$full/kache" "$full/rustc" --edition 2024
     run_wrapper "$full" cargo-wrapper-cc "$log" -c "a file.c"
     expect_argv "$log" "$full/kache" clang -c "a file.c"
@@ -91,7 +93,7 @@ case_kache_wraps_every_compiler() {
 
 case_clang_without_kache_is_used_directly() {
     log="$scratch/clang-only.log"
-    run_wrapper "$clang_only" cargo-wrapper-rustc "$log" "$clang_only/rustc" --edition 2024
+    run_wrapper "$clang_only" "$rustc_wrapper" "$log" "$clang_only/rustc" --edition 2024
     expect_argv "$log" "$clang_only/rustc" --edition 2024
     run_wrapper "$clang_only" cargo-wrapper-cc "$log" -c "a file.c"
     expect_argv "$log" "$clang_only/clang" -c "a file.c"
@@ -101,7 +103,7 @@ case_clang_without_kache_is_used_directly() {
 
 case_plain_host_tools_are_the_last_resort() {
     log="$scratch/plain.log"
-    run_wrapper "$plain" cargo-wrapper-rustc "$log" "$plain/rustc" --edition 2024
+    run_wrapper "$plain" "$rustc_wrapper" "$log" "$plain/rustc" --edition 2024
     expect_argv "$log" "$plain/rustc" --edition 2024
     run_wrapper "$plain" cargo-wrapper-cc "$log" -c "a file.c"
     expect_argv "$log" "$plain/cc" -c "a file.c"
