@@ -283,6 +283,120 @@ class WorktreeRetireTests(unittest.TestCase):
         self.assertEqual(self.retire(sibling).returncode, 0)
         self.assertFalse(sibling.exists())
 
+    def submodule_origin(self):
+        origin = Path(self.tmp.name).resolve() / "sub-origin"
+        self.git(None, "init", "-q", "-b", "main", str(origin))
+        (origin / "file.txt").write_text("hello\n")
+        self.git(origin, "add", "-A")
+        self.git(origin, "commit", "-q", "-m", "init")
+        return origin
+
+    def add_submodule(self, origin):
+        sha = self.git(origin, "rev-parse", "HEAD")
+        modules = self.repo / ".git/modules"
+        modules.mkdir(exist_ok=True)
+        subprocess.run(["git", "-c", "protocol.file.allow=always", "clone", "-q",
+                          "--separate-git-dir", str(modules / "asterinas"),
+                          str(origin), str(self.repo / "asterinas")],
+                         check=True, capture_output=True, text=True, env=self.env)
+        (self.repo / ".gitmodules").write_text(
+            f'[submodule "asterinas"]\n\tpath = asterinas\n\turl = {origin}\n')
+        self.git(self.repo, "update-index", "--add", "--cacheinfo", f"160000,{sha},asterinas")
+        self.git(self.repo, "add", ".gitmodules")
+        self.git(self.repo, "commit", "-q", "-m", "addsub")
+        return sha
+
+    def gitlink_sha(self, cwd):
+        return self.git(cwd, "ls-files", "-s", "asterinas").split()[1]
+
+    def lane_with_linked_submodule(self, name, branch=True):
+        if branch:
+            path = self.lane(name)
+        else:
+            path = self.repo / ".work/wt" / name
+            self.git(self.repo, "worktree", "add", "-q", "--detach", str(path))
+        sub = path / "asterinas"
+        if sub.is_dir() and not sub.is_symlink():
+            try:
+                sub.rmdir()
+            except OSError:
+                pass
+        sha = self.gitlink_sha(path)
+        common = self.repo / ".git/modules/asterinas"
+        self.git(common, "worktree", "add", "-q", str(sub), sha)
+        return path
+
+    def test_linked_submodule_lane_retires_and_dry_run_reports_submodule(self):
+        origin = self.submodule_origin()
+        self.add_submodule(origin)
+        path = self.lane_with_linked_submodule("sublane")
+        dry = self.retire(path, "--dry-run")
+        self.assertEqual(dry.returncode, 0, dry.stderr)
+        self.assertIn("would remove", dry.stdout)
+        self.assertIn("asterinas", dry.stdout)
+        self.assertIn(str(path / "asterinas"), dry.stdout)
+        self.assertTrue(path.exists())
+        self.assertTrue((path / "asterinas").exists())
+        result = self.retire(path)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("asterinas", result.stdout)
+        self.assertFalse(path.exists())
+        self.assertNotIn("sublane", self.branches())
+
+    def test_dirty_submodule_keeps_both(self):
+        origin = self.submodule_origin()
+        self.add_submodule(origin)
+        path = self.lane_with_linked_submodule("dirty-sub")
+        (path / "asterinas" / "dirty.txt").write_text("x")
+        result = self.retire(path)
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("submodule", result.stderr)
+        self.assertIn("asterinas", result.stderr)
+        self.assertTrue(path.exists())
+        self.assertTrue((path / "asterinas" / "dirty.txt").exists())
+        sub_head = self.git(path / "asterinas", "rev-parse", "HEAD")
+        self.assertTrue((self.repo / ".git/modules/asterinas").exists())
+        self.assertEqual(sub_head, self.gitlink_sha(path))
+
+    def test_detached_submodule_without_surviving_ref_keeps_both(self):
+        origin = self.submodule_origin()
+        self.add_submodule(origin)
+        path = self.lane_with_linked_submodule("detached-sub")
+        sub = path / "asterinas"
+        (sub / "new.txt").write_text("new\n")
+        self.git(sub, "add", "-A")
+        self.git(sub, "commit", "-q", "-m", "detached new")
+        new_head = self.git(sub, "rev-parse", "HEAD")
+        self.assertEqual(self.git(sub, "rev-parse", "--abbrev-ref", "HEAD"), "HEAD")
+        self.git(path, "add", "asterinas")
+        self.git(path, "commit", "-q", "-m", "update sub")
+        self.git(self.repo, "merge", "-q", "--ff-only", "detached-sub")
+        result = self.retire(path)
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("asterinas", result.stderr)
+        self.assertIn(new_head[:12], result.stderr)
+        self.assertTrue(path.exists())
+        self.assertTrue(sub.exists())
+
+    def test_standalone_submodule_keeps_both(self):
+        origin = self.submodule_origin()
+        self.add_submodule(origin)
+        path = self.lane("standalone-sub")
+        sub = path / "asterinas"
+        if sub.is_dir():
+            try:
+                sub.rmdir()
+            except OSError:
+                pass
+        subprocess.run(["git", "-c", "protocol.file.allow=always", "clone", "-q",
+                          str(origin), str(sub)],
+                         check=True, capture_output=True, text=True, env=self.env)
+        result = self.retire(path)
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("standalone repository", result.stderr)
+        self.assertTrue(path.exists())
+        self.assertTrue(sub.exists())
+
     def test_checkout_outside_work_wt_is_refused(self):
         path = Path(self.tmp.name).resolve() / "elsewhere"
         self.git(self.repo, "worktree", "add", "-q", "-b", "elsewhere", str(path))

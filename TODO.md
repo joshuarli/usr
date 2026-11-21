@@ -253,15 +253,6 @@ Next: 131
 - **Fix with:** single-source-of-truth
 - **Effort:** S
 
-### USR-129 · P3 · worktree-retire cannot retire a worktree with an initialized submodule
-
-- **Area:** Worktrees
-- **Where:** dotfiles/base/.local/bin/worktree-retire
-- **Problem:** worktree-retire calls git worktree remove, which refuses any worktree containing an initialized submodule (fatal: working trees containing submodules cannot be moved or removed). On 2026-11-21 in laputa, eight clean, idle worktrees whose HEAD is an ancestor of master (c-lap54, c-lap55, c-r3, lap-55, pin-20261116, pin-6cc3e647, pin-d57e24fdd, xinit-sweep), each with an asterinas submodule worktree, could not be retired; the dry run said would remove, but the real run failed after the guard passed. The nested submodule worktrees are registered in .git/modules/asterinas/worktrees, and worktree-retire refuses them directly because their common directory is outside the primary checkout's .git.
-- **Recommendation:** Teach worktree-retire to retire nested submodule worktrees first, under the same clean, lease and ancestry guards (ancestor of the superproject's pinned submodule commit), then remove the parent. Make the dry run report the submodule blocker instead of would remove. Acceptance: a fixture superproject worktree with an initialized submodule worktree, clean and integrated, retires in one command, and a dirty submodule keeps both.
-- **Fix with:** worktree-retire
-- **Effort:** M
-
 ### USR-130 · P3 · finished bridge sessions keep worktree leases until someone reads their status
 
 - **Area:** Delegation
