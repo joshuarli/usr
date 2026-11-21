@@ -89,6 +89,7 @@ POWER = Area("Linux `power-policy` or its test harness")
 SHELL = Area("a shell script")
 PYTHON = Area("a Python script", "both read `ruff.toml` and `ty.toml`")
 MACOS_TOOLS = Area("macOS tools")
+BENCH = Area("`make bench` workloads (`tools/bench`)", "run `make bench` for a timed run")
 MARKDOWN = Area("Markdown", "see below for `mdtool refs`, `router`, and `check`")
 
 SKILL_PATHS = ("dotfiles/base/.agents/skills/", ".agents/skills/", "tools/skills/", "SKILLS.md")
@@ -228,6 +229,7 @@ REGISTRY: tuple[Check, ...] = (
     Check("ruff", (PYTHON,), ("uvx", "ruff", "check", "{file}"), ("*.py",), needs=("uvx",), per_file=True),
     Check("ty", (PYTHON,), ("uvx", "ty", "check", "{file}"), ("*.py",), needs=("uvx",), per_file=True),
     Check("markdown-links", (MARKDOWN,), py("dotfiles/base/.local/bin/mdtool", "links", "--untracked", "{file}"), ("*.md",), per_file=True),
+    Check("bench", (BENCH,), py("tools/bench/test_bench.py"), ("tools/bench/",), tmpdir=True),
     Check("macos-tool", (MACOS_TOOLS,), py("host/macos/macos-test.py"), ("host/macos/macos", "host/macos/macos-test.py"), tmpdir=True),
     Check("macos-lean", (MACOS_TOOLS,), py("host/macos/lean-test.py"), ("host/macos/lean.py", "host/macos/lean-test.py"), tmpdir=True),
     Check("macos-ruff", (MACOS_TOOLS,), ("uvx", "ruff", "check", "host/macos/macos", "host/macos/macos-test.py", "host/macos/lean.py", "host/macos/lean-test.py"), ("host/macos/macos", "host/macos/macos-test.py", "host/macos/lean.py", "host/macos/lean-test.py"), needs=("uvx",)),

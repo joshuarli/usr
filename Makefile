@@ -4,7 +4,7 @@ SHELL := /bin/sh
 CF ?= cf
 NODE ?= node
 
-.PHONY: help deploy-setup.sh generate check-generated policy subagent-visualization skills-check skills-generate test lint
+.PHONY: help deploy-setup.sh generate check-generated policy subagent-visualization skills-check skills-generate test lint bench
 
 help: ## List targets
 	@awk 'BEGIN {FS = ":.*## "} /^[a-z][a-z0-9.-]*:.*## / {printf "%-16s %s\n", $$1, $$2}' $(MAKEFILE_LIST) | sort
@@ -46,3 +46,7 @@ test: ## Run the repository and policy test suites
 
 lint: ## Run repository lint checks
 	@./lint
+
+bench: ## Time representative sync, pinact, mdtool and todo journeys (BENCH_ARGS=--rounds N)
+	@mkdir -p .work/tmp
+	@TMPDIR="$$PWD/.work/tmp" python3 -I tools/bench/bench.py $(BENCH_ARGS)

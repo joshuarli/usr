@@ -52,12 +52,30 @@ Run the narrowest check that covers the change. `sh sync check-parallel` runs th
 | a shell script | `shellcheck -s sh FILE` for each changed match and `shellcheck -s sh FILE` for each changed match |
 | a Python script | `uvx ruff check FILE` for each changed match and `uvx ty check FILE` for each changed match; both read `ruff.toml` and `ty.toml` |
 | Markdown | `python3 -I dotfiles/base/.local/bin/mdtool links --untracked FILE` for each changed match; see below for `mdtool refs`, `router`, and `check` |
+| `make bench` workloads (`tools/bench`) | `TMPDIR="$PWD/.work/tmp" python3 -I tools/bench/test_bench.py`; run `make bench` for a timed run |
 | macOS tools | `TMPDIR="$PWD/.work/tmp" python3 -I host/macos/macos-test.py`, `TMPDIR="$PWD/.work/tmp" python3 -I host/macos/lean-test.py`, and `uvx ruff check host/macos/macos host/macos/macos-test.py host/macos/lean.py host/macos/lean-test.py` |
 <!-- checks:end -->
 
 `sh sync check` and `./lint` cover several repository areas. Use them for changes that cross areas; they do not replace checks omitted from `sync`.
 
 The [Alpine VM journey](../host/alpine/tests/vm.sh) requires `qemu-system-<arch>`, `qemu-img`, `nc` with `-U`, and UEFI firmware for the VM architecture, which defaults to the host's (`VM_ARCH=x86_64` or `aarch64`). It provisions the committed HEAD in a disposable VM and requires a clean checkout.
+
+## Benchmarks
+
+`make bench` runs `tools/bench/bench.py`, which times shipped CLI journeys against scratch fixtures under `.work/bench` and removes them afterwards. It is not part of `make test`. Pass options through `BENCH_ARGS`, for example `make bench BENCH_ARGS=--json`; `--rounds N` sets the round count (default 5); `--only NAME,...` selects workloads and `--list` names them.
+
+| Workload | Journey | A run counts only if |
+| --- | --- | --- |
+| `sync-links` | `sh sync links` into a fresh empty scratch `HOME` and `TARGET` | it exits 0, reports the links task applied with no failures, and creates as many symlinks as `sync plan` listed for an empty home |
+| `sync-plan` | `sh sync plan --json` on a linked scratch home | it exits 0 with no conflicts and the links task current |
+| `pinact-check` | `pinact --check` over the repository workflows | it exits 0 and prints no findings |
+| `pinact-lint` | `pinact lint --format json` over copies of the workflows plus one added unpinned workflow | it exits 1 with exactly one `unpinned-uses` finding, at the added step |
+| `mdtool-check` | `mdtool check --json` over a Git copy of the tracked tree with one added note containing a broken link | it exits 1, reports `L001` for that link, and checked files |
+| `todo-list`, `todo-check`, `todo-add` | `todo list --json`, `todo check --json`, and `todo add` on a 200-ticket backlog built from the ticket bodies in `TODO.md` | they return all 200 tickets, report no errors, and write the new ticket with `Next` advanced |
+
+Fixture construction and per-round setup stay outside the timed region, and the fixture inputs are checked before timing starts. Each round runs every selected workload once, rotating the order between rounds. The report gives the median and range of wall time, median CPU time (user plus system of the whole process tree), and the largest peak RSS of any single process in the tree. An invalid run stops the benchmark with exit 1 and prints no timings.
+
+The numbers depend on host load and include each tool's interpreter startup; `sync plan` also runs the host's package probes. Check `perf-gate-ready` before a timed run and treat results from a busy host as observations, not baselines.
 
 ## Agent setup changes
 

@@ -63,6 +63,6 @@ Run with `TMPDIR="$PWD/.work/tmp"`, Python 3.10+, and pinned Node 26.13.1 for th
 - macOS setup sequence: `host/macos/sync-test.py`; macOS utilities: `host/macos/macos-test.py`, `lean-test.py`.
 - `intercom-tailnet` CLI: `tools/intercom-tailnet/test_intercom_tailnet.py`; `src/wol.py` CLI: `src/test_wol.py`; font utilities, `src/su-exec.c`: none.
 - Network endpoints and live provider behavior: none; fixture checks do not establish live service behavior.
-- Performance workload: `cd tools/pi-subagent-bridge && npm run bench:runtime` compares local adapter/bridge samples; no repository-wide workload.
+- Performance workloads: `make bench` times validated `sync links`, `sync plan`, `pinact`, `mdtool` and `todo` journeys on scratch fixtures under `.work/bench` (see [benchmarks](docs/development.md#benchmarks)); `cd tools/pi-subagent-bridge && npm run bench:runtime` compares local adapter/bridge samples.
 - Vendored PyYAML revision and source: `tools/pinact/src/pinact/_vendor/yaml/PROVENANCE.txt`.
 - Further component commands, platform prerequisites and fixture limits: `docs/development.md`.
