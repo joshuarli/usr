@@ -8,6 +8,7 @@ import { PreAdmissionError, checkedWorktree } from "./bridge.ts"
 import { cancelCommand, commandResult, commandSession, processStartTime, startCommand, type CommandRun } from "./command.ts"
 import { codexAvailable, codexResult, codexSession, cancelCodex, startCodex } from "./codex.ts"
 import { activeWorktreeOwner, claimWorktree, ensureWorktree, releaseWorktree } from "./worktree-lease.ts"
+import { releaseOwnTerminalLease } from "./inspect.ts"
 
 import { DELEGATION, isBridgeTier, type BridgeTier } from "./tier-policy.ts"
 import { piInstalled, diagnoseGoModel } from "./optional-pi.ts"
@@ -390,12 +391,7 @@ export function makeHybridBridge(api: PiAdapter, command = {
           known = { observation, blocked: { state, notice: s.fallback_blocked } }
         }
       }
-      const childrenHold = s.execution.kind === "process" && s.execution.executor === "fx" && !fxChildren(s.execution.run).quiescent
-      if (!childrenHold && ["succeeded", "failed", "turn_limit", "cancelled", "canceled", "interrupted", "timed_out"].includes(state)) {
-        const directory = stateDir(s.cwd)
-        if (activeWorktreeOwner(directory, s.cwd) === s.id)
-          releaseWorktree(directory, s.cwd, s.id)
-      }
+      releaseOwnTerminalLease(stateDir(s.cwd), s, state)
       return { session: s, ...(known ? { known } : {}) }
     })
   }

@@ -381,19 +381,12 @@ function unreadableSnapshot(id: string, raw: unknown, reason: string): Snapshot 
   }
 }
 
-const TERMINAL_RELEASE_STATES = new Set(["succeeded", "failed", "turn_limit", "cancelled", "canceled", "interrupted", "timed_out"]);
+const TERMINAL_RELEASE_STATES = new Set(["succeeded", "failed", "turn_limit", "cancelled", "canceled", "interrupted", "timed_out"])
 
 export function releaseOwnTerminalLease(directory: string, session: Session, state: string): void {
-  try {
-    if (!TERMINAL_RELEASE_STATES.has(state)) return;
-    if (session.execution.kind === "process" && session.execution.executor === "fx") {
-      try {
-        if (!fxChildren(session.execution.run).quiescent) return;
-      } catch { return; }
-    }
-    if (activeWorktreeOwner(directory, session.cwd) !== session.id) return;
-    releaseWorktree(directory, session.cwd, session.id);
-  } catch { /* read-only inspection never fails on lease release */ }
+  if (!TERMINAL_RELEASE_STATES.has(state)) return
+  if (session.execution.kind === "process" && session.execution.executor === "fx" && !fxChildren(session.execution.run).quiescent) return
+  if (activeWorktreeOwner(directory, session.cwd) === session.id) releaseWorktree(directory, session.cwd, session.id)
 }
 
 export async function inspectStored(directory: string, id: string, deps: InspectionDeps, options?: { omitRunningWorktree?: boolean; settleLease?: boolean }): Promise<Snapshot> {
@@ -418,6 +411,8 @@ export async function inspectStored(directory: string, id: string, deps: Inspect
   } catch (error) {
     observation = withheld("unknown", describe(error), path)
   }
-  if (options?.settleLease) releaseOwnTerminalLease(directory, session, observation.state);
+  if (options?.settleLease) {
+    try { releaseOwnTerminalLease(directory, session, observation.state) } catch { /* inspection reports the run even when its lease cannot be released */ }
+  }
   return toSnapshot(compose(session, observation, undefined, options?.omitRunningWorktree))
 }
