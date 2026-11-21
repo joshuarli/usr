@@ -81,6 +81,40 @@ gate 0 'a load under the per-core limit is quiet' roomy PERF_GATE_MAX_LOAD=100
 gate 75 'a load over the per-core limit is busy' roomy PERF_GATE_MAX_LOAD=0.0001
 gate 0 'memory pressure does not make the gate busy' lowmem PERF_GATE_MAX_LOAD=100
 
+# A host whose /proc/stat advances during the sample window with <busy> of every 100 ticks
+# non-idle: short-lived processes that never raise the load average still count. The gate
+# scales the fraction by this host's core count, so the busy case uses half of every core.
+sampled () {
+    mkdir -p "$scratch/$1"
+    printf '0.10 0.10 0.10 1/100 1\n' > "$scratch/$1/loadavg"
+    printf 'cpu  1000 0 1000 100000 0 0 0 0 0 0\ncpu0 1 0 1 1 0 0 0 0 0 0\n' > "$scratch/$1/stat"
+    awk -v b="$2" 'BEGIN { printf "cpu  %d 0 1000 %d 0 0 0 0 0 0\n", 1000 + 32 * b, 100000 + 32 * (100 - b) }' > "$scratch/$1/stat.next"
+}
+sampled_gate () {
+    wanted=$1; what=$2; dir=$3; shift 3
+    gate "$wanted" "$what" "$dir" PERF_GATE_SAMPLE_S=1 PERF_GATE_MAX_LOAD=100 PATH="$sample_bin:$PATH" "$@"
+}
+
+# The sample window's sleep advances the stand-in counters, so the test does not race the clock.
+sample_bin="$scratch/sample-bin"
+mkdir -p "$sample_bin"
+printf '#!/bin/sh\n' > "$sample_bin/ps"
+cat > "$sample_bin/sleep" <<'SLEEP'
+#!/bin/sh
+mv "$PERF_GATE_PROC/stat.next" "$PERF_GATE_PROC/stat"
+SLEEP
+chmod +x "$sample_bin/ps" "$sample_bin/sleep"
+sampled idle-sampled 1
+sampled bursty 50
+sampled_gate 0 'an idle sampled host is quiet' idle-sampled
+sampled_gate 75 'bursts of CPU time under a low load average make the host busy' bursty
+for setting in PERF_GATE_SAMPLE_S=abc PERF_GATE_SAMPLE_S=0 PERF_GATE_MAX_BUSY_CORES=abc PERF_GATE_MAX_LOAD=1.2.3; do
+    sampled invalid 50
+    gate 2 "an invalid $setting is refused rather than passing the host" invalid PATH="$sample_bin:$PATH" "$setting"
+done
+sampled bursty-raised 50
+sampled_gate 0 'a raised busy-core limit accepts the same bursts' bursty-raised PERF_GATE_MAX_BUSY_CORES=100000
+
 ps_bin="$scratch/ps-bin"
 mkdir -p "$ps_bin"
 cat > "$ps_bin/ps" <<'EOF'
