@@ -1,0 +1,211 @@
+#!/usr/bin/env python3
+"""Remove agent harness session data last modified before a cutoff."""
+from __future__ import annotations
+
+import argparse
+from dataclasses import dataclass, field
+import json
+import os
+from pathlib import Path
+import re
+import shutil
+import sqlite3
+import stat
+import sys
+import time
+from typing import Iterator
+
+UNITS = {"m": 60, "h": 3600, "d": 86400, "w": 604800}
+DEFAULT_AGE = "7d"
+NOT_COVERED = {
+    "devin": "sessions.db has no documented schema",
+}
+
+
+@dataclass(frozen=True)
+class Tree:
+    harness: str
+    root: str
+    pattern: str
+
+
+TREES = (
+    Tree("claude", ".claude/projects", "*/*.jsonl"),
+    Tree("claude", ".claude/projects", "*/*-*-*-*-*/"),
+    Tree("claude", ".claude/file-history", "*/"),
+    Tree("claude", ".claude/session-env", "*/"),
+    Tree("claude", ".claude/shell-snapshots", "*"),
+    Tree("claude", ".claude/todos", "*"),
+    Tree("codex", ".codex/sessions", "*/*/*/rollout-*.jsonl"),
+    Tree("codex", ".codex/archived_sessions", "*.jsonl"),
+    Tree("pi", ".pi/agent/sessions", "*/*.jsonl"),
+    Tree("muse", ".local/share/muse/sessions", "*/*/*/*/"),
+    Tree("command-code", ".commandcode/projects", "*/*"),
+    Tree("command-code", ".commandcode/file-history", "*/"),
+    Tree("antigravity", ".gemini/antigravity-cli/conversations", "*.db"),
+    Tree("fx", ".fx/sessions", "*"),
+    Tree("fx", ".fx/sessions", "*/"),
+)
+OPENCODE_DB = ".local/share/opencode/opencode.db"
+HARNESSES = ("claude", "codex", "pi", "muse", "command-code", "antigravity", "fx", "opencode")
+
+
+@dataclass
+class Report:
+    harness: str
+    removed: int = 0
+    bytes: int = 0
+    errors: list[str] = field(default_factory=list)
+    skipped: str | None = None
+
+
+def parse_age(text: str) -> int:
+    match = re.fullmatch(r"([1-9][0-9]*)([mhdw])", text)
+    if not match:
+        raise argparse.ArgumentTypeError(f"invalid age {text!r}: use a positive count and m, h, d or w, such as 7d")
+    return int(match[1]) * UNITS[match[2]]
+
+
+def newest(path: Path) -> tuple[float, int]:
+    info = path.lstat()
+    if not stat.S_ISDIR(info.st_mode):
+        return info.st_mtime, info.st_size
+    latest, size = info.st_mtime, 0
+    for base, dirs, files in os.walk(path):
+        for name in dirs + files:
+            child = os.lstat(os.path.join(base, name))
+            latest = max(latest, child.st_mtime)
+            if not stat.S_ISDIR(child.st_mode):
+                size += child.st_size
+    return latest, size
+
+
+def candidates(root: Path, pattern: str) -> Iterator[Path]:
+    want_dir = pattern.endswith("/")
+    for path in sorted(root.glob(pattern.rstrip("/"))):
+        try:
+            mode = path.lstat().st_mode
+        except FileNotFoundError:
+            continue
+        if stat.S_ISLNK(mode) or stat.S_ISDIR(mode) != want_dir:
+            continue
+        yield path
+
+
+def prune_empty(start: Path, root: Path) -> None:
+    current = start
+    while current != root and root in current.parents:
+        try:
+            current.rmdir()
+        except OSError:
+            return
+        current = current.parent
+
+
+def clean_tree(home: Path, tree: Tree, cutoff: float, dry_run: bool, report: Report) -> None:
+    root = home / tree.root
+    if not root.is_dir() or root.is_symlink():
+        return
+    for path in candidates(root, tree.pattern):
+        try:
+            mtime, size = newest(path)
+        except OSError as error:
+            report.errors.append(f"{path}: {error.strerror}")
+            continue
+        if mtime >= cutoff:
+            continue
+        if not dry_run:
+            try:
+                if path.is_dir():
+                    shutil.rmtree(path)
+                else:
+                    path.unlink()
+            except OSError as error:
+                report.errors.append(f"{path}: {error.strerror}")
+                continue
+            prune_empty(path.parent, root)
+        report.removed += 1
+        report.bytes += size
+
+
+def clean_opencode(home: Path, cutoff: float, dry_run: bool, report: Report) -> None:
+    path = home / OPENCODE_DB
+    if not path.is_file():
+        return
+    cutoff_ms = int(cutoff * 1000)
+    try:
+        db = sqlite3.connect(f"file:{path}?mode={'ro' if dry_run else 'rw'}", uri=True, timeout=5)
+    except sqlite3.Error as error:
+        report.errors.append(f"{path}: {error}")
+        return
+    try:
+        if not db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='session_v2'").fetchone():
+            report.skipped = "session_v2 table not found"
+            return
+        db.execute("PRAGMA foreign_keys = ON")
+        with db:
+            report.removed = db.execute("SELECT count(*) FROM session_v2 WHERE time_updated < ?", (cutoff_ms,)).fetchone()[0]
+            if not dry_run:
+                db.execute("DELETE FROM session_v2 WHERE time_updated < ?", (cutoff_ms,))
+    except sqlite3.Error as error:
+        report.errors.append(f"{path}: {error}")
+        report.removed = 0
+    finally:
+        db.close()
+
+
+def human(size: int) -> str:
+    value = float(size)
+    for unit in ("B", "KiB", "MiB", "GiB"):
+        if value < 1024 or unit == "GiB":
+            return f"{value:.0f} {unit}" if unit == "B" else f"{value:.1f} {unit}"
+        value /= 1024
+    raise AssertionError
+
+
+def main(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(
+        prog="cleanup-sessions",
+        description="Remove session transcripts and per-session state from Claude, Codex, Pi, Muse, Command Code, Antigravity, FX and OpenCode when last modified before AGE ago.",
+        epilog="Devin is not covered. Exit status: 0 success, 1 a removal failed, 2 usage error.",
+    )
+    parser.add_argument("age", nargs="?", default=DEFAULT_AGE, type=parse_age, metavar="AGE", help=f"minimum age such as 30m, 12h, 7d or 2w (default {DEFAULT_AGE})")
+    parser.add_argument("-n", "--dry-run", action="store_true", help="report what would be removed without removing it")
+    parser.add_argument("--json", action="store_true", help="print one JSON object instead of text")
+    args = parser.parse_args(argv)
+
+    home = Path(os.environ.get("HOME") or Path.home())
+    cutoff = time.time() - args.age
+    reports = {name: Report(name) for name in HARNESSES}
+    for tree in TREES:
+        clean_tree(home, tree, cutoff, args.dry_run, reports[tree.harness])
+    clean_opencode(home, cutoff, args.dry_run, reports["opencode"])
+
+    failed = any(report.errors for report in reports.values())
+    if args.json:
+        json.dump({
+            "cutoff": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(cutoff)),
+            "dry_run": args.dry_run,
+            "harnesses": [vars(report) for report in reports.values()],
+            "not_covered": NOT_COVERED,
+        }, sys.stdout, indent=2)
+        print()
+        return 1 if failed else 0
+
+    verb = "would remove" if args.dry_run else "removed"
+    print(f"cutoff {time.strftime('%Y-%m-%d %H:%M', time.localtime(cutoff))}")
+    for report in reports.values():
+        if report.skipped:
+            print(f"{report.harness}: skipped, {report.skipped}")
+            continue
+        unit = "sessions" if report.harness == "opencode" else "entries"
+        sized = f", {human(report.bytes)}" if report.harness != "opencode" else ""
+        print(f"{report.harness}: {verb} {report.removed} {unit}{sized}")
+        for error in report.errors:
+            print(f"cleanup-sessions: {error}", file=sys.stderr)
+    print("not covered: " + ", ".join(f"{name} ({why})" for name, why in NOT_COVERED.items()))
+    return 1 if failed else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

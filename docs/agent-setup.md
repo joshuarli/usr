@@ -48,6 +48,8 @@ fx uses `auto` permissions with Contributor for permission reviews (instead of i
 
 The [Pi SDK + pi-subagents bridge](../tools/pi-subagent-bridge/README.md) owns approved routes, durable worker state and typed native Pi nesting. Parents retain worktree scope, independent proof, diff review and integration. The CLI executors are leaves. Muse Contributor routes allow Meta to use prompts, code and outputs for training. [Pi setup](pi.md) covers pinned release installation, authentication and the intercom boundary.
 
+`cleanup-sessions [AGE]` (default `7d`) removes session transcripts and per-session state last modified before AGE ago from Claude, Codex, Pi, Muse, Command Code, Antigravity, FX and OpenCode (whole sessions from `opencode.db`, with their messages). It never follows symlinks, leaves settings, credentials, memory and indexes alone, and does not cover Devin. Preview with `--dry-run`; `--json` reports per-harness counts.
+
 For cross-harness continuation, `/resume-session <agent> <session-id>` recovers a named local transcript and continues work in the **current** agent; it does not reopen the old agent's native process. It reads each harness's local transcripts directly; DeepSeek TUI and fx use their local files when readable. In Pi, invoke it as `/skill:resume-session <agent> <session-id>`; in Codex, use `$resume-session <agent> <session-id>`.
 
 ### Browser-native WebMCP

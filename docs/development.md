@@ -32,6 +32,7 @@ Run the narrowest check that covers the change. `sh sync check-parallel` runs th
 | `kache` setup | `python3 -I tools/sync/test_kache.py` and `python3 -I dotfiles/setup-kache-test.py` |
 | `pinact` and workflow pins | `TMPDIR="$PWD/.work/tmp" python3 -I tools/pinact/test_pinact.py`, `TMPDIR="$PWD/.work/tmp" python3 -I tools/pinact/tests/test_yaml.py`, `TMPDIR="$PWD/.work/tmp" python3 -I tools/pinact/tests/test_lint_rules.py`, `TMPDIR="$PWD/.work/tmp" python3 -I tools/pinact/tests/test_expressions.py`, `TMPDIR="$PWD/.work/tmp" python3 -I tools/pinact/tests/test_security.py`, `TMPDIR="$PWD/.work/tmp" python3 -I tools/pinact/tests/test_fix.py`, and `python3 -I dotfiles/base/.local/bin/pinact --check` |
 | `yt-dlp` shim | `sh dotfiles/yt-dlp-shim-test.sh` and `shellcheck -s sh dotfiles/base/.local/bin/yt-dlp dotfiles/yt-dlp-shim-test.sh` |
+| `cleanup-sessions` | `TMPDIR="$PWD/.work/tmp" python3 -I dotfiles/cleanup-sessions-test.py` |
 | `pk` process picker | `python3 -I dotfiles/pk-test.py`, `sh -n dotfiles/base/.local/bin/pk`, `dash -n dotfiles/base/.local/bin/pk`, and `shellcheck -s sh dotfiles/base/.local/bin/pk` |
 | DeepSeek launcher | `sh dotfiles/dsh-launcher-test.sh` and `shellcheck -s sh dotfiles/base/.local/bin/dsh dotfiles/dsh-launcher-test.sh` |
 | Claude API launcher | `sh dotfiles/claude-api-test.sh` and `shellcheck -s sh dotfiles/base/.local/bin/claude-api dotfiles/claude-api-test.sh` |

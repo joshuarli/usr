@@ -17,6 +17,8 @@ The one entry point for improving how agents work here. Instructions drift, skil
 - `/audit-skills past 2h` (any window): stages 2 and 3 over sessions in that window only, across harnesses and repos, including delegation and qualification tooling friction.
 - `/audit-skills <repo>`: stages 3, 4 and 6 for that repository, from its history, reviews and sessions, plus its `AGENTS.md` chain and repo-local skills. A window may be combined with it.
 
+Before stage 1, ask the owner whether to run `cleanup-sessions` (default: data older than 7 days; `cleanup-sessions --dry-run` previews) so stale sessions do not dominate the sample; run it only on their yes.
+
 Audit and report first. Apply only what the owner approves, unless the invocation explicitly authorizes an unattended repair run (for example `/audit-skills apply`). Even then, park owner decisions: a behavior choice between conflicting rules, removing a slash command the owner types, and model or effort settings.
 
 ## Cost

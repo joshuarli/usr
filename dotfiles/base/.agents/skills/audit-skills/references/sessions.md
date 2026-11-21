@@ -4,6 +4,8 @@ Read this for stage 2, and for the session sources stage 3 uses. A skill that re
 
 ## Data (all read-only)
 
+The audit reads these stores and never deletes from them; `cleanup-sessions AGE` prunes the same stores, so any sessions it removed are absent from the window.
+
 - Claude: `~/.claude/projects/*/<session>.jsonl`. Codex: `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl` (the `session_meta` line carries `cwd` and `originator`). Muse: `~/.local/share/muse/sessions`. Pi: `~/.pi/agent/sessions/*/*.jsonl` (scan the first lines for `cwd`).
 - OpenCode: `sqlite3 ~/.local/share/opencode/opencode.db`. Sessions from `session_v2` (`time_updated` is epoch ms); assistant turns from `session_message` (JSON `data.content` holds the tool calls); parts from `session_part` if the JSON layout differs.
 - List candidates in a window with `fd -I -H --changed-within <window>`. Bridge state and qualification logs live under `.work/`, which is gitignored, so `-I` is required for those trees.
