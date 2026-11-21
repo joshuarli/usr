@@ -10,7 +10,8 @@ import { makeHybridBridge } from "../src/hybrid.ts"
 import { inspectStored } from "../src/inspect.ts"
 import { Scratch, realDeps, runFor, writeLog, writeSession, type Repo } from "./worker-fixtures.ts"
 import {
-  activatePi, activateProcess, backendOf, decodeSession, encodeSession, processRun, targetOf, transition, type Session,
+  ADMITTING_PARENT_ENV, activatePi, activateProcess, admittingParentFrom, backendOf, decodeSession, encodeSession, processRun, targetOf,
+  transition, type Session,
 } from "../src/session.ts"
 
 const cwd = "/tmp/usr-session-fixture"
@@ -148,6 +149,29 @@ test("unknown versions, removed tiers and malformed state fail at the boundary",
   assert.throws(() => decode(lower({ pi_candidates: [null] })))
   assert.throws(() => decode(lower({ remaining_pi: ["other"] })))
   assert.throws(() => decodeSession(null, cwd, id), /Invalid/)
+})
+
+test("an admitting parent identity round trips unchanged and stays absent on records that never declared one", () => {
+  const parent = "claude:7f3c2a90-1b4d-4e8f-9a6b-0c1d2e3f4a5b"
+  for (const value of [record(), lower(), JSON.parse(JSON.stringify(encodeSession(decode(lower()))))]) {
+    const declared = roundTrip({ ...value, admitting_parent: parent })
+    assert.equal(declared.admitting_parent, parent)
+    assert.equal(encodeSession(declared).admitting_parent, parent)
+    assert.equal(encodeSession(declared).schema_version, encodeSession(decode(value)).schema_version)
+    const legacy = roundTrip(value)
+    assert.equal(Object.hasOwn(legacy, "admitting_parent"), false)
+    assert.equal(Object.hasOwn(JSON.parse(JSON.stringify(encodeSession(legacy))), "admitting_parent"), false)
+  }
+})
+
+test("a malformed admitting parent identity is refused in the record and at admission", () => {
+  for (const malformed of [null, "", " parent", "parent ", "two\nlines", "tab\there", "x".repeat(257), "unknown", 7, { id: "p" }]) {
+    assert.throws(() => decode(record({ admitting_parent: malformed })), /Invalid persisted admitting parent/)
+    if (typeof malformed === "string") assert.throws(() => admittingParentFrom({ [ADMITTING_PARENT_ENV]: malformed }), new RegExp(ADMITTING_PARENT_ENV))
+  }
+  assert.equal(admittingParentFrom({}), undefined)
+  assert.equal(admittingParentFrom({ [ADMITTING_PARENT_ENV]: "codex:run-42" }), "codex:run-42")
+  assert.equal(admittingParentFrom({ [ADMITTING_PARENT_ENV]: "x".repeat(256) }), "x".repeat(256))
 })
 
 function current(overrides: Record<string, unknown> = {}): Record<string, unknown> {

@@ -10,7 +10,7 @@ import { inspectStored, type Snapshot } from "../src/inspect.ts"
 import { optionalPiAdapter } from "../src/optional-pi.ts"
 import { activeWorktreeOwner, claimWorktree, ensureWorktree } from "../src/worktree-lease.ts"
 import {
-  PI_MODEL, PI_ID, Scratch, git, commandLane, commandResultLine, migrate, piSession, piSuccess, realDeps, runFor, toolQueued,
+  PI_MODEL, PI_ID, Scratch, git, commandLane, commandResultLine, migrate, piSession, piSuccess, realDeps, runFor, sessionId, toolQueued,
   treeOf, unusedApi, writeLog, writePiChild, writeSession, type Repo,
 } from "./worker-fixtures.ts"
 
@@ -200,4 +200,16 @@ test("inspection reports lane commits and retains legacy strictness", async () =
   assert.equal(current.commits_since_base, 1)
   assert.deepEqual(current.changed_paths, ["README"])
   assert.equal((await inspectStored(repo.directory, legacy, realDeps())).head_on_lane, false)
+})
+
+test("snapshots expose a recorded admitting parent unchanged and report it unknown otherwise", async () => {
+  const repo = scratch.repo()
+  const parent = "claude:7f3c2a90-1b4d-4e8f-9a6b-0c1d2e3f4a5b"
+  const declared = commandLane(repo, 60, await scratch.gone(), [receipt], { admitting_parent: parent })
+  const legacy = commandLane(repo, 61, await scratch.gone(), [receipt])
+  const unreadable = sessionId(62)
+  writeFileSync(join(repo.directory, unreadable + ".json"), "{")
+  assert.equal((await inspectStored(repo.directory, declared, realDeps())).admitting_parent, parent)
+  assert.equal((await inspectStored(repo.directory, legacy, realDeps())).admitting_parent, "unknown")
+  assert.equal((await inspectStored(repo.directory, unreadable, realDeps())).admitting_parent, "unknown")
 })

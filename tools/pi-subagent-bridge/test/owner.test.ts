@@ -20,7 +20,7 @@ import {
   ownerSteer, rawOwnerRpc, readOwnerDiscovery,
 } from "../src/owner-client.ts"
 import { ROOT_PLANS, type RootPlan } from "../src/policy.ts"
-import { decodeSession, encodeSession, type Session } from "../src/session.ts"
+import { ADMITTING_PARENT_ENV, decodeSession, encodeSession, type Session } from "../src/session.ts"
 import { connect } from "../src/server.ts"
 import { worktreeLeasePath } from "../src/worktree-lease.ts"
 
@@ -612,6 +612,41 @@ test("e: status, jobs, and hello leave leases, counts, and session records byte-
   const after = snapshotTree(sDir)
   assertTreesByteEqual(before, after)
   assert.equal(existsSync(worktreeLeasePath(sDir, repo)), true)
+})
+
+test("e2: owner status reports the declared admitting parent, unknown when none was declared, and refuses a malformed one", async (t) => {
+  const scratch = makeScratch(t)
+  const declaredRepo = makeRepo(scratch)
+  const undeclaredRepo = makeRepo(scratch)
+  const malformedRepo = makeRepo(scratch)
+  const cmd = makeFakeCommand()
+  const bridge = makeHybridBridge(piAdapter(makeFakePiPort().port), cmd.runner, noCodex)
+  const manager = new OwnerManager(bridge)
+  t.after(async () => manager.close())
+  const previous = process.env[ADMITTING_PARENT_ENV]
+  t.after(() => { if (previous === undefined) delete process.env[ADMITTING_PARENT_ENV]; else process.env[ADMITTING_PARENT_ENV] = previous })
+  const parent = "claude:7f3c2a90-1b4d-4e8f-9a6b-0c1d2e3f4a5b"
+
+  process.env[ADMITTING_PARENT_ENV] = parent
+  const declared = await bridge.start(declaredRepo, "job-parent", "worker", scopeFor(declaredRepo), "task parent")
+  delete process.env[ADMITTING_PARENT_ENV]
+  const undeclared = await bridge.start(undeclaredRepo, "job-orphan", "worker", scopeFor(undeclaredRepo), "task orphan")
+  process.env[ADMITTING_PARENT_ENV] = "two\nlines"
+  await assert.rejects(bridge.start(malformedRepo, "job-bad", "worker", scopeFor(malformedRepo), "task bad"), new RegExp(ADMITTING_PARENT_ENV))
+  delete process.env[ADMITTING_PARENT_ENV]
+  assert.equal(cmd.counts().starts, 2)
+  assert.equal(existsSync(worktreeLeasePath(stateDir(malformedRepo), malformedRepo)), false)
+
+  const rawRecord = (repo: string, id: string) => JSON.parse(readFileSync(join(readStateDir(repo), `${id}.json`), "utf8"))
+  assert.equal(rawRecord(declaredRepo, declared.session_id).admitting_parent, parent)
+  assert.equal(Object.hasOwn(rawRecord(undeclaredRepo, undeclared.session_id), "admitting_parent"), false)
+
+  for (const [repo, expected] of [[declaredRepo, parent], [undeclaredRepo, "unknown"]] as const) {
+    const [job] = await ownerJobs(repo, manager.ownerId)
+    const status = await ownerStatus(repo, manager.ownerId, { job_id: job.job_id, run_id: job.run_id, owner_generation: job.owner_generation })
+    assert.equal(status.admitting_parent, expected)
+    assert.equal(status.owner_id, manager.ownerId)
+  }
 })
 
 test("f: unknown method, unknown param field, bad protocol use, and unowned job target are rejected", async (t) => {

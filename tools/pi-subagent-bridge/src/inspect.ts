@@ -81,6 +81,7 @@ export type Inspection = {
 export type Snapshot = {
   observed_at: string
   id: string
+  admitting_parent: OrUnknown<string>
   title: OrUnknown<string>
   tier: OrUnknown<Tier>
   worktree: OrUnknown<string>
@@ -340,7 +341,7 @@ export function toSnapshot(i: Inspection): Snapshot {
   const read = worktree.kind === "read" ? worktree : null
   const activity = i.observation.last_activity_ms
   return {
-    observed_at: i.observed_at, id: s.id, title: s.title, tier: s.tier, worktree: s.cwd,
+    observed_at: i.observed_at, id: s.id, admitting_parent: s.admitting_parent ?? "unknown", title: s.title, tier: s.tier, worktree: s.cwd,
     base_revision: s.scope.base_revision, head: read?.head ?? "unknown", backend: backendOf(s),
     model: route.model, effort: route.effort,
     execution_state: i.state, attention: classifyState(i.state), last_assistant_text: i.observation.final_text?.slice(-5000) ?? null,
@@ -363,7 +364,7 @@ function unreadableSnapshot(id: string, raw: unknown, reason: string): Snapshot 
   const record = isRecord(raw) ? raw : {}
   const text = (value: unknown) => typeof value === "string" && value ? value : "unknown"
   return {
-    observed_at: new Date().toISOString(), id, title: text(record.title), tier: "unknown", worktree: text(record.cwd),
+    observed_at: new Date().toISOString(), id, admitting_parent: "unknown", title: text(record.title), tier: "unknown", worktree: text(record.cwd),
     base_revision: "unknown", head: "unknown", backend: text(record.backend), model: "unknown", effort: "unknown",
     execution_state: "unknown", attention: "unknown", last_assistant_text: "unknown", error: reason, usage: "unknown", pid: "unknown",
     last_activity: "unknown", last_event: "unknown", changed_paths: "unknown", out_of_scope_paths: "unknown",

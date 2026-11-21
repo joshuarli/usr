@@ -7,6 +7,7 @@ import test from "node:test"
 import { stripIntercomEnvironment, workerEnvironment } from "../src/worker-env.ts"
 import { startCodex } from "../src/codex.ts"
 import { startCommand } from "../src/command.ts"
+import { ADMITTING_PARENT_ENV, admittingParentFrom } from "../src/session.ts"
 
 test("a scoped worker process receives provider settings but no coordinator authority", () => {
   const parent = {
@@ -31,6 +32,14 @@ test("a scoped worker process receives provider settings but no coordinator auth
   assert.equal(received.PI_OFFLINE, "1")
   assert.equal(received.USR_SCOPED_WORKER, "1")
   assert.equal(parent.AGENT_INTERCOM_ACCESS_CREDENTIAL_PATH, "/private/coordinator.json", "parent enrollment remains intact")
+})
+
+test("a scoped worker never inherits its admitting parent's identity, so its own admissions cannot claim that lineage", () => {
+  const parent = { [ADMITTING_PARENT_ENV]: "claude:coordinator", PI_OFFLINE: "1" }
+  const env = workerEnvironment(parent)
+  assert.equal(Object.hasOwn(env, ADMITTING_PARENT_ENV), false)
+  assert.equal(admittingParentFrom(env), undefined)
+  assert.equal(parent[ADMITTING_PARENT_ENV], "claude:coordinator")
 })
 
 test("direct SDK entry scrubs its environment before native nested children inherit it", () => {

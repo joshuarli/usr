@@ -69,10 +69,28 @@ export function isOwnerId(value: unknown): value is string {
   return typeof value === "string" && OWNER_ID_RE.test(value)
 }
 
+export const ADMITTING_PARENT_ENV = "USR_BRIDGE_PARENT_ID"
+const ADMITTING_PARENT_MAX = 256
+const LINE_BREAKING = /[\p{Cc}\p{Zl}\p{Zp}]/u
+
+function admittingParent(value: unknown): string | undefined {
+  return typeof value === "string" && value.length > 0 && value.length <= ADMITTING_PARENT_MAX && value === value.trim() &&
+    !LINE_BREAKING.test(value) && value !== "unknown" ? value : undefined
+}
+export function admittingParentFrom(env: Readonly<Record<string, string | undefined>>): string | undefined {
+  const value = env[ADMITTING_PARENT_ENV]
+  if (value === undefined) return undefined
+  const parent = admittingParent(value)
+  if (parent === undefined)
+    throw new Error(ADMITTING_PARENT_ENV + " must be one line of at most " + ADMITTING_PARENT_MAX + " characters without control characters or surrounding whitespace, and not \"unknown\"")
+  return parent
+}
+
 export type Session = {
   id: string; cwd: string; title: string; tier: BridgeTier; scope: Scope; task: string
   plan: AdmittedPlan; execution: Execution; attempts: number
   owner?: SessionOwner
+  admitting_parent?: string
   lane_branch?: string | null
   fallback_reason?: string; fallback_detail?: string; fallback_blocked?: string
   continuations?: number; steers?: number; cancel_requested?: boolean
@@ -425,6 +443,11 @@ export function decodeSession(value: unknown, cwd: string, id: string): Session 
       throw new Error("Invalid persisted session owner")
     }
     s.owner = { owner_id: raw.owner_id, owner_generation: raw.owner_generation }
+  }
+  if (value.admitting_parent !== undefined) {
+    const parent = admittingParent(value.admitting_parent)
+    if (parent === undefined) throw new Error("Invalid persisted admitting parent")
+    s.admitting_parent = parent
   }
   return s
 }

@@ -19,7 +19,7 @@ import {
   type Inspection, type InspectionDeps, type Known,
 } from "./inspect.ts"
 import {
-  STEER_LIMIT, TURN_LIMIT_CONTINUATIONS, activatePi, activateProcess, backendOf, decodeSession, encodeSession,
+  STEER_LIMIT, TURN_LIMIT_CONTINUATIONS, activatePi, activateProcess, admittingParentFrom, backendOf, decodeSession, encodeSession,
   executorOf, isSessionId, piFallbackPlan, processRun, processTarget, targetOf, transition, type PiFallbackPlan, type ProcessExecution,
   type ProcessTarget, type ExecutionPlan, type Session, type SessionOwner,
 } from "./session.ts"
@@ -464,6 +464,7 @@ export function makeHybridBridge(api: PiAdapter, command = {
       if (!isBridgeTier(tierInput)) throw new Error("Unknown bridge tier")
       if (git(dir, "status", "--porcelain", "--untracked-files=all")) throw new Error("Worker worktree must start clean")
       const task = required(brief, "brief", 32000)
+      const admitting_parent = admittingParentFrom(process.env)
       const plan = resolvePolicy(tierInput)
       if (plan.kind === "leaf") {
         if (activeWorktreeOwner(stateDir(dir), dir)) throw new Error("Worktree already has an active worker")
@@ -472,7 +473,8 @@ export function makeHybridBridge(api: PiAdapter, command = {
         if (!available) throw new Error("Pinned leaf runtime/model unavailable. No fallback.")
         const s: Session = { id: "usrw_" + randomUUID(), cwd: dir, tier: tierInput,
           title: required(title, "title", 100), scope: scopeFor(scopeInput, tierInput, dir),
-          task, lane_branch: currentBranch(dir), plan, execution: { kind: "transition", to: target }, attempts: 0 }
+          task, lane_branch: currentBranch(dir), plan, execution: { kind: "transition", to: target }, attempts: 0,
+          ...(admitting_parent === undefined ? {} : { admitting_parent }) }
         const leaseDir = stateDir(dir)
         await settleHolder(leaseDir, dir)
         claimWorktree(leaseDir, dir, s.id)
@@ -494,7 +496,8 @@ export function makeHybridBridge(api: PiAdapter, command = {
       const first: ProcessTarget = fxTarget ?? codexTarget
       const s: Session = { id: "usrw_" + randomUUID(), cwd: dir, tier: tierInput,
         title: required(title, "title", 100), scope: scopeFor(scopeInput, tierInput, dir),
-        task, lane_branch: currentBranch(dir), plan, execution: { kind: "transition", to: first }, attempts: 0 }
+        task, lane_branch: currentBranch(dir), plan, execution: { kind: "transition", to: first }, attempts: 0,
+        ...(admitting_parent === undefined ? {} : { admitting_parent }) }
       const leaseDir = stateDir(dir)
       await settleHolder(leaseDir, dir)
       claimWorktree(leaseDir, dir, s.id)

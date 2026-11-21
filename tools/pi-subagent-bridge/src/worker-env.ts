@@ -1,6 +1,9 @@
+import { ADMITTING_PARENT_ENV } from "./session.ts"
+
 /** Coordinator enrollment and transport settings never enter scoped worker processes. */
 export function workerEnvironment(source: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
-  const env = { ...source, USR_SCOPED_WORKER: "1" }
+  const env: NodeJS.ProcessEnv = { ...source, USR_SCOPED_WORKER: "1" }
+  delete env[ADMITTING_PARENT_ENV]
   stripIntercomEnvironment(env)
   return env
 }
