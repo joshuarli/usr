@@ -100,7 +100,7 @@ def check_bridge_lease(primary: Path, path: Path) -> None:
                               env={**os.environ, "GIT_OPTIONAL_LOCKS": "0"})
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise Kept(f"kept {path}: active bridge lease at {lease} for session {session_id}; "
-                    f"bridge unavailable ({exc})")
+                    f"bridge unavailable ({exc})") from exc
     reported: str | None = None
     try:
         snapshot = json.loads(proc.stdout)
@@ -166,11 +166,7 @@ def collect_submodule_worktrees(path: Path, primary: Path, discard_ignored: bool
         if dirs is None:
             continue
         gitdir, common = dirs
-        try:
-            same = gitdir.resolve() == common.resolve()
-        except OSError:
-            raise Kept(f"kept {path}: submodule {rel} repository cannot be verified")
-        if same:
+        if gitdir.resolve() == common.resolve():
             raise Kept(f"kept {path}: submodule {rel} has its own standalone repository at {gitdir}; "
                         "removing the lane could destroy that repository")
         try:
@@ -180,10 +176,7 @@ def collect_submodule_worktrees(path: Path, primary: Path, discard_ignored: bool
         if has_modules:
             raise Kept(f"kept {path}: submodule {rel} contains nested modules at {gitdir / 'modules'}; "
                         "removing the lane could destroy that repository")
-        try:
-            sub_resolved = sub.resolve()
-        except OSError:
-            raise Kept(f"kept {path}: submodule {rel} path cannot be resolved")
+        sub_resolved = sub.resolve()
         entries = worktree_entries(common)
         match: dict[str, str] | None = None
         for entry in entries:
