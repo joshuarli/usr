@@ -1,5 +1,5 @@
 Prefix: USR
-Next: 132
+Next: 133
 
 ### USR-83 · P2 · running sessions on two hosts cannot reach each other over intercom
 
@@ -72,6 +72,15 @@ Next: 132
 - **Recommendation:** Reproduce with a long Codex worker while recording the exit status and signal of the codex process (for example by having the bridge launcher record wait status) and process accounting around the exit, then fix the killer or, if Codex exits on its own, classify a silent exit before edits as a provider failure eligible for fallback. Acceptance: a recorded death names its signal or exit status, and a regression check keeps an unrelated detached worker process group alive across the full bridge test suite.
 - **Fix with:** root-cause
 - **Effort:** M
+
+### USR-132 · P3 · worktree-retire keeps lanes whose commits master carries as equal patches
+
+- **Area:** Worktree lifecycle
+- **Where:** worktree-retire integration check (ancestor-only)
+- **Problem:** On 2026-11-21 in xsh, four completed lanes (lane/debloat-xsh, integrate, lane/lean-effects, integrate-xsh-147) were kept as "not integrated" although `git cherry master BRANCH` reports every commit as an equal patch already on master (each was rebased or cherry-picked before landing). The ancestor-only check cannot prove these, so their worktrees (about 1.7 GiB with ignored build caches) stay until someone hand-reviews them, and the cleanup rule forbids forcing them out. A `--dry-run` also stops at the ignored-files notice before the integration check, so it reports "review ignored files" for lanes it will then refuse.
+- **Recommendation:** Accept a lane when every commit beyond the merge base has an equal patch id on the target (`git cherry` reports only `-`), keep the branch in that case (it is not an ancestor) and say so in the output. Run the integration check before the ignored-files notice so a dry run reports the decisive refusal. Acceptance: a fixture lane whose two commits were cherry-picked onto the target is retired with its branch kept; a lane with one unmatched commit is still refused; a dry run on an unintegrated lane with ignored files prints the integration refusal.
+- **Fix with:** none
+- **Effort:** S
 
 ### USR-75 · P3 · clang plus mold host links intermittently segfault and leave truncated artifacts
 
