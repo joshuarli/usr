@@ -84,6 +84,7 @@ HOOKS = Area("git hooks and worktree helpers")
 ZSH = Area("zsh shim")
 MDTOOL = Area("a hook or `mdtool`")
 PERF_GATE = Area("`perf-gate-ready`")
+GPU_GATE = Area("`gpu-gate-ready`")
 WOL = Area("`src/wol.py`")
 SETUP_LINUX = Area("`host/setup-linux`")
 MACOS_SYNC = Area("macOS sync side effects")
@@ -161,6 +162,7 @@ REGISTRY: tuple[Check, ...] = (
         "dotfiles/base/.local/bin/git-tune",
         "dotfiles/base/.local/bin/gh-cancel-pr-runs",
         "dotfiles/base/.local/bin/ghostty-fda-check",
+        "dotfiles/base/.local/bin/gpu-gate-ready",
         "dotfiles/base/.local/bin/perf-gate-ready",
         "dotfiles/base/.local/bin/reset-agent-home",
         "dotfiles/base/.local/bin/reset-agents",
@@ -224,6 +226,8 @@ REGISTRY: tuple[Check, ...] = (
     Check("mdtool-hook-test", (MDTOOL,), ("sh", "{file}"), ("tools/mdtool/tests/*-test.sh",), per_file=True),
     Check("perf-gate-ready", (PERF_GATE,), ("sh", "dotfiles/perf-gate-ready-test.sh"), ("dotfiles/base/.local/bin/perf-gate-ready", "dotfiles/perf-gate-ready-test.sh")),
     Check("perf-gate-ready-dash", (PERF_GATE,), ("dash", "dotfiles/perf-gate-ready-test.sh"), ("dotfiles/base/.local/bin/perf-gate-ready", "dotfiles/perf-gate-ready-test.sh"), needs=("dash",)),
+    Check("gpu-gate-ready", (GPU_GATE,), ("sh", "dotfiles/gpu-gate-ready-test.sh"), ("dotfiles/base/.local/bin/gpu-gate-ready", "dotfiles/gpu-gate-ready-test.sh")),
+    Check("gpu-gate-ready-dash", (GPU_GATE,), ("dash", "dotfiles/gpu-gate-ready-test.sh"), ("dotfiles/base/.local/bin/gpu-gate-ready", "dotfiles/gpu-gate-ready-test.sh"), needs=("dash",)),
     Check("wol", (WOL,), py("src/test_wol.py"), ("src/wol.py", "src/test_wol.py"), tmpdir=True),
     Check("setup-linux", (SETUP_LINUX,), ("sh", "host/setup-linux-test.sh"), ("host/setup-linux", "host/setup-linux-test.sh")),
     Check("setup-linux-shellcheck", (SETUP_LINUX,), ("shellcheck", "-s", "sh", "host/setup-linux", "host/setup-linux-test.sh"), ("host/setup-linux", "host/setup-linux-test.sh"), needs=("shellcheck",)),

@@ -47,6 +47,7 @@ Run the narrowest check that covers the change. `sh sync check-parallel` runs th
 | zsh shim | `(cd dotfiles && sh zsh-shim-test.sh)` |
 | a hook or `mdtool` | `python3 -I tools/mdtool/src/mdtool.py selftest`, `sh tools/mdtool/tests/mdtool-test.sh`, and `sh FILE` for each changed match |
 | `perf-gate-ready` | `sh dotfiles/perf-gate-ready-test.sh` and `dash dotfiles/perf-gate-ready-test.sh` |
+| `gpu-gate-ready` | `sh dotfiles/gpu-gate-ready-test.sh` and `dash dotfiles/gpu-gate-ready-test.sh` |
 | `src/wol.py` | `TMPDIR="$PWD/.work/tmp" python3 -I src/test_wol.py` |
 | `host/setup-linux` | `sh host/setup-linux-test.sh` and `shellcheck -s sh host/setup-linux host/setup-linux-test.sh` |
 | macOS sync side effects | `python3 -I host/macos/sync-test.py` |
@@ -77,7 +78,7 @@ The [Alpine VM journey](../host/alpine/tests/vm.sh) requires `qemu-system-<arch>
 
 Fixture construction and per-round setup stay outside the timed region, and the fixture inputs are checked before timing starts. Each round runs every selected workload once, rotating the order between rounds. The report gives the median and range of wall time, median CPU time (user plus system of the whole process tree), and the largest peak RSS of any single process in the tree. An invalid run stops the benchmark with exit 1 and prints no timings.
 
-The numbers depend on host load and include each tool's interpreter startup; `sync plan` also runs the host's package probes. Check `perf-gate-ready` before a timed run: it samples load and CPU time (default maximum 2 busy cores over 1 second), and exits 2 for invalid settings. Treat busy-host results as observations, not baselines.
+The numbers depend on host load and include each tool's interpreter startup; `sync plan` also runs the host's package probes. Check `perf-gate-ready` before a timed run: it samples load and CPU time (default maximum 2 busy cores over 1 second), and exits 2 for invalid settings. Treat busy-host results as observations, not baselines. Before a GPU timing on macOS, also check `gpu-gate-ready`: it samples other processes' GPU time, device utilization, memory pressure, swap and compressor activity over 1 second, names the GPU users, and exits 75 when any exceeds its limit.
 
 ## Agent setup changes
 

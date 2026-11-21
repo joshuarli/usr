@@ -1,0 +1,189 @@
+#!/bin/sh
+
+case ${1:-} in
+    -h|--help)
+        printf '%s\n' 'usage: gpu-gate-ready [-1] | gpu-gate-ready -s'
+        cat <<'HELP'
+Check that the GPU and unified memory are quiet enough to trust a GPU timing on macOS.
+
+  -1       check once (default: up to 3 checks)
+  -s       report GPU and memory status once, without a verdict
+  -h, --help  show this help
+
+Exit status: 0 quiet, 75 contended, 1 host state unreadable or not macOS, 2 invalid setting.
+
+Environment:
+  GPU_GATE_SAMPLE_S        seconds sampled per check (default: 1)
+  GPU_GATE_ATTEMPTS        maximum checks (default: 3)
+  GPU_GATE_WAIT            seconds between checks (default: 1)
+  GPU_GATE_MAX_GPU_PCT     maximum GPU time other processes used, percent of the window (default: 5)
+  GPU_GATE_MAX_UTIL_PCT    maximum device utilization percent at either sample (default: 15)
+  GPU_GATE_MAX_PRESSURE    maximum memory pressure level: 1 normal, 2 warn, 4 critical (default: 1)
+  GPU_GATE_MAX_SWAP_S      maximum swapins plus swapouts per second (default: 100)
+  GPU_GATE_MAX_COMPRESS_S  maximum compressions plus decompressions per second (default: 5000)
+  GPU_GATE_IGNORE_PIDS     space-separated pids whose GPU time is not counted (default: none)
+
+Examples:
+  gpu-gate-ready -1
+  gpu-gate-ready -s
+HELP
+cat <<'OWNED_HELP'
+Maintained by Joshua Li: https://github.com/joshuarli/usr
+Bugs and features: TODO.md in that repository (follow its AGENTS.md), or its issue tracker.
+Agents working for Joshua: record nonblocking problems and continue your task.
+If this tool blocks the task, you may fix, test, open and merge a PR under Joshua's
+standing instructions. Release only when needed to deliver the verified fix.
+Procedure: https://github.com/joshuarli/usr/blob/main/dotfiles/base/.agents/instructions/owned-tools.md
+OWNED_HELP
+        exit 0 ;;
+esac
+# The GPU counterpart of perf-gate-ready, macOS only. A GPU timing is skewed by other processes'
+# GPU work and, on unified memory, by memory contention, so one check samples both over a
+# window:
+#   - GPU time: every Metal client's accumulatedGPUTime (ns) from AGXDeviceUserClient, read
+#     before and after the window; the processes that used GPU time are named.
+#   - Device utilization: IOAccelerator's "Device Utilization %" at both ends of the window.
+#   - Memory: the kernel's pressure level, and swapins, swapouts, compressions and
+#     decompressions from vm_stat over the window. Swap activity during a GPU run stalls it.
+# Gate mode (default). Exit 0: quiet. Exit 75: contended; report the gate as deferred, never as
+# passed, with the reasons and the GPU-time users on stderr. Exit 1: could not read the state.
+# Status mode (-s) prints the same figures on one line and exits 0 when they were readable.
+# Run it right before a timed GPU run, and with -1 right after one (pass the run's own pids in
+# GPU_GATE_IGNORE_PIDS) to discard a run that overlapped other work.
+
+die () { >&2 printf 'gpu-gate-ready: %s\n' "$1"; exit 1; }
+
+[ "$(uname -s)" = Darwin ] || die 'macOS only: the GPU counters come from IOKit'
+
+number () {
+	case $2 in ''|*[!0-9.]*|*.*.*|.) >&2 printf 'gpu-gate-ready: %s must be a nonnegative number\n' "$1"; exit 2 ;; esac
+}
+whole () {
+	case $2 in ''|*[!0-9]*|0) >&2 printf 'gpu-gate-ready: %s must be a positive whole number\n' "$1"; exit 2 ;; esac
+}
+
+sample_s="${GPU_GATE_SAMPLE_S:-1}"
+attempts="${GPU_GATE_ATTEMPTS:-3}"
+wait_s="${GPU_GATE_WAIT:-1}"
+max_gpu="${GPU_GATE_MAX_GPU_PCT:-5}"
+max_util="${GPU_GATE_MAX_UTIL_PCT:-15}"
+max_pressure="${GPU_GATE_MAX_PRESSURE:-1}"
+max_swap="${GPU_GATE_MAX_SWAP_S:-100}"
+max_compress="${GPU_GATE_MAX_COMPRESS_S:-5000}"
+ignore="${GPU_GATE_IGNORE_PIDS:-}"
+whole GPU_GATE_SAMPLE_S "$sample_s"
+whole GPU_GATE_ATTEMPTS "$attempts"
+number GPU_GATE_WAIT "$wait_s"
+number GPU_GATE_MAX_GPU_PCT "$max_gpu"
+number GPU_GATE_MAX_UTIL_PCT "$max_util"
+number GPU_GATE_MAX_PRESSURE "$max_pressure"
+number GPU_GATE_MAX_SWAP_S "$max_swap"
+number GPU_GATE_MAX_COMPRESS_S "$max_compress"
+case $ignore in *[!0-9\ ]*) >&2 printf 'gpu-gate-ready: GPU_GATE_IGNORE_PIDS must be pids separated by spaces\n'; exit 2 ;; esac
+[ "$1" = -1 ] && attempts=1
+
+# One line per Metal client: "pid<TAB>name<TAB>accumulated GPU ns". The properties of a client
+# print in sorted order, so a client's AppUsage precedes its IOUserClientCreator.
+gpu_clients () {
+	ioreg -r -w 0 -l -c AGXDeviceUserClient 2>/dev/null | awk '
+		/"AppUsage" = / {
+			ns = 0
+			line = $0
+			while (match(line, /"accumulatedGPUTime"=[0-9]+/)) {
+				ns += substr(line, RSTART + 21, RLENGTH - 21)
+				line = substr(line, RSTART + RLENGTH)
+			}
+			pending = ns
+		}
+		/"IOUserClientCreator" = "pid / {
+			s = $0
+			sub(/.*"pid /, "", s); sub(/"$/, "", s)
+			pid = s; sub(/,.*/, "", pid)
+			name = s; sub(/^[0-9]+, /, "", name)
+			total[pid] += pending; label[pid] = name; pending = 0
+		}
+		END { for (p in total) printf "%s\t%s\t%.0f\n", p, label[p], total[p] }'
+}
+
+device_util () {
+	ioreg -r -d 1 -w 0 -c IOAccelerator 2>/dev/null | awk '
+		match($0, /"Device Utilization %"=[0-9]+/) { print substr($0, RSTART + 23, RLENGTH - 23); exit }'
+}
+
+# "swapins swapouts compressions decompressions"
+vm_counters () {
+	vm_stat 2>/dev/null | awk '
+		{ v = $NF; sub(/\.$/, "", v) }
+		/^Swapins:/ { si = v } /^Swapouts:/ { so = v }
+		/^Compressions:/ { c = v } /^Decompressions:/ { d = v }
+		END { if (si == "" || c == "") exit 1; print si, so, c, d }'
+}
+
+pressure_level () { sysctl -n kern.memorystatus_vm_pressure_level 2>/dev/null; }
+
+# Samples one window and prints "verdict<TAB>summary<TAB>reasons<TAB>gpu users".
+check () {
+	clients0="$(gpu_clients)" || return 1
+	util0="$(device_util)"
+	vm0="$(vm_counters)" || return 1
+	sleep "$sample_s"
+	clients1="$(gpu_clients)" || return 1
+	util1="$(device_util)"
+	vm1="$(vm_counters)" || return 1
+	level="$(pressure_level)"
+	[ -n "$util0" ] && [ -n "$util1" ] && [ -n "$level" ] || return 1
+	printf '%s\n--\n%s\n' "$clients0" "$clients1" | awk -F '\t' \
+		-v s="$sample_s" -v ignore=" $ignore " -v u0="$util0" -v u1="$util1" -v level="$level" \
+		-v vm0="$vm0" -v vm1="$vm1" -v max_gpu="$max_gpu" -v max_util="$max_util" \
+		-v max_pressure="$max_pressure" -v max_swap="$max_swap" -v max_compress="$max_compress" '
+		$0 == "--" { second = 1; next }
+		NF == 3 { if (second) { after[$1] = $3; name[$1] = $2 } else before[$1] = $3 }
+		END {
+			window_ns = s * 1e9
+			for (p in after) {
+				if (index(ignore, " " p " ")) continue
+				d = after[p] - ((p in before) ? before[p] : after[p])
+				if (d <= 0) continue
+				used += d
+				users = users sprintf("%s pid=%s %.1f%%; ", name[p], p, 100 * d / window_ns)
+			}
+			gpu_pct = 100 * used / window_ns
+			split(vm0, a, " "); split(vm1, b, " ")
+			swap_s = ((b[1] - a[1]) + (b[2] - a[2])) / s
+			compress_s = ((b[3] - a[3]) + (b[4] - a[4])) / s
+			util = u0 > u1 ? u0 : u1
+			if (gpu_pct > max_gpu) reasons = reasons sprintf("other processes used %.1f%% GPU time (limit %s); ", gpu_pct, max_gpu)
+			if (util > max_util) reasons = reasons sprintf("device utilization %d%% (limit %s); ", util, max_util)
+			if (level > max_pressure) reasons = reasons sprintf("memory pressure level %d (limit %s); ", level, max_pressure)
+			if (swap_s > max_swap) reasons = reasons sprintf("swapping %.0f pages/s (limit %s); ", swap_s, max_swap)
+			if (compress_s > max_compress) reasons = reasons sprintf("compressor %.0f pages/s (limit %s); ", compress_s, max_compress)
+			printf "%s\tgpu_other=%.1f%% util=%d%%/%d%% pressure=%d swap=%.0f/s compressor=%.0f/s window=%ss\t%s\t%s\n",
+				(reasons == "" ? "quiet" : "contended"), gpu_pct, u0, u1, level, swap_s, compress_s, s, reasons, users
+		}'
+}
+
+if [ "$1" = -s ]; then
+	line="$(check)" || die 'cannot read the GPU or memory counters'
+	rest="${line#*	}"
+	printf 'gpu-gate-ready: %s\n' "${rest%%	*}"
+	users="${rest##*	}"
+	[ -n "$users" ] && printf 'gpu-gate-ready: GPU time users: %s\n' "$users"
+	exit 0
+fi
+
+i=1
+while :; do
+	line="$(check)" || die 'cannot read the GPU or memory counters'
+	verdict="${line%%	*}"
+	rest="${line#*	}"
+	summary="${rest%%	*}"
+	rest="${rest#*	}"
+	reasons="${rest%%	*}"
+	users="${rest#*	}"
+	[ "$verdict" = quiet ] && exit 0
+	>&2 printf 'gpu-gate-ready: contended (check %s of %s): %s\n  %s\n' "$i" "$attempts" "$reasons" "$summary"
+	[ -n "$users" ] && >&2 printf '  GPU time users: %s\n' "$users"
+	[ "$i" -ge "$attempts" ] && exit 75
+	i=$((i + 1))
+	sleep "$wait_s"
+done

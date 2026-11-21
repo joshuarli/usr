@@ -19,6 +19,7 @@ for script in \
     dotfiles/base/.local/bin/git-tune \
     dotfiles/base/.local/bin/gh-cancel-pr-runs \
     dotfiles/base/.local/bin/ghostty-fda-check \
+    dotfiles/base/.local/bin/gpu-gate-ready \
     dotfiles/base/.local/bin/perf-gate-ready \
     dotfiles/base/.local/bin/reset-agent-home \
     dotfiles/base/.local/bin/reset-agents \
