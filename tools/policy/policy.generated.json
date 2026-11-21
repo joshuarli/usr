@@ -8,11 +8,6 @@
   "rootRoutes": {
     "scout": [
       {
-        "executor": "codex",
-        "model": "gpt-6-luna",
-        "effort": "medium"
-      },
-      {
         "executor": "command-code",
         "model": "meta/muse-ember",
         "effort": "medium"
@@ -22,14 +17,14 @@
         "providerID": "opencode-go",
         "model": "muse-spark-1.3-contributor",
         "effort": "medium"
-      }
-    ],
-    "mechanic": [
+      },
       {
         "executor": "codex",
         "model": "gpt-6-luna",
-        "effort": "high"
-      },
+        "effort": "medium"
+      }
+    ],
+    "mechanic": [
       {
         "executor": "command-code",
         "model": "meta/muse-ember",
@@ -40,14 +35,14 @@
         "providerID": "opencode-go",
         "model": "muse-spark-1.3-contributor",
         "effort": "high"
+      },
+      {
+        "executor": "codex",
+        "model": "gpt-6-luna",
+        "effort": "high"
       }
     ],
     "worker": [
-      {
-        "executor": "codex",
-        "model": "gpt-6.1-terra",
-        "effort": "high"
-      },
       {
         "executor": "command-code",
         "model": "deepseek/deepseek-v4.1-flash",
@@ -70,6 +65,11 @@
         "providerID": "devin",
         "model": "swe-2-flash",
         "effort": "medium"
+      },
+      {
+        "executor": "codex",
+        "model": "gpt-6.1-terra",
+        "effort": "high"
       }
     ]
   },

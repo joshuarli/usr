@@ -7,9 +7,9 @@ import {
 import { GO_TIER_MODELS, PI_MODEL_ALLOWLIST, TIER_TOOLS, isTier, BRIDGE_TIERS } from "../src/tier-policy.ts"
 
 test("root admission keeps ordered lower-tier fallback and no expert route", () => {
-  assert.deepEqual(routesOf(ROOT_PLANS.scout).map(route => route.executor), ["codex", "command-code", "pi"])
-  assert.deepEqual(routesOf(ROOT_PLANS.mechanic).map(route => route.executor), ["codex", "command-code", "pi"])
-  assert.deepEqual(routesOf(ROOT_PLANS.worker).map(route => route.executor), ["codex", "command-code", "pi", "pi", "pi"])
+  assert.deepEqual(routesOf(ROOT_PLANS.scout).map(route => route.executor), ["command-code", "pi", "codex"])
+  assert.deepEqual(routesOf(ROOT_PLANS.mechanic).map(route => route.executor), ["command-code", "pi", "codex"])
+  assert.deepEqual(routesOf(ROOT_PLANS.worker).map(route => route.executor), ["command-code", "pi", "pi", "pi", "codex"])
   assert.deepEqual(ROOT_PLANS.worker.pi.map(pin => pin.providerID), ["muse-sdk", "opencode-go", "devin"])
   assert.equal("expert" in ROOT_PLANS, false)
   assert.equal("expert" in POLICY.rootRoutes, false)
@@ -31,7 +31,7 @@ test("native expert paths are first-class and Claude Code pins opus at xhigh eff
 })
 
 test("the plans are the pins the bridge admits, and the exported routes derive from them", () => {
-  assert.equal(ROOT_PLANS.worker.kind, "fallback")
+  assert.equal(ROOT_PLANS.worker.kind, "codex-last")
   assert.deepEqual(ROOT_PLANS.worker.codex, { model: "gpt-6.1-terra", effort: "high" })
   assert.deepEqual(ROOT_PLANS.worker.command, { model: "deepseek/deepseek-v4.1-flash", effort: "high" })
   for (const tier of BRIDGE_TIERS) assert.deepEqual(POLICY.rootRoutes[tier], routesOf(ROOT_PLANS[tier]))

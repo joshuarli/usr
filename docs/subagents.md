@@ -26,7 +26,7 @@ flowchart TD
   cwd -->|Command Code| cmd["Command Code native usr-* agents<br/>scout Inkling 2 Small Free · mechanic HY4 Flash<br/>worker DeepSeek V4.1 Flash · expert HY4<br/>HY4-medium worker only explicit pilot"]
   cwd -->|otherwise| bridge["pi-subagent-bridge<br/>worker_model_check → worker_start"]
 
-  bridge --> plan["Admitted ordered plan per tier<br/>codex → command-code → ordered Pi fallback"]
+  bridge --> plan["Admitted ordered plan per tier<br/>command-code → ordered Pi fallback → codex"]
   plan --> fallback{"First route available?"}
   fallback -->|yes| admitted["worker_start admits one scoped assignment<br/>clean linked worktree · bounded attempts · scope enforced"]
   fallback -->|no| next["Next admitted route in order<br/>only before edits · only along admitted routes"]
@@ -51,9 +51,9 @@ Codex, Pi and Claude Code route `scout`/`mechanic`/`worker` through the bridge; 
 
 | Tier | Primary | Fallback (in order) |
 | --- | --- | --- |
-| scout | Codex `gpt-6-luna` (`medium`) | Command Code `meta/muse-ember` (`medium`); Pi `opencode-go/muse-spark-1.3-contributor` (`medium`) |
-| mechanic | Codex `gpt-6-luna` (`high`) | Command Code `meta/muse-ember` (`xhigh`); Pi `opencode-go/muse-spark-1.3-contributor` (`high`) |
-| worker | Codex `gpt-6.1-terra` (`high`) | Command Code `deepseek/deepseek-v4.1-flash` (`high`); Pi `muse-sdk/muse-spark-1.3` (`xhigh`); Pi `opencode-go/deepseek-v4.1-flash` (`high`); Pi `devin/swe-2-flash` (`medium`) |
+| scout | Command Code `meta/muse-ember` (`medium`) | Pi `opencode-go/muse-spark-1.3-contributor` (`medium`); Codex `gpt-6-luna` (`medium`) |
+| mechanic | Command Code `meta/muse-ember` (`xhigh`) | Pi `opencode-go/muse-spark-1.3-contributor` (`high`); Codex `gpt-6-luna` (`high`) |
+| worker | Command Code `deepseek/deepseek-v4.1-flash` (`high`) | Pi `muse-sdk/muse-spark-1.3` (`xhigh`); Pi `opencode-go/deepseek-v4.1-flash` (`high`); Pi `devin/swe-2-flash` (`medium`); Codex `gpt-6.1-terra` (`high`) |
 
 ## Hard rules
 
@@ -61,7 +61,7 @@ Codex, Pi and Claude Code route `scout`/`mechanic`/`worker` through the bridge; 
 - Expert is harness-native everywhere; nothing routes to the bridge. Expert is terminal by lane: use it for exceptional architectural decisions and adversarial review, never as a size-based upgrade.
 - Top-level OpenCode, Devin and Command Code sessions never use the bridge, at any tier or as a fallback. Command Code uses native `usr-*` agents; HY4-medium worker is an explicit pilot, not a default. When the OpenCode top-level model is free, every tier runs a free model (its configured tier agents use `opencode/hy4-flash-free`).
 - Top-level Antigravity CLI sessions use native usr-* subagents only. Its flash/pro model selectors do not enforce exact model IDs or efforts: verify or block the lane. God is a direct main-session mode.
-- Claude Code, Codex and Pi sessions use the bridge for `scout`/`mechanic`/`worker`; the bridge owns provider fallback (Codex → Command Code leaf → ordered Pi), only before edits, only along admitted routes.
+- Claude Code, Codex and Pi sessions use the bridge for `scout`/`mechanic`/`worker`; the bridge owns provider fallback (Command Code → ordered Pi → Codex), only before edits, only along admitted routes.
 - Command Code native children cannot spawn another subagent. Native frontmatter pins and parent scoping are instructions, not bridge-enforced admission; model overrides and unsupported effort can bypass intended settings.
 - An admitted session keeps its recorded model and route. A task failure, rejected acceptance check or scope change is not a provider failure and never authorizes a replacement worker.
 - Codex and Command Code workers are leaves. Pi workers may fan out one nested generation to equal-or-weaker approved tiers; the typed ceiling is enforced per child, depth is 2, and `options: { agentScope: "user" }` is required for nested calls.

@@ -259,6 +259,19 @@ export function makeHybridBridge(api: PiAdapter, command = {
     }
     return null
   }
+  class PiUnavailableError extends Error {}
+  /** The final Codex route of a codex-last plan, taken only when every earlier route is unavailable or failed before edits. */
+  function fallbackToCodex(s: Session, plan: RootPlan, reason: string, detail?: unknown): Session {
+    return fallbackToProcess(s, { executor: "codex", selection: plan.codex }, reason, detail)
+  }
+  async function fallbackToPiThenCodex(s: Session, plan: PiFallbackPlan, reason: string, detail?: unknown): Promise<Session> {
+    try {
+      return await fallbackToPi(s, plan, reason, detail)
+    } catch (error) {
+      if (!(error instanceof PiUnavailableError) || plan.kind !== "codex-last") throw error
+      return fallbackToCodex(s, plan, "Command Code and the approved Pi providers are unavailable; continued on Codex before edits.", detail)
+    }
+  }
   async function fallbackToPi(s: Session, plan: PiFallbackPlan, reason: string, detail?: unknown): Promise<Session> {
     if (!untouched(s)) throw new Error("Fallback forbidden after partial edits; inspect the worktree")
     // An in-flight, interrupted, or ambiguous Command Code process must never be duplicated.
@@ -269,7 +282,7 @@ export function makeHybridBridge(api: PiAdapter, command = {
     let next = 0
     for (;;) {
       const available = await availablePi(plan, next, s.cwd)
-      if (!available) throw new Error("Pinned Pi fallback models are unavailable")
+      if (!available) throw new PiUnavailableError("Pinned Pi fallback models are unavailable")
       const { selection } = available
       next = available.next
       const worker = api(selection)
@@ -318,10 +331,21 @@ export function makeHybridBridge(api: PiAdapter, command = {
       const clean = source === null || untouched(s)
       let state = settledState(s, observation, clean).state
       let known: Known | undefined = { observation }
-      if (source?.kind === "pi" && clean) {
+      if (source?.kind === "pi" && clean && source.plan.kind === "pi-first") {
         fallbackToCommand(s, source.plan.command, "Primary Pi runner unavailable during execution (provider usage limit); no edits existed, so the task continued on Command Code.", observation.error)
         state = "running"
         known = undefined
+      } else if (source?.kind === "pi" && clean && source.plan.kind === "codex-last" && codex.available()) {
+        try {
+          fallbackToCodex(s, source.plan, "Pi provider/model unavailable during execution; no edits existed, so the task continued on Codex, the final approved route.", observation.error)
+          state = "running"
+          known = undefined
+        } catch (fallbackError) {
+          s.fallback_blocked = "Codex fallback blocked: " + String(fallbackError)
+          save(s)
+          state = "blocked_fallback"
+          known = { observation, blocked: { state, notice: s.fallback_blocked } }
+        }
       } else if (source?.kind === "fx" && clean) {
         try {
           transition(s, source.from)
@@ -354,7 +378,7 @@ export function makeHybridBridge(api: PiAdapter, command = {
         }
       } else if (source?.kind === "command-code" && clean) {
         try {
-          await fallbackToPi(s, piFallbackPlan(source.plan),
+          await fallbackToPiThenCodex(s, piFallbackPlan(source.plan),
             "Primary Command Code provider/model unavailable; continued on an approved Pi provider before edits.", observation.error)
           state = "running"
           known = undefined
@@ -450,9 +474,10 @@ export function makeHybridBridge(api: PiAdapter, command = {
       return {
         primary: plan.kind === "fx-fallback"
           ? { backend: "fx", ...plan.fx, available: targetAvailable({ executor: "fx", selection: plan.fx }) }
-          : codexLane,
-        fallback: plan.kind === "fx-fallback" ? codexLane : commandLane,
+          : commandLane,
+        fallback: plan.kind === "fx-fallback" ? codexLane : piLane,
         command_code: commandLane,
+        codex: codexLane,
         pi_fallback: piLane,
         muse: museModel ? { backend: "pi", model: museModel, available: museInfo.available, issue: museInfo.issue, version: museInfo.version } : undefined,
         opencode_go: goModel ? { backend: "pi", model: goModel, available: goInfo.available, issue: goInfo.issue } : null,
@@ -489,6 +514,32 @@ export function makeHybridBridge(api: PiAdapter, command = {
         activateProcess(s, target, launch(s, target, prompt(s)))
         s.attempts = 1
         save(s)
+        return admission(s)
+      }
+      if (plan.kind === "codex-last") {
+        const commandTarget: ProcessTarget = { executor: "command-code", selection: plan.command }
+        const s: Session = { id: "usrw_" + randomUUID(), cwd: dir, tier: tierInput,
+          title: required(title, "title", 100), scope: scopeFor(scopeInput, tierInput, dir),
+          task, lane_branch: currentBranch(dir), plan, execution: { kind: "transition", to: commandTarget }, attempts: 0,
+          ...(admitting_parent === undefined ? {} : { admitting_parent }) }
+        const leaseDir = stateDir(dir)
+        await settleHolder(leaseDir, dir)
+        claimWorktree(leaseDir, dir, s.id)
+        try {
+          const owner = await ownerResolver?.(leaseDir)
+          if (owner) s.owner = owner
+          save(s)
+        } catch (error) {
+          releaseWorktree(leaseDir, dir, s.id)
+          throw error
+        }
+        if (targetAvailable(commandTarget)) {
+          activateProcess(s, commandTarget, launch(s, commandTarget, prompt(s)))
+          s.attempts = 1
+          save(s)
+          return admission(s)
+        }
+        await fallbackToPiThenCodex(s, plan, "Command Code CLI is unavailable; continued on an approved Pi provider.")
         return admission(s)
       }
       const codexTarget: ProcessTarget = { executor: "codex", selection: plan.codex }

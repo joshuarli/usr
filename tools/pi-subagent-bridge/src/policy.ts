@@ -15,13 +15,13 @@ export type Route =
   | (CliPin & { readonly executor: Exclude<CliExecutor, "fx"> })
   | (CliPin & { readonly executor: "pi"; readonly providerID: string })
 
+/** Command Code first, then the Pi ladder, then Codex as the final route. */
 export type RootPlan = {
-  readonly kind: "fallback"
-  readonly codex: CliPin
+  readonly kind: "codex-last"
   readonly command: CliPin
   readonly pi: PiDestinations
+  readonly codex: CliPin
 }
-export type FallbackPlan = RootPlan
 
 /** Antigravity CLI native target allocation. The custom-agent schema only admits flash/pro tier hints. */
 export const ANTIGRAVITY_DIRECT = {
@@ -65,14 +65,14 @@ export const COMMAND_TIER_MODELS = {
 /** Ordered admission plan per admitted bridge tier. Expert is a harness-native lane and has no plan here. */
 export const ROOT_PLANS = {
   scout: {
-    kind: "fallback", codex: CODEX_TIER_MODELS.scout, command: COMMAND_TIER_MODELS.scout, pi: [GO_TIER_MODELS.scout],
+    kind: "codex-last", command: COMMAND_TIER_MODELS.scout, pi: [GO_TIER_MODELS.scout], codex: CODEX_TIER_MODELS.scout,
   },
   mechanic: {
-    kind: "fallback", codex: CODEX_TIER_MODELS.mechanic, command: COMMAND_TIER_MODELS.mechanic, pi: [GO_TIER_MODELS.mechanic],
+    kind: "codex-last", command: COMMAND_TIER_MODELS.mechanic, pi: [GO_TIER_MODELS.mechanic], codex: CODEX_TIER_MODELS.mechanic,
   },
   worker: {
-    kind: "fallback", codex: CODEX_TIER_MODELS.worker, command: COMMAND_TIER_MODELS.worker,
-    pi: [MUSE_TIER_MODELS.worker, GO_TIER_MODELS.worker, DEVIN_TIER_MODELS.worker],
+    kind: "codex-last", command: COMMAND_TIER_MODELS.worker,
+    pi: [MUSE_TIER_MODELS.worker, GO_TIER_MODELS.worker, DEVIN_TIER_MODELS.worker], codex: CODEX_TIER_MODELS.worker,
   },
 } as const satisfies Record<BridgeTier, RootPlan>
 
@@ -81,9 +81,9 @@ function piRoute(pin: PiSelection) {
 }
 export function routesOf(plan: RootPlan): readonly [Route, ...Route[]] {
   return [
-    { executor: "codex", ...plan.codex },
     { executor: "command-code", ...plan.command },
     ...plan.pi.map(piRoute),
+    { executor: "codex", ...plan.codex },
   ]
 }
 

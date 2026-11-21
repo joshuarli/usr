@@ -207,7 +207,7 @@ test("an unknown subcommand prints usage", async () => {
 test("list --json is a snapshot array in which missing evidence is the string unknown", async () => {
   const snapshotRepo = scratch.repo("repo-snapshot")
   const finished = commandLane(snapshotRepo, 20, gone, [succeeded("proof\nACCEPTANCE: met")], { title: "Snapshot lane", steers: 1 })
-  const future = writeSession(snapshotRepo, 21, { schema_version: 4, title: "Future lane" })
+  const future = writeSession(snapshotRepo, 21, { schema_version: 5, title: "Future lane" })
   const bare = scratch.repo("repo-snapshot-missing")
   const { status, out } = await run(["list", "--json", snapshotRepo.root, bare.root])
   assert.equal(status, 0)

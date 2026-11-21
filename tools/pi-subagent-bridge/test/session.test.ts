@@ -141,7 +141,7 @@ test("incomplete or prohibited legacy records are refused for manual reconciliat
 
 test("unknown versions, removed tiers and malformed state fail at the boundary", () => {
   for (const malformed of [
-    { schema_version: 4 }, { schema_version: "1" }, { schema_version: "2" }, { tier: "god" }, { backend: "carbon" },
+    { schema_version: 5 }, { schema_version: "1" }, { schema_version: "2" }, { tier: "god" }, { backend: "carbon" },
     { id: "usrw_other" }, { cwd: "/tmp/another-worktree" }, { attempts: -1 }, { steers: 1.5 },
     { command_run: { ...run, pid: 0 } }, { command_run: { ...run, output: null } },
     { remaining_pi: ["other"] }, { execution_order: "other" }, { cancel_requested: "yes" },

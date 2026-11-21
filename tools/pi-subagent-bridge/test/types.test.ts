@@ -33,22 +33,22 @@ export function witnesses(): void {
   // @ts-expect-error a Pi destination needs a Pi selection
   const wrongDestination = { executor: "pi", selection: PIN } satisfies Target
 
-  const validPlan = { kind: "fallback", codex: PIN, command: PIN, pi: [PI] } satisfies RootPlan
+  const validPlan = { kind: "codex-last", command: PIN, pi: [PI], codex: PIN } satisfies RootPlan
   // @ts-expect-error a fallback plan needs at least one Pi destination
-  const emptyPi = { kind: "fallback", codex: PIN, command: PIN, pi: [] } satisfies RootPlan
+  const emptyPi = { kind: "codex-last", command: PIN, pi: [], codex: PIN } satisfies RootPlan
 
   // @ts-expect-error a Pi selection cannot occupy the codex slot
-  const piInCodexSlot = { kind: "fallback", codex: PI, command: PIN, pi: [PI] } satisfies RootPlan
+  const piInCodexSlot = { kind: "codex-last", command: PIN, pi: [PI], codex: PI } satisfies RootPlan
 
   const resolvedPiFallback = { kind: "fallback", codex: PIN, command: PIN, pi: [PI] } satisfies PiFallbackPlan
   // @ts-expect-error a plan whose Pi destinations are unresolved cannot be passed to the Pi fallback
   const unresolvedPiFallback = { kind: "fallback-unresolved-pi", codex: PIN, command: PIN } satisfies PiFallbackPlan
 
   // @ts-expect-error an extra executor kind is not an arrangement
-  const extraExecutor = { kind: "fallback", codex: PIN, command: PIN, pi: [PI], antigravity: PIN } satisfies RootPlan
+  const extraExecutor = { kind: "codex-last", command: PIN, pi: [PI], codex: PIN, antigravity: PIN } satisfies RootPlan
 
   // @ts-expect-error a plan is named slots, not an ordered list of routes
-  const routeList = { kind: "fallback", routes: [PIN] } satisfies RootPlan
+  const routeList = { kind: "codex-last", routes: [PIN] } satisfies RootPlan
 
   const validRequest = { directory: "/w", logDirectory: "/l", prompt: "p", selection: PIN, access: { kind: "read-only" } } satisfies LaunchRequest
   // @ts-expect-error a launch request needs its selection

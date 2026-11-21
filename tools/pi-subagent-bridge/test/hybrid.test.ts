@@ -12,7 +12,7 @@ import { inspectStored } from "../src/inspect.ts"
 import { STEER_LIMIT, TURN_LIMIT_CONTINUATIONS } from "../src/session.ts"
 import { startCodex, codexResult, cancelCodex, codexSession } from "../src/codex.ts"
 import type { LaunchRequest } from "../src/launch.ts"
-import { ROOT_PLANS, type CliPin, type FallbackPlan, type RootPlan } from "../src/policy.ts"
+import { ROOT_PLANS, type CliPin, type RootPlan } from "../src/policy.ts"
 import { PI_RUN_DEADLINE_MS } from "../src/tier-policy.ts"
 import type { OpenCodePort } from "../src/bridge.ts"
 import { activeWorktreeOwner, claimWorktree } from "../src/worktree-lease.ts"
@@ -136,7 +136,7 @@ function steerable(f: ReturnType<typeof fixture>, m: ReturnType<typeof fake>) {
   return { command, control }
 }
 
-test("model check reports Codex primary and Command Code pins", async () => {
+test("model check reports Command Code primary, its pins, and Codex as the final lane", async () => {
   const f = fixture()
   try {
     const m = fake(f.cwd), bridge = makeHybridBridge(piAdapter(m.api), m.command, noCodex)
@@ -147,8 +147,9 @@ test("model check reports Codex primary and Command Code pins", async () => {
     ] as const
     for (const [tier, model, effort] of expected) {
       const status = await bridge.modelCheck(f.cwd, tier)
-      assert.equal(status.primary.backend, "codex")
-      assert.equal(status.primary.available, false)
+      assert.equal(status.primary.backend, "command-code")
+      assert.equal(status.primary.available, true)
+      assert.equal(status.codex?.available, false)
       assert.ok(status.command_code)
       assert.equal(status.command_code.model, model)
       assert.equal(status.command_code.effort, effort)
@@ -188,10 +189,11 @@ for (const executor of ["codex", "command-code"] as const) {
     try {
       const oldPin: CliPin = { model: "fixture-before", effort: "high" }
       const newPin: CliPin = { model: "fixture-after", effort: "medium" }
-      const plan: FallbackPlan = ROOT_PLANS.worker
+      const plan: RootPlan = ROOT_PLANS.worker
       const withPin = (pin: CliPin): RootPlan => ({ ...plan, [executor === "codex" ? "codex" : "command"]: pin })
       const m = fake(f.cwd)
-      const codex = executor === "codex" ? { ...m.command, session: () => "cmd-session" } : noCodex
+      const codex = executor === "codex" ? { ...m.command, available: () => true, session: () => "cmd-session" } : noCodex
+      if (executor === "codex") { m.noCommand(); m.omitGo() }
       const before = makeHybridBridge(piAdapter(m.api), m.command, codex, () => withPin(oldPin))
       const task = await before.start(f.cwd, "snapshot", "worker", f.scope, "Verify the pin")
       assert.equal(task.backend, executor)
@@ -216,7 +218,7 @@ test("pending Pi fallback uses its admitted plan after restart, not the new poli
     const before = makeHybridBridge(piAdapter(m.api), m.command, noCodex)
     const task = await before.start(f.cwd, "snapshot", "scout", { ...f.scope, writable_paths: [] }, "Inspect README")
     m.failCommand("quota exhausted")
-    const changedPlan: FallbackPlan = ROOT_PLANS.scout
+    const changedPlan: RootPlan = ROOT_PLANS.scout
     const after = makeHybridBridge(piAdapter(m.api), m.command, noCodex, 
       () => ({ ...changedPlan, pi: [{ providerID: "opencode-go", id: "unavailable-new-model", variant: "high" }] }))
     const status = await after.status(f.cwd, task.session_id)
@@ -273,7 +275,7 @@ test("Command Code scout and mechanic use Ember medium and xhigh, even when Go h
       const scope = tier === "scout" ? { ...f.scope, writable_paths: [] } : f.scope
       const started = await bridge.start(f.cwd, tier, tier, scope, "Provide evidence")
       assert.equal(started.backend, "command-code")
-      assert.match(started.fallback_reason ?? "", /Codex subscription unavailable/)
+      assert.equal(started.fallback_reason, null)
       assert.equal(commandCalls(m.calls).length, 1)
       assert.equal(piCreates(m.calls).length, 0)
       assert.match(JSON.stringify(commandCalls(m.calls)[0]), /"model":"meta\/muse-ember"/)
@@ -339,7 +341,7 @@ test("quota in task prose is not a provider error and never causes fallback", as
     const status = await bridge.status(f.cwd, task.session_id)
     assert.equal(status.backend, "command-code")
     assert.equal(status.state, "failed")
-    assert.match(status.fallback_reason ?? "", /Codex subscription unavailable/)
+    assert.equal(status.fallback_reason, null)
     assert.equal(piCreates(m.calls).length, 0)
   } finally { f.close() }
 })
@@ -1087,7 +1089,7 @@ test("scout uses Command when Codex is unavailable and retains the Contributor f
   try {
     const m = fake(f.cwd), bridge = makeHybridBridge(piAdapter(m.api), m.command, noCodex)
     const check = await bridge.modelCheck(f.cwd, "scout")
-    assert.equal(check.primary.backend, "codex")
+    assert.equal(check.primary.backend, "command-code")
     assert.ok(check.pi_fallback)
     assert.deepEqual(check.pi_fallback.model, { providerID: "opencode-go", id: "muse-spark-1.3-contributor", variant: "medium" })
     const start = await bridge.start(f.cwd, "Contributor scout", "scout", { ...f.scope, writable_paths: [] }, "Inspect README")
@@ -1095,7 +1097,7 @@ test("scout uses Command when Codex is unavailable and retains the Contributor f
     assert.equal(commandCalls(m.calls).length, 1)
     assert.equal(piCreates(m.calls).length, 0)
     const worker = await bridge.modelCheck(f.cwd, "worker")
-    assert.equal(worker.primary.backend, "codex")
+    assert.equal(worker.primary.backend, "command-code")
   } finally {
     f.close()
   }
@@ -1203,69 +1205,109 @@ for (const route of ["initial", "status"] as const) {
 }
 
 
-test("Codex is first for standard tiers and a pre-edit quota failure advances to Command Code", async () => {
+function recordingCodex(m: ReturnType<typeof fake>, failed: () => boolean = () => false) {
+  return { ...noCodex, available: () => true,
+    start: (request: LaunchRequest) => { m.calls.push({ codex: request }); return { pid: 123, output: "fake", errors: "fake", started_at: "now" } },
+    status: () => failed() ? { state: "failed", result: { subtype: "error" as const, error: "429 quota" }, stderr: null } : { state: "running", result: null, stderr: null } }
+}
+const codexCalls = (calls: unknown[]) => calls.filter((value) => !!value && typeof value === "object" && "codex" in value)
+
+test("Command Code is first for standard tiers and Codex is never admitted while it is available", async () => {
   for (const tier of ["scout", "mechanic", "worker"] as const) {
     const f = fixture()
     try {
-      const m = fake(f.cwd)
-      let fail = false
-      const codex = { ...noCodex, available: () => true,
-        start: (request: LaunchRequest) => { m.calls.push({ codex: request }); return { pid: 123, output: "fake", errors: "fake", started_at: "now" } },
-        status: () => fail ? { state: "failed", result: { subtype: "error" as const, error: "429 quota" }, stderr: null } : { state: "running", result: null, stderr: null } }
-      const bridge = makeHybridBridge(piAdapter(m.api), m.command, codex)
-      assert.equal((await bridge.modelCheck(f.cwd, tier)).primary.backend, "codex")
+      const m = fake(f.cwd), bridge = makeHybridBridge(piAdapter(m.api), m.command, recordingCodex(m))
+      const check = await bridge.modelCheck(f.cwd, tier)
+      assert.equal(check.primary.backend, "command-code")
+      assert.equal(check.fallback?.backend, "pi")
       const scope = tier === "scout" ? { ...f.scope, writable_paths: [] } : f.scope
       const started = await bridge.start(f.cwd, tier, tier, scope, "Do scoped work")
-      assert.equal(started.backend, "codex")
-      assert.equal(commandCalls(m.calls).length, 0)
-      fail = true
-      const state = await bridge.status(f.cwd, started.session_id)
-      assert.equal(state.backend, "command-code")
+      assert.equal(started.backend, "command-code")
       assert.equal(commandCalls(m.calls).length, 1)
+      assert.equal(codexCalls(m.calls).length, 0)
     } finally { f.close() }
   }
 })
 
-test("Codex quota failure after an edit does not replay the task", async () => {
+test("a pre-edit Pi provider failure continues on Codex as the final route", async () => {
   const f = fixture()
   try {
-    const m = fake(f.cwd)
-    const codex = { ...noCodex, available: () => true,
-      start: () => ({ pid: 123, output: "fake", errors: "fake", started_at: "now" }),
-      status: () => ({ state: "failed", result: { subtype: "error" as const, error: "429 quota" }, stderr: null }) }
-    const bridge = makeHybridBridge(piAdapter(m.api), m.command, codex)
+    const m = fake(f.cwd), bridge = makeHybridBridge(piAdapter(m.api), m.command, recordingCodex(m))
+    m.noCommand()
+    const started = await bridge.start(f.cwd, "edit", "worker", f.scope, "Do scoped work")
+    assert.equal(started.backend, "pi")
+    m.failPi("quota exceeded")
+    const status = await bridge.status(f.cwd, started.session_id)
+    assert.equal(status.backend, "codex")
+    assert.match(status.fallback_reason ?? "", /continued on Codex/)
+    assert.match(status.fallback_detail ?? "", /quota exceeded/)
+    assert.equal(codexCalls(m.calls).length, 1)
+    assert.equal(commandCalls(m.calls).length, 0)
+  } finally { f.close() }
+})
+
+test("a Pi provider failure after edits never replays the task on Codex", async () => {
+  const f = fixture()
+  try {
+    const m = fake(f.cwd), bridge = makeHybridBridge(piAdapter(m.api), m.command, recordingCodex(m))
+    m.noCommand()
     const started = await bridge.start(f.cwd, "edit", "worker", f.scope, "Do scoped work")
     writeFileSync(join(f.cwd, "README"), "partial")
+    m.failPi("quota exceeded")
     assert.equal((await bridge.status(f.cwd, started.session_id)).state, "blocked_partial_work")
-    assert.equal(commandCalls(m.calls).length, 0)
+    assert.equal(codexCalls(m.calls).length, 0)
+  } finally { f.close() }
+})
+
+test("admission reaches Codex only when Command Code and every Pi provider are unavailable", async () => {
+  const f = fixture()
+  try {
+    const m = fake(f.cwd), bridge = makeHybridBridge(piAdapter(m.api), m.command, recordingCodex(m))
+    m.noCommand()
+    m.omitGo()
+    const started = await bridge.start(f.cwd, "read", "scout", { ...f.scope, writable_paths: [] }, "Provide evidence")
+    assert.equal(started.backend, "codex")
+    assert.match(started.fallback_reason ?? "", /continued on Codex/)
+    assert.equal(codexCalls(m.calls).length, 1)
+    assert.equal(piCreates(m.calls).length, 0)
+  } finally { f.close() }
+})
+
+test("a pre-edit Command Code failure continues on Pi before Codex", async () => {
+  const f = fixture()
+  try {
+    const m = fake(f.cwd), bridge = makeHybridBridge(piAdapter(m.api), m.command, recordingCodex(m))
+    const started = await bridge.start(f.cwd, "edit", "worker", f.scope, "Do scoped work")
+    m.failCommand("quota exhausted")
+    const status = await bridge.status(f.cwd, started.session_id)
+    assert.equal(status.backend, "pi")
+    assert.equal(codexCalls(m.calls).length, 0)
   } finally { f.close() }
 })
 
 const CODEX_CYBER_REFUSAL = "This content was flagged for possible cybersecurity risk. You're approved for Daybreak Blue, but this request needs additional verification: use a compatible FIDO2 hardware security key"
 
-test("a Codex cybersecurity refusal falls back before edits and needs attention after them", async () => {
-  for (const edited of [false, true]) {
-    const f = fixture()
-    try {
-      const m = fake(f.cwd)
-      const codex = { ...noCodex, available: () => true,
-        start: () => ({ pid: 123, output: "fake", errors: "fake", started_at: "now" }),
-        status: () => ({ state: "failed", result: { subtype: "error" as const, error: CODEX_CYBER_REFUSAL }, stderr: null }) }
-      const bridge = makeHybridBridge(piAdapter(m.api), m.command, codex)
-      const started = await bridge.start(f.cwd, "repair", "worker", f.scope, "Do scoped work")
-      assert.equal(started.backend, "codex")
-      if (edited) writeFileSync(join(f.cwd, "README"), "partial")
-      const status = await bridge.status(f.cwd, started.session_id)
-      if (edited) {
-        assert.equal(status.state, "blocked_partial_work")
+test("a Codex provider failure on the final route is terminal before and after edits", async () => {
+  for (const error of ["429 quota", CODEX_CYBER_REFUSAL]) {
+    for (const edited of [false, true]) {
+      const f = fixture()
+      try {
+        const m = fake(f.cwd)
+        m.noCommand(); m.omitGo()
+        const codex = { ...noCodex, available: () => true,
+          start: () => ({ pid: 123, output: "fake", errors: "fake", started_at: "now" }),
+          status: () => ({ state: "failed", result: { subtype: "error" as const, error }, stderr: null }) }
+        const bridge = makeHybridBridge(piAdapter(m.api), m.command, codex)
+        const started = await bridge.start(f.cwd, "repair", "worker", f.scope, "Do scoped work")
+        assert.equal(started.backend, "codex")
+        if (edited) writeFileSync(join(f.cwd, "README"), "partial")
+        const status = await bridge.status(f.cwd, started.session_id)
+        assert.equal(status.backend, "codex")
+        assert.equal(status.state, "failed")
         assert.equal(commandCalls(m.calls).length, 0)
-      } else {
-        assert.equal(status.backend, "command-code")
-        assert.notEqual(status.fallback_reason, null)
-        assert.match(status.fallback_detail ?? "", /cybersecurity risk/)
-        assert.equal(commandCalls(m.calls).length, 1)
-      }
-    } finally { f.close() }
+        assert.equal(piCreates(m.calls).length, 0)
+      } finally { f.close() }
+    }
   }
 })
 
@@ -1273,6 +1315,7 @@ test("an interrupted Codex run never triggers fallback", async () => {
   const f = fixture()
   try {
     const m = fake(f.cwd)
+    m.noCommand(); m.omitGo()
     const codex = { ...noCodex, available: () => true,
       start: () => ({ pid: 123, output: "fake", errors: "fake", started_at: "now" }),
       status: () => ({ state: "interrupted", result: null, stderr: "429 quota" }) }
@@ -1287,6 +1330,7 @@ test("Codex correction resumes the same thread and pinned model", async () => {
   const f = fixture()
   try {
     const m = fake(f.cwd), starts: LaunchRequest[] = []
+    m.noCommand(); m.omitGo()
     const codex = { ...noCodex, available: () => true,
       start: (request: LaunchRequest) => { starts.push(request); return { pid: 123, output: "fake", errors: "fake", started_at: "now" } },
       status: () => ({ state: "succeeded", result: { subtype: "success" as const, sessionId: "codex-thread", finalText: "proof" }, stderr: null }) }
@@ -1300,25 +1344,11 @@ test("Codex correction resumes the same thread and pinned model", async () => {
   } finally { f.close() }
 })
 
-test("Codex quota failure skips missing Command Code and goes to Pi", async () => {
-  const f = fixture()
-  try {
-    const m = fake(f.cwd)
-    m.noCommand()
-    const codex = { ...noCodex, available: () => true,
-      start: () => ({ pid: 123, output: "fake", errors: "fake", started_at: "now" }),
-      status: () => ({ state: "failed", result: { subtype: "error" as const, error: "429 quota" }, stderr: null }) }
-    const bridge = makeHybridBridge(piAdapter(m.api), m.command, codex)
-    const started = await bridge.start(f.cwd, "research", "scout", { ...f.scope, writable_paths: [] }, "Find proof")
-    assert.equal((await bridge.status(f.cwd, started.session_id)).backend, "pi")
-    assert.equal(piCreates(m.calls).length, 1)
-  } finally { f.close() }
-})
-
 test("an acknowledged Codex cancellation does not fall back on a quota-shaped failure", async () => {
   const f = fixture()
   try {
     const m = fake(f.cwd)
+    m.noCommand(); m.omitGo()
     let cancelled = false
     const codex = { ...noCodex, available: () => true,
       start: () => ({ pid: 123, output: "fake", errors: "fake", started_at: "now" }),
@@ -1341,6 +1371,7 @@ test("a run without a final ACCEPTANCE: met line is incomplete", async () => {
     const f = fixture()
     try {
       const m = fake(f.cwd), starts: LaunchRequest[] = []
+      m.noCommand(); m.omitGo()
       const codex = { ...noCodex, available: () => true,
         start: (request: LaunchRequest) => { starts.push(request); return { pid: 123, output: "fake", errors: "fake", started_at: "now" } },
         status: () => ({ state: "succeeded", result: { subtype: "success" as const, sessionId: "t", finalText }, stderr: null }) }
@@ -1365,6 +1396,7 @@ test("an unmet acceptance names a listed stop condition", async () => {
     const f = fixture()
     try {
       const m = fake(f.cwd)
+      m.noCommand(); m.omitGo()
       const codex = { ...noCodex, available: () => true,
         start: () => ({ pid: 123, output: "fake", errors: "fake", started_at: "now" }),
         status: () => ({ state: "succeeded", result: { subtype: "success" as const, sessionId: "t", finalText }, stderr: null }) }

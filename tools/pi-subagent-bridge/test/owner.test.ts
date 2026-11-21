@@ -210,7 +210,7 @@ function makeFakePiPort(initialState: "running" | "completed" = "running") {
   }>()
 
   const workerPlan = ROOT_PLANS.worker
-  if (workerPlan.kind !== "fallback") throw new Error("Expected fallback plan for worker")
+  if (workerPlan.kind !== "codex-last") throw new Error("Expected codex-last plan for worker")
 
   const port: OpenCodePort = {
     async models() {
@@ -297,7 +297,7 @@ const piOnlyPolicy = (): RootPlan => ROOT_PLANS.worker
 function writeArbitrarySession(dir: string, overrides: Partial<Session> & { id: string }): Session {
   const sDir = stateDir(dir)
   const workerPlan = ROOT_PLANS.worker
-  if (workerPlan.kind !== "fallback") throw new Error("Expected fallback plan")
+  if (workerPlan.kind !== "codex-last") throw new Error("Expected codex-last plan")
   const s: Session = {
     cwd: dir,
     title: "foreign",

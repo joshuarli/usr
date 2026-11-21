@@ -5,11 +5,11 @@ import { join } from "node:path"
 import { type ModelRef } from "./bridge.ts"
 import type { CommandResult, CommandRun } from "./command.ts"
 import { inspectionChanges, inspectionGit, laneHead, outside } from "./git.ts"
-import type { FallbackPlan, PiSelection } from "./policy.ts"
+import type { PiSelection, RootPlan } from "./policy.ts"
 import { isRecord } from "./scope.ts"
 import {
   STEER_LIMIT, TURN_LIMIT_CONTINUATIONS, admittedEffort, admittedModel, backendOf, decodeSession, targetOf, processTarget,
-  type FallbackUnresolvedPiPlan, type FxFallbackPlan, type LadderPlan, type PiFirstPlan, type ProcessExecution, type ProcessTarget, type Session,
+  type FallbackPlan, type FallbackUnresolvedPiPlan, type FxFallbackPlan, type LadderPlan, type PiFirstPlan, type ProcessExecution, type ProcessTarget, type Session,
 } from "./session.ts"
 import type { Effort, Tier } from "./tier-policy.ts"
 
@@ -58,7 +58,7 @@ export type FallbackSource =
   | { readonly kind: "fx"; readonly from: ProcessTarget; readonly plan: FxFallbackPlan }
   | { readonly kind: "codex"; readonly from: ProcessTarget; readonly plan: FallbackPlan | FallbackUnresolvedPiPlan | FxFallbackPlan }
   | { readonly kind: "command-code"; readonly from: ProcessTarget; readonly plan: LadderPlan }
-  | { readonly kind: "pi"; readonly plan: PiFirstPlan }
+  | { readonly kind: "pi"; readonly plan: PiFirstPlan | RootPlan }
 export type Known = { observation: Observation; blocked?: { state: string; notice: string } }
 
 type Route = { model: string | PiSelection; effort: Effort }
@@ -142,7 +142,8 @@ function stopCondition(text: string | null, scope: string): { stopped_on: string
 function continuedOn(s: Session): string {
   const target = targetOf(s)
   if (target.executor === "pi")
-    return target.selection.providerID === "muse-sdk" ? "Muse subscription via the Pi SDK" : "OpenCode Go via the Pi SDK"
+    return target.selection.providerID === "muse-sdk" ? "Muse subscription via the Pi SDK" :
+      target.selection.providerID === "devin" ? "Devin via the Pi SDK" : "OpenCode Go via the Pi SDK"
   return { codex: "Codex", "command-code": "Command Code", fx: "FX" }[target.executor]
 }
 
@@ -253,7 +254,11 @@ export function fallbackSource(s: Session, observation: Observation): FallbackSo
   const execution = s.execution, plan = s.plan
   if (execution.kind === "pi") {
     const finished = !["running", "queued", "succeeded"].includes(observation.state)
-    return plan.kind === "pi-first" && finished && quota(observation.error) ? { kind: "pi", plan } : null
+    if (plan.kind === "pi-first") return finished && quota(observation.error) ? { kind: "pi", plan } : null
+    if (plan.kind === "codex-last" && !s.fallback_blocked && observation.state === "failed" &&
+        (quota(observation.error) || providerUnavailable(observation.error)))
+      return { kind: "pi", plan }
+    return null
   }
   if (execution.kind !== "process" || s.fallback_blocked) return null
   if (observation.state !== "failed" || !(quota(observation.error) || providerUnavailable(observation.error))) return null
@@ -262,7 +267,7 @@ export function fallbackSource(s: Session, observation: Observation): FallbackSo
     return plan.kind === "fx-fallback" ? { kind: "fx", from, plan } : null
   if (execution.executor === "codex")
     return plan.kind === "fallback" || plan.kind === "fallback-unresolved-pi" || plan.kind === "fx-fallback" ? { kind: "codex", from, plan } : null
-  if (execution.executor === "command-code" && (plan.kind === "fallback" || plan.kind === "fallback-unresolved-pi" ||
+  if (execution.executor === "command-code" && (plan.kind === "codex-last" || plan.kind === "fallback" || plan.kind === "fallback-unresolved-pi" ||
       plan.kind === "command-first" || plan.kind === "command-first-unresolved-pi" || plan.kind === "fx-fallback"))
     return { kind: "command-code", from, plan }
   return null
@@ -283,7 +288,8 @@ function inheritedNotice(s: Session, state: string): string | null {
     return "The Pi run reached its pinned run deadline and was stopped; the worktree may hold partial work and the bridge will not re-dispatch automatically. Inspect changed_paths, then resume with worker_resume (same scope) or preserve the work before dispatching again."
   }
   if (target.executor === "pi" && ["failed", "interrupted", "cancelled", "canceled"].includes(state)) {
-    const provider = target.selection.providerID === "muse-sdk" ? "the pinned Muse SDK fallback" : "the pinned OpenCode Go fallback"
+    const provider = target.selection.providerID === "muse-sdk" ? "the pinned Muse SDK fallback" :
+      target.selection.providerID === "devin" ? "the pinned Devin fallback" : "the pinned OpenCode Go fallback"
     return "The task was admitted to " + provider + " after earlier approved lanes failed or were unavailable, but that Pi run ended in " + state +
       " (see error; it may have left partial edits). The worktree is retained and the lease is released. No automatic retry will occur: a fresh dispatch" +
       " re-admits with the best available lane, and a provider usage-limit error (for example 429) means every pinned lane is exhausted —" +

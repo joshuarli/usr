@@ -32,7 +32,7 @@ test("a root route pin change propagates to the README table and JSON export, le
     const changed = outputs.filter(output => output.content !== output.previous)
     assert.deepEqual(changed.map(output => output.path), ["tools/pi-subagent-bridge/README.md", JSON_PATH])
     const table = changed.find(output => output.path === "tools/pi-subagent-bridge/README.md")!
-    assert.ok(table.content.includes("| worker | Codex `fixture-worker-model` (`high`) |"))
+    assert.ok(table.content.includes("| worker | Command Code `fixture-worker-model` (`high`) |"))
     const exported = JSON.parse(changed.find(output => output.path === JSON_PATH)!.content)
     assert.equal(exported.rootRoutes.worker[0].model, "fixture-worker-model")
     assert.deepEqual(exported.nativePi, POLICY.nativePi)
@@ -207,29 +207,29 @@ type Dimension = { name: string; mutate: (policy: MutablePolicy) => void; reject
 const FIXTURE_MODEL = "fixture-model"
 const otherEffort = (value: string) => (["low", "medium", "high", "xhigh", "max"] as const).find(effort => effort !== value)!
 const dimensions: Dimension[] = [
-  { name: "codex scout model", mutate: p => { p.rootRoutes.scout[0].model = FIXTURE_MODEL } },
-  { name: "codex scout effort", mutate: p => { p.rootRoutes.scout[0].effort = "xhigh" } },
-  { name: "codex mechanic model", mutate: p => { p.rootRoutes.mechanic[0].model = FIXTURE_MODEL } },
-  { name: "codex mechanic effort", mutate: p => { p.rootRoutes.mechanic[0].effort = "low" } },
-  { name: "codex worker model", mutate: p => { p.rootRoutes.worker[0].model = FIXTURE_MODEL } },
-  { name: "codex worker effort", mutate: p => { p.rootRoutes.worker[0].effort = "max" } },
+  { name: "command scout model", mutate: p => { p.rootRoutes.scout[0].model = FIXTURE_MODEL } },
+  { name: "command scout effort", mutate: p => { p.rootRoutes.scout[0].effort = "low" } },
+  { name: "command mechanic model", mutate: p => { p.rootRoutes.mechanic[0].model = FIXTURE_MODEL } },
+  { name: "command mechanic effort", mutate: p => { p.rootRoutes.mechanic[0].effort = "low" } },
+  { name: "command worker model", mutate: p => { p.rootRoutes.worker[0].model = FIXTURE_MODEL } },
+  { name: "command worker effort", mutate: p => { p.rootRoutes.worker[0].effort = "low" } },
 
-  { name: "command scout model", mutate: p => { p.rootRoutes.scout[1].model = FIXTURE_MODEL } },
-  { name: "command scout effort", mutate: p => { p.rootRoutes.scout[1].effort = "low" } },
-  { name: "command mechanic model", mutate: p => { p.rootRoutes.mechanic[1].model = FIXTURE_MODEL } },
-  { name: "command mechanic effort", mutate: p => { p.rootRoutes.mechanic[1].effort = "low" } },
-  { name: "command worker model", mutate: p => { p.rootRoutes.worker[1].model = FIXTURE_MODEL } },
-  { name: "command worker effort", mutate: p => { p.rootRoutes.worker[1].effort = "low" } },
+  { name: "pi scout model", mutate: p => { p.rootRoutes.scout[1].model = FIXTURE_MODEL } },
+  { name: "pi scout provider", mutate: p => { p.rootRoutes.scout[1].providerID = "fixture-provider" } },
+  { name: "pi scout effort", mutate: p => { p.rootRoutes.scout[1].effort = "low" } },
+  { name: "pi mechanic model", mutate: p => { p.rootRoutes.mechanic[1].model = FIXTURE_MODEL } },
+  { name: "pi mechanic effort", mutate: p => { p.rootRoutes.mechanic[1].effort = "low" } },
+  { name: "pi worker first model", mutate: p => { p.rootRoutes.worker[1].model = FIXTURE_MODEL } },
+  { name: "pi worker second effort", mutate: p => { p.rootRoutes.worker[2].effort = "low" } },
+  { name: "pi worker order", mutate: p => { p.rootRoutes.worker.splice(2, 0, ...p.rootRoutes.worker.splice(1, 1)) } },
+  { name: "pi worker list length", mutate: p => { p.rootRoutes.worker.splice(1, 1) } },
 
-  { name: "pi scout model", mutate: p => { p.rootRoutes.scout[2].model = FIXTURE_MODEL } },
-  { name: "pi scout provider", mutate: p => { p.rootRoutes.scout[2].providerID = "fixture-provider" } },
-  { name: "pi scout effort", mutate: p => { p.rootRoutes.scout[2].effort = "low" } },
-  { name: "pi mechanic model", mutate: p => { p.rootRoutes.mechanic[2].model = FIXTURE_MODEL } },
-  { name: "pi mechanic effort", mutate: p => { p.rootRoutes.mechanic[2].effort = "low" } },
-  { name: "pi worker first model", mutate: p => { p.rootRoutes.worker[2].model = FIXTURE_MODEL } },
-  { name: "pi worker second effort", mutate: p => { p.rootRoutes.worker[3].effort = "low" } },
-  { name: "pi worker order", mutate: p => { p.rootRoutes.worker.push(...p.rootRoutes.worker.splice(2, 1)) } },
-  { name: "pi worker list length", mutate: p => { p.rootRoutes.worker.splice(2, 1) } },
+  { name: "codex scout model", mutate: p => { p.rootRoutes.scout.at(-1)!.model = FIXTURE_MODEL } },
+  { name: "codex scout effort", mutate: p => { p.rootRoutes.scout.at(-1)!.effort = "xhigh" } },
+  { name: "codex mechanic model", mutate: p => { p.rootRoutes.mechanic.at(-1)!.model = FIXTURE_MODEL } },
+  { name: "codex mechanic effort", mutate: p => { p.rootRoutes.mechanic.at(-1)!.effort = "low" } },
+  { name: "codex worker model", mutate: p => { p.rootRoutes.worker.at(-1)!.model = FIXTURE_MODEL } },
+  { name: "codex worker effort", mutate: p => { p.rootRoutes.worker.at(-1)!.effort = "max" } },
 
   { name: "command native scout model", mutate: p => { p.commandNative.scout.model = FIXTURE_MODEL } },
   { name: "command native mechanic model", mutate: p => { p.commandNative.mechanic.model = FIXTURE_MODEL } },
