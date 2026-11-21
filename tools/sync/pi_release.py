@@ -76,8 +76,8 @@ def _is_pin(value: object) -> TypeGuard[Pin]:
     if not isinstance(value, dict):
         return False
     targets = value.get("targets")
-    companions = value.get("companions")
-    if companions is not None:
+    if "companions" in value:
+        companions = value.get("companions")
         if not isinstance(companions, dict):
             return False
         if set(companions) != set(COMPANIONS):

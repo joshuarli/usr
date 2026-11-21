@@ -296,5 +296,26 @@ pi_release.install(Path(sys.argv[2]), json.loads(Path(sys.argv[3]).read_text()),
         self.assertEqual(self.requests, [])
 
 
+class PinLoadTests(unittest.TestCase):
+    def test_null_companions_is_an_invalid_pin(self):
+        pin = json.loads(pi_release.PIN.read_text())
+        pin["companions"] = None
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "pin.json"
+            path.write_text(json.dumps(pin))
+            with self.assertRaisesRegex(pi_offline.OfflinePiError, "invalid Pi release pin"):
+                pi_release.load_pin(path)
+
+    def test_absent_companions_loads_and_selection_reports_missing_archives(self):
+        pin = json.loads(pi_release.PIN.read_text())
+        del pin["companions"]
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "pin.json"
+            path.write_text(json.dumps(pin))
+            loaded = pi_release.load_pin(path)
+        with self.assertRaisesRegex(pi_offline.OfflinePiError, "does not carry companion archives"):
+            pi_release.companions(loaded)
+
+
 if __name__ == "__main__":
     unittest.main()
