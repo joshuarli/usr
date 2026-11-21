@@ -162,6 +162,8 @@ def collect_submodule_worktrees(path: Path, primary: Path, discard_ignored: bool
     collected: list[tuple[Path, Path]] = []
     for _oid, rel in gitlinks(path):
         sub = path / rel
+        if not (sub / ".git").exists():
+            continue
         dirs = submodule_gitdirs(sub)
         if dirs is None:
             continue
