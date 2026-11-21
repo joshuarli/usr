@@ -75,7 +75,7 @@ The [Alpine VM journey](../host/alpine/tests/vm.sh) requires `qemu-system-<arch>
 
 Fixture construction and per-round setup stay outside the timed region, and the fixture inputs are checked before timing starts. Each round runs every selected workload once, rotating the order between rounds. The report gives the median and range of wall time, median CPU time (user plus system of the whole process tree), and the largest peak RSS of any single process in the tree. An invalid run stops the benchmark with exit 1 and prints no timings.
 
-The numbers depend on host load and include each tool's interpreter startup; `sync plan` also runs the host's package probes. Check `perf-gate-ready` before a timed run and treat results from a busy host as observations, not baselines.
+The numbers depend on host load and include each tool's interpreter startup; `sync plan` also runs the host's package probes. Check `perf-gate-ready` before a timed run: it samples load and CPU time (default maximum 2 busy cores over 1 second), and exits 2 for invalid settings. Treat busy-host results as observations, not baselines.
 
 ## Agent setup changes
 
@@ -100,4 +100,4 @@ Use `TODO.md` for deferred work and create an RFC under `docs/rfc/` when a desig
 
 `README.md` is a clean, up-to-date end-user guide: what the project is, how to get and use it, configuration and output users need, where to get help, and license. Keep developer setup, architecture, internals, and contributor workflow in `AGENTS.md` or `docs/`.
 
-Use the supported Node version (currently at least 26.12.0) for Pi runtime checks. `test_offline.py` skips its runtime cases when Node is absent or below major 26; a green suite with skips does not verify SDK loading. `test_sync_bridge_offline.py` creates and removes an ignored bridge dependency link and refuses an existing installation, so use a disposable checkout. Live provider checks require local account authentication and remain separate from fixture proof.
+Use Node 26.13.1 for the offline bridge fixture. `test_offline.py` skips its runtime cases when Node is absent or below major 26; a green suite with skips does not verify SDK loading. `test_sync_bridge_offline.py` runs in place, creates and removes an ignored bridge dependency link, and skips the end-to-end case if an installation already exists or Node is not exactly 26.13.1, so run it in a disposable checkout to exercise that case. Live provider checks require local account authentication and remain separate from fixture proof.

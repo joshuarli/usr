@@ -18,7 +18,7 @@ This inventory covers the owned tooling in `tools/`, `src/`, `host/`, `sync`, `l
 | usage | `tools/usage/tests/test_usage.py` | Provider integrations use fixtures. Live account data is unverified. |
 | host Alpine | `host/alpine/tests/test_provision.py`, `test_tuning.py` | The VM journey is separate and requires QEMU and firmware. |
 | host macOS | `host/macos/sync-test.py`, `macos-test.py`, `lean-test.py` | Actual host mutations are not exercised by these fixture checks. |
-| src | none for `src/wol.py` | Compact MAC file input is a demonstrated gap recorded as USR-95. |
+| src | none for `src/wol.py` | Compact MAC file input is covered by `src/test_wol.py`. |
 | lint | `make lint` | The entrypoint is exercised by lint itself. |
 | tailscale | none | Live network and host changes require a separate environment. |
 | C utility | none for `src/su-exec.c` | Privileged runtime behavior is unverified. |

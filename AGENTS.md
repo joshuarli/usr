@@ -15,6 +15,7 @@ Each path belongs to one sync layer (see [sync](docs/sync.md)). Do not `cat` or 
 | Home sync, layers, tools, doctor, uninstall | [docs/sync.md](docs/sync.md) |
 | Development checks and conventions | [docs/development.md](docs/development.md) |
 | Agent setup and harness configuration | [docs/agent-setup.md](docs/agent-setup.md) |
+| Command Code and Antigravity native delegation | [docs/command-code-delegation.md](docs/command-code-delegation.md), [docs/antigravity-native.md](docs/antigravity-native.md) |
 | Lean harness defaults and launch shims | [docs/harness-lean.md](docs/harness-lean.md) |
 | Instruction profiles | [docs/model-profiles.md](docs/model-profiles.md) |
 | Model policy ownership and generation | [tools/policy/README.md](tools/policy/README.md) |
@@ -47,15 +48,15 @@ it instead of touching it.
 
 ## Verification
 
-Test tiers are local unit and CLI fixture tests, subprocess integration tests, and a separate Alpine VM journey. The [deslop inventory](docs/verification/deslop-test-inventory.md) records boundaries and gaps.
+Test tiers are local unit and CLI fixture tests, subprocess integration tests, and a separate Alpine VM journey. The [deslop inventory](docs/verification/deslop-test-inventory.md) records boundaries and gaps; [scanner observations](docs/verification/deslop-scans.md) record the type, dead-code and duplication scans.
 
-Run with `TMPDIR="$PWD/.work/tmp"`, Python 3.10+, and pinned Node 26.13.1 for the offline bridge fixture.
+Run with `TMPDIR="$PWD/.work/tmp"`, Python 3.11+, and pinned Node 26.13.1 for the offline bridge fixture.
 - `make test`: cache-empty 230s, warm 265s and 283s; `make lint`: 12s. Busy-host observations, not performance gates. The Pi offline SDK check isolates coordinator role markers from the invoking worker.
 - `sync` CLI, links and ownership formats: `tools/sync/test_main.py`, `test_links.py`, `test_integration.py`, `test_uninstall.py`.
 - `sync` installers, archives and companion configuration: `tools/sync/test_installer.py`, `test_ffmpeg_runtime.py`, `test_companions.py`.
 - `pinact` CLI, workflow YAML and action pins: `tools/pinact/test_pinact.py`, `tools/pinact/tests/`.
 - `mdtool` CLI and Markdown formats: `tools/mdtool/tests/mdtool-test.sh`; `decide` CLI and JSON: `tools/decide/tests/test_decide.py`.
-- `todo` CLI and backlog format: `tools/todo/tests/test_todo.py` (not in `make test`).
+- Many registered checks, including `tools/todo/tests/test_todo.py`, run through `sh sync check --changed` rather than `make test`.
 - Pi bridge CLI, provider processes and session records: `tools/pi-subagent-bridge/test/`; full suite requires its documented development install.
 - Pi release and runtime formats: `tools/pi/test_release_install.py`, `test_offline.py`, `test_runtime_profiles.py`.
 - Policy generation and projections: `tools/policy/generate.test.ts`; skills metadata: `tools/skills/skills.test.ts`.

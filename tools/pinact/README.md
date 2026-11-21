@@ -59,7 +59,7 @@ usage or operational errors. `--select` accepts any known rule ID; selecting a k
 by the chosen profile can return no findings. An unknown rule ID returns status 2.
 
 `correctness` reports syntax and proven workflow errors, including invalid event filters, bad
-matrix properties, and template injection. `default` adds policy and schema checks. `strict` adds
+matrix properties, and untrusted expression interpolation in step `run:` bodies. The template-injection check omits `workflow_run` fields. `default` adds policy and schema checks. `strict` adds
 permission and timeout recommendations. See the [rule reference](docs/rules.md) for IDs, severities,
 profiles, fixes, and limits.
 

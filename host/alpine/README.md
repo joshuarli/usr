@@ -81,12 +81,14 @@ Answer the prompt, or skip it with `INSTALL_MODE=server` or
 wget -O - https://17166969.xyz/setup.sh | INSTALL_MODE=server sh
 ```
 
-For a fully unattended server install, pass a Tailscale auth key and a GitHub
-token with the `admin:public_key` scope:
+For an unattended server install, pass a Tailscale auth key and a GitHub
+token with the `admin:public_key` scope. Run the bootstrap as the setup user;
+a root run uses `su -l` and drops `GH_TOKEN`:
 
 ```sh
 wget -O - https://17166969.xyz/setup.sh | \
   INSTALL_MODE=server \
+  USER_NAME=josh \
   TS_AUTHKEY=tskey-auth-... \
   GH_TOKEN=github_pat_... \
   sh
@@ -101,10 +103,9 @@ doas env INSTALL_MODE=server sh usr/host/alpine/install.sh
 doas env INSTALL_MODE=desktop sh usr/host/alpine/install.sh
 ```
 
-Provisioning defaults to user `josh` (`USER_NAME`); override with
-`wget -O - https://17166969.xyz/setup.sh | USER_NAME=other sh`
-for the bootstrap, or
-`doas env USER_NAME=other sh usr/host/alpine/install.sh` by hand, if needed.
+Set `USER_NAME` explicitly for the bootstrap: it passes an empty value when unset.
+A direct `install.sh` invocation defaults to `josh` when `USER_NAME` is unset;
+use `doas env USER_NAME=other sh usr/host/alpine/install.sh` to override it.
 
 `install.sh` installs Alpine's `python3` if it is missing and hands off to
 `provision.py`, which builds a task graph for the chosen mode and runs it with
