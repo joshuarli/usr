@@ -1,5 +1,5 @@
 Prefix: USR
-Next: 131
+Next: 132
 
 ### USR-83 · P2 · running sessions on two hosts cannot reach each other over intercom
 
@@ -71,6 +71,15 @@ Next: 131
 - **Problem:** On 2026-11-20 on this Mac, Codex bridge workers started after about 18:02 local exited mid-run with no turn.completed, turn.failed or error event and stderr only Reading additional input from stdin; the bridge reported interrupted with no fallback. Affected: usrw_de2f41eb, usrw_ae450e43, usrw_b0273670, usrw_593cd847 and usrw_47289e45 in another checkout, and usrw_ff4bc30e and usrw_32520f9d here. The first deaths overlapped a bridge test run (pid 25124), but usrw_47289e45 died at about 02:08:50Z after 21 completed items with no node --test process running, no jetsam or memorystatus log entries, 71% free memory and 686 of 8000 user processes. Workers started before 18:02 ran for an hour. The cause is unestablished: candidates include a test or tool signalling a process group it did not create, an external reaper, and Codex CLI itself exiting.
 - **Recommendation:** Reproduce with a long Codex worker while recording the exit status and signal of the codex process (for example by having the bridge launcher record wait status) and process accounting around the exit, then fix the killer or, if Codex exits on its own, classify a silent exit before edits as a provider failure eligible for fallback. Acceptance: a recorded death names its signal or exit status, and a regression check keeps an unrelated detached worker process group alive across the full bridge test suite.
 - **Fix with:** root-cause
+- **Effort:** M
+
+### USR-131 · P2 · heavy jobs share no host CPU budget and timeouts leak process trees
+
+- **Area:** Host resources
+- **Where:** dotfiles/linux/.local/bin (new cpu-slot); xsh .work/bin/lean-slot
+- **Problem:** On 2026-11-21 load reached 56 on a 32-CPU host. A corpus runner's BusyBox timeout signalled only its direct child, so each timed-out document left an orphaned lean process (reparented to init) still holding one of lean-slot's two 4-CPU slots. Docker test containers, Asterinas kernel builds and Lean jobs from several lanes ran at once with no shared CPU cap; only lean-slot (Lean, 8 CPUs) and a Rust flock existed, each private to one repository.
+- **Recommendation:** Add cpu-slot: a host-wide pool of per-CPU flock locks minus a reserve, which pins a command to the granted CPUs with sched_setaffinity, exports CPU_SLOT_CPUS for docker --cpuset-cpus, runs it in its own session and on timeout or signal kills the whole process group before releasing the CPUs. Acceptance: tests show exact affinity, disjoint concurrent grants with a waiting third job, a timed-out grandchild gone after exit 124, SIGTERM killing the group, an oversize request exiting 2, and status listing holders.
+- **Fix with:** cpu-slot
 - **Effort:** M
 
 ### USR-75 · P3 · clang plus mold host links intermittently segfault and leave truncated artifacts
