@@ -42,7 +42,7 @@ export async function watchSession(
   try { directory = readStateDir(path) } catch { return refuse("not a Git repository: " + path) }
   let previousActivity: string | undefined, delay = pollMs
   for (;;) {
-    const snapshot = await inspectStored(directory, id, deps, { omitRunningWorktree: true })
+    const snapshot = await inspectStored(directory, id, deps, { omitRunningWorktree: true, settleLease: true })
     const state = snapshot.execution_state
     if (options.stateOnly) { stdout(state + "\n"); return 0 }
     if (snapshot.attention === "unknown" || snapshot.attention === "needs_attention")

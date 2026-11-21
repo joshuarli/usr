@@ -85,7 +85,7 @@ async function inspect(rest: string[]): Promise<void> {
   if (!isSessionId(id)) throw new Error("Invalid worker ID")
   const directory = readStateDir(resolve(path))
   if (!existsSync(sessionPath(directory, id))) throw new Error("no session record at " + sessionPath(directory, id))
-  process.stdout.write(JSON.stringify(await inspectStored(directory, id, await inspectionDeps())) + "\n")
+  process.stdout.write(JSON.stringify(await inspectStored(directory, id, await inspectionDeps(), { settleLease: true })) + "\n")
 }
 
 async function watch(rest: string[]): Promise<void> {

@@ -1,4 +1,5 @@
-import { fxResult } from "./fx.ts"
+import { fxChildren, fxResult } from "./fx.ts"
+import { activeWorktreeOwner, releaseWorktree } from "./worktree-lease.ts"
 import type { PiAdapter } from "./pi-adapter.ts"
 import { closeSync, fstatSync, openSync, readFileSync, readSync, statSync } from "node:fs"
 import { join } from "node:path"
@@ -380,7 +381,15 @@ function unreadableSnapshot(id: string, raw: unknown, reason: string): Snapshot 
   }
 }
 
-export async function inspectStored(directory: string, id: string, deps: InspectionDeps, options?: { omitRunningWorktree?: boolean }): Promise<Snapshot> {
+const TERMINAL_RELEASE_STATES = new Set(["succeeded", "failed", "turn_limit", "cancelled", "canceled", "interrupted", "timed_out"])
+
+export function releaseOwnTerminalLease(directory: string, session: Session, state: string): void {
+  if (!TERMINAL_RELEASE_STATES.has(state)) return
+  if (session.execution.kind === "process" && session.execution.executor === "fx" && !fxChildren(session.execution.run).quiescent) return
+  if (activeWorktreeOwner(directory, session.cwd) === session.id) releaseWorktree(directory, session.cwd, session.id)
+}
+
+export async function inspectStored(directory: string, id: string, deps: InspectionDeps, options?: { omitRunningWorktree?: boolean; settleLease?: boolean }): Promise<Snapshot> {
   const path = sessionPath(directory, id)
   let raw: unknown
   try {
@@ -401,6 +410,9 @@ export async function inspectStored(directory: string, id: string, deps: Inspect
     observation = await observeExecution(session, directory, deps)
   } catch (error) {
     observation = withheld("unknown", describe(error), path)
+  }
+  if (options?.settleLease) {
+    try { releaseOwnTerminalLease(directory, session, observation.state) } catch { /* inspection reports the run even when its lease cannot be released */ }
   }
   return toSnapshot(compose(session, observation, undefined, options?.omitRunningWorktree))
 }

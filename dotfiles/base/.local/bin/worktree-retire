@@ -20,6 +20,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import shutil
 import stat
 import subprocess
 import sys
@@ -79,7 +80,133 @@ def check_bridge_lease(primary: Path, path: Path) -> None:
         lease.lstat()
     except FileNotFoundError:
         return
-    raise Kept(f"kept {path}: active or unknown bridge lease at {lease}")
+    session_id: str | None = None
+    try:
+        data = json.loads((lease / "owner.json").read_text())
+        candidate = data.get("session_id") if isinstance(data, dict) else None
+        if isinstance(candidate, str) and candidate.startswith("usrw_") and len(candidate) == 41:
+            session_id = candidate
+    except (OSError, ValueError, UnicodeDecodeError):
+        session_id = None
+    if session_id is None:
+        raise Kept(f"kept {path}: active or unknown bridge lease at {lease}")
+    bridge = shutil.which("pi-subagent-bridge")
+    if bridge is None:
+        raise Kept(f"kept {path}: active bridge lease at {lease} for session {session_id}; "
+                    "bridge unavailable (pi-subagent-bridge not on PATH)")
+    try:
+        proc = subprocess.run([bridge, "inspect", str(primary), session_id],
+                              capture_output=True, text=True, timeout=30,
+                              env={**os.environ, "GIT_OPTIONAL_LOCKS": "0"})
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise Kept(f"kept {path}: active bridge lease at {lease} for session {session_id}; "
+                    f"bridge unavailable ({exc})") from exc
+    reported: str | None = None
+    try:
+        snapshot = json.loads(proc.stdout)
+        if isinstance(snapshot, dict):
+            value = snapshot.get("execution_state", snapshot.get("state"))
+            if isinstance(value, str) and value:
+                reported = value
+    except ValueError:
+        reported = None
+    try:
+        lease.lstat()
+    except FileNotFoundError:
+        return
+    if proc.returncode != 0 and reported is None:
+        detail = proc.stderr.strip() or f"exit {proc.returncode}"
+        raise Kept(f"kept {path}: active bridge lease at {lease} for session {session_id}; "
+                    f"bridge unavailable ({detail})")
+    if reported:
+        raise Kept(f"kept {path}: active bridge lease at {lease} for session {session_id} (state {reported})")
+    raise Kept(f"kept {path}: active bridge lease at {lease} for session {session_id} (state unknown)")
+
+
+def gitlinks(cwd: Path) -> list[tuple[str, str]]:
+    out = git(cwd, "ls-files", "-s", "-z").stdout
+    found: list[tuple[str, str]] = []
+    for block in out.split("\0"):
+        if not block:
+            continue
+        try:
+            meta, rel = block.split("\t", 1)
+            mode, oid, _stage = meta.split(" ", 2)
+        except ValueError:
+            continue
+        if mode == "160000":
+            found.append((oid, rel))
+    return found
+
+
+def submodule_gitdirs(sub: Path) -> tuple[Path, Path] | None:
+    probe = git(sub, "rev-parse", "--path-format=absolute",
+                "--git-dir", "--git-common-dir", check=False)
+    if probe.returncode != 0:
+        return None
+    lines = probe.stdout.splitlines()
+    if len(lines) != 2 or not lines[0] or not lines[1]:
+        return None
+    return Path(lines[0]), Path(lines[1])
+
+
+def submodule_survives(common: Path, head: str) -> bool:
+    refs = git(common, "for-each-ref", f"--contains={head}",
+               "--format=%(refname)", "refs/heads", "refs/tags", "refs/remotes", check=False)
+    if refs.returncode != 0:
+        raise Kept(f"could not verify submodule refs: {refs.stderr.strip()}")
+    return bool(refs.stdout.strip())
+
+
+def collect_submodule_worktrees(path: Path, primary: Path, discard_ignored: bool) -> list[tuple[Path, Path]]:
+    collected: list[tuple[Path, Path]] = []
+    for _oid, rel in gitlinks(path):
+        sub = path / rel
+        dirs = submodule_gitdirs(sub)
+        if dirs is None:
+            continue
+        gitdir, common = dirs
+        if gitdir.resolve() == common.resolve():
+            raise Kept(f"kept {path}: submodule {rel} has its own standalone repository at {gitdir}; "
+                        "removing the lane could destroy that repository")
+        try:
+            has_modules = (gitdir / "modules").is_dir()
+        except OSError:
+            has_modules = False
+        if has_modules:
+            raise Kept(f"kept {path}: submodule {rel} contains nested modules at {gitdir / 'modules'}; "
+                        "removing the lane could destroy that repository")
+        sub_resolved = sub.resolve()
+        entries = worktree_entries(common)
+        match: dict[str, str] | None = None
+        for entry in entries:
+            try:
+                if "prunable" in entry or "HEAD" not in entry:
+                    continue
+                if Path(entry["worktree"]).resolve() == sub_resolved:
+                    match = entry
+                    break
+            except OSError:
+                continue
+        if match is None:
+            raise Kept(f"kept {path}: submodule {rel} worktree at {sub} is not a registered linked worktree")
+        if "locked" in match:
+            raise Kept(f"kept {path}: submodule {rel} worktree is locked")
+        if git(sub, "status", "--porcelain", "--untracked-files=all").stdout.strip():
+            raise Kept(f"kept {path}: submodule {rel} has uncommitted or untracked files")
+        ignored = [line[3:] for line in git(sub, "status", "--porcelain", "--ignored=matching",
+                                            "--untracked-files=all").stdout.splitlines() if line.startswith("!! ")]
+        if ignored and not discard_ignored:
+            raise Kept(f"kept {path}: submodule {rel} has ignored files, pass --discard-ignored: " + ", ".join(ignored))
+        for _nested_oid, nested_rel in gitlinks(sub):
+            if submodule_gitdirs(sub / nested_rel) is not None:
+                raise Kept(f"kept {path}: submodule {rel} contains nested submodule {nested_rel}; refusing")
+        head = match["HEAD"]
+        branch = match.get("branch", "")
+        if not branch and not submodule_survives(common, head):
+            raise Kept(f"kept {path}: submodule {rel} detached HEAD {head[:12]} has no surviving branch, tag or remote-tracking ref")
+        collected.append((sub_resolved, common))
+    return collected
 
 
 def is_ancestor(cwd: Path, before: str, after: str) -> bool:
@@ -160,6 +287,7 @@ def retire(request: Path, into: str | None, discard_ignored: bool = False, dry_r
     primary, entry = registered_lane(path, caller)
     if "locked" in entry:
         raise Kept(f"kept {path}: worktree is locked")
+    submodules = collect_submodule_worktrees(path, primary, discard_ignored)
     if git(path, "status", "--porcelain", "--untracked-files=all").stdout.strip():
         raise Kept(f"kept {path}: uncommitted or untracked files")
     ignored = [line[3:] for line in git(path, "status", "--porcelain", "--ignored=matching",
@@ -198,9 +326,17 @@ def retire(request: Path, into: str | None, discard_ignored: bool = False, dry_r
             raise Kept(f"kept {path}: integration revision {into} has no surviving ref or checkout")
         detail = f" ({verdict} of {into})"
     check_bridge_lease(primary, path)
-    if not dry_run:
+    if dry_run:
+        lines = [f"would remove {sub} (submodule worktree)" for sub, _common in submodules]
+        lines.append(f"would remove {path}{detail}")
+    else:
+        for sub, common in submodules:
+            git(common, "worktree", "remove", str(sub))
+            # An empty directory is an unpopulated gitlink, which keeps the parent clean for git worktree remove.
+            sub.mkdir()
         git(primary, "worktree", "remove", str(path))
-    lines = [f"{'would remove' if dry_run else 'removed'} {path}{detail}"]
+        lines = [f"removed {sub} (submodule worktree)" for sub, _common in submodules]
+        lines.append(f"removed {path}{detail}")
     if branch and (into is not None or branch.startswith("refs/heads/worktree-")):
         name = branch.removeprefix("refs/heads/")
         if verdict == "ancestor":
