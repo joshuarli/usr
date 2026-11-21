@@ -1,10 +1,9 @@
 [build]
-rustc-wrapper = "kache"
+rustc-wrapper = "cargo-wrapper-rustc"
 
 [env]
-CC_KNOWN_WRAPPER_CUSTOM = "kache"
-HOST_CXX = "kache clang++"
-HOST_CC = "kache clang"
+HOST_CXX = "cargo-wrapper-cxx"
+HOST_CC = "cargo-wrapper-cc"
 
 # Link with the installed mold. /usr/local/libexec/mold/ld is a symlink to
 # /usr/local/bin/mold, and -B makes the C compiler driver use it as `ld`.
@@ -16,4 +15,3 @@ rustflags = ["-Clink-arg=-B/usr/local/libexec/mold"]
 [target.aarch64-unknown-linux-musl]
 linker = "clang"
 rustflags = ["-Clink-arg=-B/usr/local/libexec/mold"]
-
