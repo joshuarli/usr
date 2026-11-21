@@ -177,13 +177,27 @@ test("provider-qualified prohibited models fail before any projection is written
   const f = fixture()
   try {
     const before = f.paths.map(path => readFileSync(join(f.root, path), "utf8"))
-    for (const model of ["gemini-4-argon-high", "google/gemini-4-argon-high", "antigravity/gemini-4-carbon-xhigh"]) {
+    for (const model of ["gemini-4-argon-high", "google/gemini-4-argon-high", "antigravity/gemini-4-carbon-xhigh", "claude-fable-5-2", "anthropic/claude-fable-5-2"]) {
       const policy: Policy = {
         ...POLICY,
         rootRoutes: { ...POLICY.rootRoutes, worker: [{ ...POLICY.rootRoutes.worker[0], model }, ...POLICY.rootRoutes.worker.slice(1)] },
       }
       assert.throws(() => writeOutputs(f.root, renderOutputs(f.root, policy)), /Prohibited model in active policy/)
       assert.deepEqual(f.paths.map(path => readFileSync(join(f.root, path), "utf8")), before)
+    }
+  } finally { f.close() }
+})
+
+test("prohibited native Claude aliases cannot be projected", () => {
+  const f = fixture()
+  try {
+    for (const model of ["fable", "claude-fable-5-2"]) {
+      const policy: Policy = {
+        ...POLICY,
+        nativeFallback: { ...POLICY.nativeFallback,
+          claudeModels: { ...POLICY.nativeFallback.claudeModels, expert: model } },
+      }
+      assert.throws(() => renderOutputs(f.root, policy), /Prohibited model in active policy/)
     }
   } finally { f.close() }
 })

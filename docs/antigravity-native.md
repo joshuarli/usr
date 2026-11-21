@@ -26,3 +26,7 @@ Give children explicit writable paths, a worktree when they will write, a decisi
 The small `~/.gemini/config/rules/neon.md` rule tunes evidence-grounded use without pretending to replace the model's built-in instructions. The user may explicitly select Antigravity's Orchestrator mode, which pairs Neon planning with Hydrogen execution, but that mode is not an exact per-tier custom-agent pin.
 
 After pulling, review `sh sync plan`, resolve any conflicts, then run `sh sync` and start a fresh agy session. Antigravity rewrites its own untracked `~/.gemini/antigravity-cli/settings.json`; do not commit or overwrite that state. Inspect actual native child model identity and effort before relying on each tier.
+
+## Evidence-based child attestation
+
+On the actual authenticated host, obtain each native child's **resolved** concrete model, effective effort and evidence of one bounded tool call. Write a private JSON receipt (not a fabricated config-derived value) containing `harness`, `requested_model`, `observed_model`, `requested_effort`, `observed_effort`, `probe_ok` and `evidence` (path/identifier to the original host log); run `model-attest < receipt.json`. The validator only compares evidence fields and banned families; it does not remotely interrogate the CLI. If the alias cannot resolve to the exact intended Hydrogen/Neon ID and effort, leave that tier unqualified rather than asserting compliance.

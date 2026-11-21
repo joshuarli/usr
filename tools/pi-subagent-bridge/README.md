@@ -268,3 +268,7 @@ unattended use.
 A parent may extend a session by one or two attempts using `worker_resume` fields `extend_attempts` and `extension_reason`, or the corresponding CLI flags. The lifetime extension cap is two; status reports the total.
 
 Steering persists `pending_steer` before signaling and records `last_steer` on completion or failure. Process relaunches record their planned output paths before spawning; status reconciles an abandoned caller using the replacement process identity or its output, retaining the original run if no replacement started. A pending steer blocks another. A 12-second shared deadline bounds the external probes and asynchronous phases; a timed-out relaunch can return `steering` for status to reconcile. A Pi delivery awaiting acknowledgement remains pending.
+
+## Contributor data-use exclusion
+
+Do not use Contributor-backed Pi or FX workers for non-shareable code. An empty `.agents/no-contributor` file tracked in the primary repo or `USR_CONTRIBUTOR_MODE=deny` causes the bridge to skip Contributor Pi fallback candidates and reject Contributor SDK/FX launches. Other native clients need independent controls. A disabled Contributor lane is not a provider outage authorizing an unapproved paid model; follow only preapproved non-Contributor routes. See `docs/model-economics.md` for subscription multipliers and controlled eval criteria.

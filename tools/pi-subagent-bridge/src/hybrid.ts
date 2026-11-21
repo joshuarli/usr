@@ -28,7 +28,7 @@ import type { Access, PlannedRun } from "./launch.ts"
 import { ROOT_PLANS, type CliExecutor, type CliPin, type PiSelection, type RootPlan } from "./policy.ts"
 import { parseScope, requiredText as required, type Scope } from "./scope.ts"
 import { beforeDeadline, deadlineTimeout, steerCleanup, steerDeadline, SteerDeadlineError } from "./steer-deadline.ts"
-import { workerEnvironment } from "./worker-env.ts"
+import { workerEnvironment, contributorAllowed, contributorModel } from "./worker-env.ts"
 export type RoutedTier = BridgeTier
 export type { Scope } from "./scope.ts"
 const TERMINATION_WAIT_MS = 2000
@@ -252,6 +252,7 @@ export function makeHybridBridge(api: PiAdapter, command = {
   async function availablePi(plan: PiFallbackPlan, from: number, cwd: string): Promise<{ selection: PiSelection; next: number } | null> {
     for (let index = from; index < plan.pi.length; index++) {
       const candidate = plan.pi[index]
+      if (contributorModel(candidate.providerID, candidate.id) && !contributorAllowed(cwd)) continue
       if (candidate.providerID === "muse-sdk") process.env.PI_MUSE_SDK_CONTRIBUTOR = "on"
       try {
         if ((await api(candidate).modelCheck(cwd)).available) return { selection: candidate, next: index + 1 }
@@ -443,7 +444,8 @@ export function makeHybridBridge(api: PiAdapter, command = {
       const goModel = plan.pi.find(pin => pin.providerID === "opencode-go")
       const devinModel = plan.pi.find(pin => pin.providerID === "devin")
       let museAvailable = false, museIssue: string | null = null
-      if (museModel) {
+      if (museModel && !contributorAllowed(dir)) museIssue = "Contributor models disallowed by repository or environment policy"
+      else if (museModel) {
         try {
           museAvailable = (await api(museModel).modelCheck(dir)).available
         } catch (e) { museIssue = String(e) }
@@ -451,7 +453,9 @@ export function makeHybridBridge(api: PiAdapter, command = {
           museIssue = musePreflight().issue ?? "Muse subscription model unavailable; check Muse Code login"
       }
       let goAvailable = false, goIssue: string | null = null
-      if (goModel) {
+      if (goModel && contributorModel(goModel.providerID, goModel.id) && !contributorAllowed(dir))
+        goIssue = "Contributor models disallowed by repository or environment policy"
+      else if (goModel) {
         try { goAvailable = (await api(goModel).modelCheck(dir)).available }
         catch (e) { goIssue = String(e) }
       }

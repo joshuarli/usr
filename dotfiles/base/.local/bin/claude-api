@@ -42,6 +42,14 @@ done
 prompt=$*
 [ -n "$prompt" ] || usage
 
+# Fable is explicitly prohibited, even when passed as a qualified provider ID.
+# Reject before contacting vault, creating logs, or invoking a provider.
+case $model in
+  fable|fable-*|claude-fable|claude-fable-*|*/fable|*/fable-*|*/claude-fable|*/claude-fable-*)
+    printf "%s\n" "claude-api: prohibited Fable model: $model" >&2
+    exit 2 ;;
+esac
+
 # The key is not scoped to a workspace, so the API requires this header. The
 # ID only names the workspace and grants no access without the key.
 export ANTHROPIC_CUSTOM_HEADERS="anthropic-workspace-id: wrkspc_01AD5KAnLMgJB9A97WHG28DY"
@@ -77,6 +85,7 @@ def price:
 	elif startswith("claude-sonnet-4-6") then {i: 3,  o: 15, r: 0.3}
 	elif startswith("claude-haiku-5-5")  then {i: 0.1, o: 0.5, r: 0.01}
 	elif startswith("claude-haiku-4-5")  then {i: 1,  o: 5,  r: 0.1}
+	elif startswith("claude-fable-5-2")  then {i: 8,  o: 40, r: 0.2}
 	elif startswith("claude-fable-5-1")  then {i: 10, o: 50, r: 0.25}
 	elif startswith("claude-fable-5")    then {i: 10, o: 50, r: 1}
 	else null end;

@@ -7,6 +7,7 @@ import { processStartTime, processIdentity, workerAlive, type CommandRun, type C
 import { plannedCommand, type LaunchRequest } from "./launch.ts"
 import { isRecord } from "./scope.ts"
 import { isBannedModel, type CliPin } from "./policy.ts"
+import { contributorAllowed, contributorModel } from "./worker-env.ts"
 import { deadlineTimeout } from "./steer-deadline.ts"
 import { CHILD_SERVER, CHILD_TOOLS, cancelChildRun, childConfigPath, childTerminal, childrenQuiescent, readChildLedger, type FxChildConfig, type FxChildLimits } from "./fx-children.ts"
 import type { BridgeTier } from "./tier-policy.ts"
@@ -213,6 +214,8 @@ export function makeFxAdapter(options: FxOptions) {
   }
   function admitted(request: Omit<FxLaunch, "prompt">, delegating: boolean): { cwd: string; settings: string } {
     if (!available(request.selection)) throw new Error("Pinned FX binary/provider unavailable")
+    if (contributorModel(request.selection.provider, request.selection.model) && !contributorAllowed(request.directory))
+      throw new Error("Contributor-model data-use policy forbids this FX worker")
     const cwd = realpathSync(request.directory), underHome = relative(home, cwd)
     if (!underHome || underHome.startsWith("..") || isAbsolute(underHome)) throw new Error("FX qualification worktree must be beneath its private HOME")
     const readOnly = request.access.kind === "read-only"

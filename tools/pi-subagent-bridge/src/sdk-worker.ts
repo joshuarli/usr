@@ -8,7 +8,7 @@ import { ensureOpenCodeApiKey } from "./opencode-auth.ts"
 import { PI_RUN_DEADLINE_MS } from "./tier-policy.ts"
 import { MUSE_PROVIDER, museExtensionPath, musePreflight } from "./muse-subscription.ts"
 import { DEVIN_PROVIDER, devinExtensionPath, devinPreflight } from "./devin-provider.ts"
-import { stripIntercomEnvironment } from "./worker-env.ts"
+import { stripIntercomEnvironment, contributorAllowed, contributorModel } from "./worker-env.ts"
 
 import { assertTierProfiles, tierGuardPath } from "./tier-profile.ts"
 import {
@@ -93,6 +93,8 @@ async function run(job: Job, started: (admission: Admission) => void, dispatchin
   process.env.PI_OFFLINE = "1"
   process.env.PI_SKIP_VERSION_CHECK = "1"
   const tier = role(job)
+  if (contributorModel(job.model.providerID, job.model.id) && !contributorAllowed(job.cwd))
+    throw new Error("Contributor-model data-use policy forbids this worker; choose a non-contributor route")
   const muse = job.model.providerID === MUSE_PROVIDER
   const devin = job.model.providerID === DEVIN_PROVIDER
   if (muse) {

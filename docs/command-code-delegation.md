@@ -75,3 +75,7 @@ Sources:
 
 No live signed-in Command Code dispatch, paid quota check, or effective-effort
 check was performed during this policy change.
+
+## Subscriber-aware cost and experimental routing
+
+Do **not** promote HY4 Flash solely because its public API token price is lower. GOAT currently advertises model-specific monthly allowances: DeepSeek V4.1 Flash $100, HY4 $20, HY4 Flash $15 (subject to the live plan terms, shared caps and promotional changes). On a $10 GOAT subscription those represent nominal credit-allowance-to-fee ratios of 10×, 2× and 1.5×, **not** guaranteed discounts in tokens or incremental costs. Compare accepted slices per unit of remaining model-specific quota, latency, retries, and cache usage; keep DeepSeek the default until an effort-matched A/B proves a better marginal outcome. Inkling 2 Small Free's 200/day offer is promotional: verify availability in `cmd --list-models` at dispatch, block on absence rather than automatically substituting a paid model. See [model economics](model-economics.md).

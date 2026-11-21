@@ -118,6 +118,25 @@ else
 	[ "$?" -eq 2 ] || fail "empty string prompt returned the wrong status"
 fi
 
+# The historical price table remains accurate for audit, but no Fable launch is permitted.
+grep -q 'startswith("claude-fable-5-2").*{i: 8,  o: 40, r: 0.2}' "$launcher" || fail "missing Fable 5.2 historical pricing"
+for banned in fable fable-5-2 claude-fable-5-1 claude-fable-5-2 anthropic/claude-fable-5-2; do
+  if run --model "$banned" test; then
+    fail "accepted banned Fable model $banned"
+  else
+    [ "$?" -eq 2 ] || fail "Fable ban returned wrong status"
+  fi
+  grep -q 'prohibited Fable model' "$error" || fail "Fable rejection was not explicit"
+done
+[ "$(grep -c '^called
+	fail "accepted the removed --prompt option"
+else
+	[ "$?" -eq 2 ] || fail "removed --prompt option returned the wrong status"
+fi
+[ "$(grep -c '^called$' "$calls")" -eq 2 ] || fail "invalid prompt started Claude"
+
+printf '%s\n' 'claude-api tests passed'
+ "$calls")" -eq 2 ] || fail "Fable rejection launched Claude"
 if run --prompt example; then
 	fail "accepted the removed --prompt option"
 else

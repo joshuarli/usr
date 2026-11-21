@@ -236,7 +236,7 @@ function validatePolicy(policy: Policy): void {
     validateModel(pin.model)
     if ("effort" in pin && pin.effort) code(pin.effort)
   }
-  for (const value of Object.values(policy.nativeFallback.claudeModels)) code(value)
+  for (const value of Object.values(policy.nativeFallback.claudeModels)) validateModel(value)
   for (const value of Object.values(policy.nativeFallback.claudeEffort)) code(value)
 }
 

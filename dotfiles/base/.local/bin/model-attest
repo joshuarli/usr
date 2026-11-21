@@ -1,0 +1,61 @@
+#!/usr/bin/env python3
+"""Fail-closed verifier for a live harness model/effort attestation.
+
+The input MUST come from an observed harness run; this script does not probe
+a provider itself. JSON object on stdin, one invocation per native lane.
+"""
+import json
+import sys
+
+BANNED = ("claude-fable", "fable", "gemini-3.8", "gemini-4-argon",
+          "gemini-4-carbon", "gpt-6-astra", "gpt-6.1-astra", "gpt-6.2-astra")
+
+
+def prohibited(model):
+    name = model.rsplit("/", 1)[-1].lower()
+    return any(name == family or name.startswith(family + "-") for family in BANNED)
+
+
+def evaluate(record):
+    if not isinstance(record, dict):
+        return ["attestation must be a JSON object"]
+    reasons = []
+    for field in ("harness", "requested_model", "observed_model",
+                  "requested_effort", "observed_effort", "evidence"):
+        if not isinstance(record.get(field), str) or not record[field].strip():
+            reasons.append("missing " + field)
+    requested = record.get("requested_model")
+    observed = record.get("observed_model")
+    if isinstance(requested, str) and prohibited(requested):
+        reasons.append("requested model is prohibited")
+    if isinstance(observed, str) and prohibited(observed):
+        reasons.append("observed model is prohibited")
+    if (isinstance(requested, str) and isinstance(observed, str)
+            and requested != observed):
+        reasons.append("model identity mismatch")
+    if (isinstance(record.get("requested_effort"), str)
+            and isinstance(record.get("observed_effort"), str)
+            and record["requested_effort"] != record["observed_effort"]):
+        reasons.append("effective reasoning effort mismatch")
+    if record.get("probe_ok") is not True:
+        reasons.append("successful bounded real-tool probe not attested")
+    return reasons
+
+
+def main():
+    if len(sys.argv) != 1:
+        print("usage: model-attest < receipt.json", file=sys.stderr)
+        return 2
+    try:
+        receipt = json.load(sys.stdin)
+    except (ValueError, UnicodeError):
+        print('{"status":"blocked","reasons":["invalid JSON attestation"]}')
+        return 1
+    reasons = evaluate(receipt)
+    print(json.dumps({"status": "blocked" if reasons else "pass",
+                      "reasons": reasons}, sort_keys=True))
+    return 1 if reasons else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -4,7 +4,7 @@ import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import test from "node:test"
-import { stripIntercomEnvironment, workerEnvironment } from "../src/worker-env.ts"
+import { stripIntercomEnvironment, workerEnvironment, contributorAllowed, contributorModel } from "../src/worker-env.ts"
 import { startCodex } from "../src/codex.ts"
 import { startCommand } from "../src/command.ts"
 import { ADMITTING_PARENT_ENV, admittingParentFrom } from "../src/session.ts"
@@ -93,4 +93,21 @@ test("every CLI worker launcher actually strips coordinator authority before exe
     }
     rmSync(root, { recursive: true, force: true })
   }
+})
+
+test("explicit privacy marker and environment deny contributor-backed routes", () => {
+  const root = mkdtempSync(join(tmpdir(), "contributor-policy-"))
+  const cwd = join(root, ".work/wt/worker")
+  try {
+    mkdirSync(cwd, { recursive: true })
+    assert.equal(contributorAllowed(cwd, {}), true)
+    assert.equal(contributorAllowed(cwd, { USR_CONTRIBUTOR_MODE: "deny" }), false)
+    mkdirSync(join(root, ".agents"), { recursive: true })
+    writeFileSync(join(root, ".agents/no-contributor"), "")
+    assert.equal(contributorAllowed(cwd, {}), false)
+    assert.equal(contributorModel("muse-sdk", "muse-spark-1.3"), true)
+    assert.equal(contributorModel("opencode-go", "muse-spark-1.3-contributor"), true)
+    assert.equal(contributorModel("gateway", "meta/muse-spark-1.3-contributor"), true)
+    assert.equal(contributorModel("opencode-go", "deepseek-v4.1-flash"), false)
+  } finally { rmSync(root, { recursive: true, force: true }) }
 })
