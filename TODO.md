@@ -73,15 +73,6 @@ Next: 132
 - **Fix with:** root-cause
 - **Effort:** M
 
-### USR-131 · P2 · heavy jobs share no host CPU budget and timeouts leak process trees
-
-- **Area:** Host resources
-- **Where:** dotfiles/linux/.local/bin (new cpu-slot); xsh .work/bin/lean-slot
-- **Problem:** On 2026-11-21 load reached 56 on a 32-CPU host. A corpus runner's BusyBox timeout signalled only its direct child, so each timed-out document left an orphaned lean process (reparented to init) still holding one of lean-slot's two 4-CPU slots. Docker test containers, Asterinas kernel builds and Lean jobs from several lanes ran at once with no shared CPU cap; only lean-slot (Lean, 8 CPUs) and a Rust flock existed, each private to one repository.
-- **Recommendation:** Add cpu-slot: a host-wide pool of per-CPU flock locks minus a reserve, which pins a command to the granted CPUs with sched_setaffinity, exports CPU_SLOT_CPUS for docker --cpuset-cpus, runs it in its own session and on timeout or signal kills the whole process group before releasing the CPUs. Acceptance: tests show exact affinity, disjoint concurrent grants with a waiting third job, a timed-out grandchild gone after exit 124, SIGTERM killing the group, an oversize request exiting 2, and status listing holders.
-- **Fix with:** cpu-slot
-- **Effort:** M
-
 ### USR-75 · P3 · clang plus mold host links intermittently segfault and leave truncated artifacts
 
 - **Area:** rust toolchain
