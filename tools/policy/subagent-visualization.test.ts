@@ -28,7 +28,7 @@ test("renders a self-contained HTML visualization with layered lane strength", (
     for (const label of ["Bridge primary", "Bridge fallback", "Native", "Pilot / opt-in", "Undefined"]) {
       assert.ok(html.includes(label), `missing lane kind ${label}`)
     }
-    assert.match(html, /thinking level/)
+    assert.match(html, /Thinking:/)
     assert.match(html, /Route rank/)
     assert.match(html, /<svg[^>]*role="img"/)
     assert.match(html, /<path class="edge"/)
@@ -36,7 +36,8 @@ test("renders a self-contained HTML visualization with layered lane strength", (
     for (const tier of POLICY.tiers) {
       for (const route of POLICY.rootRoutes[tier]) {
         const id = route.executor === "pi" ? `${route.providerID}/${route.model}` : route.model
-        assert.ok(html.includes(id), `missing route ${id}`)
+        const tail = id.slice(id.lastIndexOf("/") + 1)
+        assert.ok(html.includes(id) || html.includes(tail), `missing route ${id}`)
       }
     }
     const mtime = statSync(f.path).mtimeMs
