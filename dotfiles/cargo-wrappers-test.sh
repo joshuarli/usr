@@ -73,7 +73,8 @@ case_config_names_the_wrappers() {
     [ "$(basename "$rustc_wrapper")" = kache ] && [ -x "$rustc_wrapper" ]
     grep -Fx 'HOST_CC = "cargo-wrapper-cc"' "$config" >/dev/null
     grep -Fx 'HOST_CXX = "cargo-wrapper-cxx"' "$config" >/dev/null
-    if grep -Eq 'CC_KNOWN_WRAPPER_CUSTOM|kache clang' "$config"; then
+    grep -Fx 'CC_KNOWN_WRAPPER_CUSTOM = "kache"' "$config" >/dev/null
+    if grep -Eq 'kache clang' "$config"; then
         return 1
     fi
     for wrapper in cargo-wrapper-cc cargo-wrapper-cxx; do

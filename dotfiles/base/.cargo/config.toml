@@ -5,6 +5,9 @@
 rustc-wrapper = ".local/lib/cargo-kache/kache"
 
 [env]
+# kache init adds this key when it is missing. cc-rs reads it only when a
+# compiler value is several words, so it does not affect the wrappers below.
+CC_KNOWN_WRAPPER_CUSTOM = "kache"
 HOST_CXX = "cargo-wrapper-cxx"
 HOST_CC = "cargo-wrapper-cc"
 
