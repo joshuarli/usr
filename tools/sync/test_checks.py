@@ -141,6 +141,7 @@ class SuiteAndDocsTests(unittest.TestCase):
             "node tools/skills/skills.ts check",
             "node tools/skills/skills.ts check --root .agents/skills",
             "python3 -I dotfiles/skills-campaign-test.py",
+            'TMPDIR="$PWD/.work/tmp" python3 -I src/test_wol.py',
         ]
         rendered = [checks.render_argv(checks.BY_ID[i], checks.BY_ID[i].argv) for i in checks.SUITE]
         self.assertEqual(previous, rendered)
