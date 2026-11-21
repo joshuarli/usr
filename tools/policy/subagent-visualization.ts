@@ -8,23 +8,22 @@ const DESTINATION = "docs/subagents.html"
 const SOURCE = "tools/policy/subagent-visualization.ts"
 const NOTICE = `<!-- Generated from ${SOURCE}; run make subagent-visualization. -->`
 
-const TIERS = ["scout", "mechanic", "worker", "expert"] as const
-type Tier = typeof TIERS[number]
+type Tier = "scout" | "mechanic" | "worker" | "expert"
 type LaneKind = "native" | "primary" | "fallback" | "undefined" | "pilot"
 
 const LANES: Record<LaneKind, { label: string; accent: string; fills: readonly string[] }> = {
-  native: { label: "Native", accent: "#0e7a58", fills: ["#eaf7f1", "#cceede", "#a2ddc4", "#6cc6a3", "#39ad84"] },
-  primary: { label: "Bridge primary", accent: "#2459c9", fills: ["#eef3ff", "#dbe6ff", "#b6ccfa", "#89acf4", "#5590ea"] },
-  fallback: { label: "Bridge fallback", accent: "#b56a0a", fills: ["#fff6e8", "#ffe9c8", "#ffd49a", "#f8b964", "#ed9d33"] },
-  undefined: { label: "Undefined", accent: "#8a97a8", fills: ["#f5f6f8", "#e9ecf1", "#d9dfe8", "#c5cedb", "#aab7c8"] },
-  pilot: { label: "Pilot / opt-in", accent: "#7a3bb5", fills: ["#f6effc", "#e9daf8", "#d4b7ee", "#b98adf", "#9a5fd0"] },
+  native: { label: "Native", accent: "#2f6f5e", fills: ["#fbfdfc", "#f7faf9", "#f2f8f5", "#ecf5f0", "#e5f0ea"] },
+  primary: { label: "Bridge primary", accent: "#3b5b9c", fills: ["#fbfcfe", "#f5f8fd", "#eef4fb", "#e7f0f9", "#dfeaf6"] },
+  fallback: { label: "Bridge fallback", accent: "#9a6a2f", fills: ["#fdfbf8", "#fbf6ee", "#f8f0e3", "#f4e9d7", "#efe1ca"] },
+  undefined: { label: "Undefined", accent: "#7a818c", fills: ["#fbfbfc", "#f7f8f9", "#f3f4f6", "#eceef1", "#e5e8ec"] },
+  pilot: { label: "Pilot / opt-in", accent: "#735a9a", fills: ["#fcfbfd", "#f8f5fb", "#f3eef8", "#ece5f4", "#e5dbef"] },
 }
 
 const TIER_ACCENTS: Record<Tier, string> = {
-  scout: "#0d8f86",
-  mechanic: "#4f46c9",
-  worker: "#d25a12",
-  expert: "#8b32c2",
+  scout: "#0f766e",
+  mechanic: "#4338a0",
+  worker: "#b45309",
+  expert: "#7e22ce",
 }
 
 const HTML_ESCAPES: Record<string, string> = {
@@ -57,20 +56,15 @@ function level(effort: string | undefined): number {
 function laneStyle(kind: LaneKind, strength: number): string {
   const spec = LANES[kind]
   const index = Math.max(0, Math.min(4, strength - 1))
-  return `--accent:${spec.accent};--fill:${spec.fills[index]};--pct:${strength * 20}%`
+  return `--accent:${spec.accent};--fill:${spec.fills[index]}`
 }
 
-function meter(): string {
-  return '<span class="meter" aria-hidden="true"></span>'
-}
-
-function tierBadge(tier: Tier): string {
+function tierLabel(tier: Tier): string {
   return `<span class="tier" style="--tone:${TIER_ACCENTS[tier]}">${tier}</span>`
 }
 
-function rankBadge(rank: number | undefined): string {
-  if (rank === undefined) return ""
-  return `<span class="rank ${rank === 1 ? "rank-primary" : "rank-fallback"}">P${rank}</span>`
+function rankLabel(rank: number | undefined): string {
+  return rank === undefined ? "" : `<span class="rank">P${rank}</span>`
 }
 
 type LaneOptions = {
@@ -83,23 +77,20 @@ type LaneOptions = {
   note?: string
 }
 
-function laneCard(option: LaneOptions): string {
-  const spec = LANES[option.kind]
-  return [
-    `<div class="lane" style="${laneStyle(option.kind, option.strength)}">`,
-    `<div class="lane-top">${option.tier ? tierBadge(option.tier) : ""}<span class="kind">${spec.label}</span>${rankBadge(option.rank)}</div>`,
-    `<div class="lane-title">${esc(option.title)} ${meter()}</div>`,
-    option.detail ? `<div class="lane-detail">${inline(option.detail)}</div>` : "",
-    option.note ? `<div class="lane-note">${inline(option.note)}</div>` : "",
-    "</div>",
-  ].filter(Boolean).join("\n")
+function heading(option: LaneOptions): string {
+  return `${rankLabel(option.rank)}<span class="kind">${LANES[option.kind].label}</span>` +
+    (option.tier ? tierLabel(option.tier) : "") + `<strong>${esc(option.title)}</strong>`
+}
+
+function laneRow(option: LaneOptions): string {
+  const body = option.detail ? `<div class="detail">${inline(option.detail)}</div>` : ""
+  const note = option.note ? `<div class="detail">${inline(option.note)}</div>` : ""
+  return `<div class="lane" style="${laneStyle(option.kind, option.strength)}">${heading(option)}${body}${note}</div>`
 }
 
 function mapCell(option: LaneOptions): string {
-  return `<td class="cell" style="${laneStyle(option.kind, option.strength)}">` +
-    `<div class="cell-top">${option.tier ? tierBadge(option.tier) : ""}<span class="kind">${LANES[option.kind].label}</span></div>` +
-    `<div class="cell-title">${esc(option.title)} ${meter()}</div>` +
-    (option.detail ? `<div class="cell-detail">${inline(option.detail)}</div>` : "") + "</td>"
+  const detail = option.detail ? `<div class="detail">${inline(option.detail)}</div>` : ""
+  return `<td class="cell" style="${laneStyle(option.kind, option.strength)}">${heading(option)}${detail}</td>`
 }
 
 function modelOf(route: Route): string {
@@ -114,87 +105,59 @@ function executorLabel(route: Route): string {
   }
 }
 
+function commandEffort(tier: "scout" | "mechanic" | "worker"): string {
+  const pin = POLICY.commandNative[tier]
+  return "effort" in pin ? pin.effort : "medium"
+}
+
 function style(): string {
   return `<style>
-:root{--bg:#f5f7fb;--ink:#172033;--muted:#56637a;--line:#dae1ed;--card:#fff}
+:root{--ink:#20242b;--muted:#6b7280;--line:#e6e8ec}
 *{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
-main{max-width:1320px;margin:0 auto;padding:28px 24px 64px}
-.hero{background:linear-gradient(135deg,#101f3c 0%,#1d3f7b 60%,#2857a0 100%);color:#fff;border-radius:18px;padding:28px 32px;box-shadow:0 12px 32px #10204a26}
-.hero h1{margin:0 0 6px;font-size:30px;letter-spacing:-.02em}
-.hero p{margin:5px 0;max-width:105ch;color:#dbe6ff}
-code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.88em;background:#edf1f8;border-radius:5px;padding:1px 5px;color:#1e3a6d}
-.hero code{background:#ffffff24;color:#fff}
-section{margin-top:26px}
-h2{font-size:20px;margin:0 0 12px;display:flex;align-items:center;gap:10px}
-h2::before{content:"";width:6px;height:22px;border-radius:3px;background:#2f6bd8}
-h3{margin:0;font-size:15px}
-.panel{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px 20px}
-.muted{color:var(--muted)}
-.legend-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:14px}
-.legend-item{background:#f9fbff;border:1px solid var(--line);border-radius:10px;padding:12px}
-.legend-item strong{display:block;margin-bottom:7px;font-size:13px}
-.swatch{width:18px;height:18px;border-radius:5px;border-left:6px solid var(--accent);background:var(--fill);display:inline-block;vertical-align:middle;margin-right:8px}
-.scale{display:flex;gap:4px;align-items:flex-end;margin-top:4px}
-.scale-step{width:38px;text-align:center}
-.scale-step i{height:14px;border-radius:3px;display:block}
-.scale-step em{font-size:10px;font-style:normal;color:var(--muted)}
-.flow{display:flex;flex-direction:column;align-items:center;gap:9px}
-.node{border-radius:10px;padding:11px 18px;font-weight:650;text-align:center;background:#eef3ff;border:1px solid #b6ccfa;color:#1b3f8c}
-.node.native{background:#eaf7f1;border-color:#a2ddc4;color:#0c5f46}
-.arrow{color:#98a5ba;font-weight:800;line-height:1}
-.branches{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:16px;width:100%;margin-top:8px}
-.branch{background:#f9fbff;border:1px solid var(--line);border-radius:12px;padding:14px}
-.branch-head{font-weight:700;margin-bottom:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
-.branch-note{font-weight:400;font-size:12px;color:var(--muted)}
-.lane-list{display:grid;grid-template-columns:repeat(auto-fit,minmax(205px,1fr));gap:9px}
-.lane{background:var(--fill);border:1px solid #0a1f3d12;border-left:6px solid var(--accent);border-radius:10px;padding:10px 12px}
-.lane-top,.cell-top{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:5px}
-.kind{font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--accent);font-weight:800}
-.rank{font-size:10px;font-weight:800;border-radius:999px;padding:1px 7px}
-.rank-primary{background:var(--accent);color:#fff}
-.rank-fallback{background:#ffffffaa;border:1px solid var(--accent);color:var(--accent)}
-.tier{font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.04em;color:#fff;background:var(--tone);border-radius:999px;padding:1px 7px}
-.lane-title,.cell-title{font-weight:650;font-size:13.5px}
-.lane-detail,.cell-detail{font-size:12px;color:#334059;margin-top:3px;word-break:break-word}
-.lane-note{font-size:11.5px;color:var(--muted);margin-top:4px;font-style:italic}
-.meter{display:inline-block;width:44px;height:6px;border-radius:3px;background:#ffffffb8;overflow:hidden;vertical-align:middle;margin-left:4px}
-.meter::after{content:"";display:block;height:100%;width:var(--pct);background:var(--accent)}
-.table-scroll{overflow-x:auto;border:1px solid var(--line);border-radius:12px;background:#fff}
-table{border-collapse:collapse;width:100%;min-width:1180px}
-th,td{border-bottom:1px solid var(--line);padding:10px 12px;text-align:left;vertical-align:top}
-thead th{background:#eef3fb;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:#40506b}
-tbody th{background:#f7f9fd;font-size:13px;width:120px}
-.cell{background:var(--fill);border-left:5px solid var(--accent);border-radius:8px;min-width:155px}
-.tier-row{display:grid;grid-template-columns:118px 1fr;gap:12px;align-items:start;padding:13px 0;border-top:1px solid var(--line)}
-.tier-row:first-of-type{border-top:0}
-.chain{display:flex;flex-wrap:wrap;align-items:stretch;gap:8px}
-.chain-arrow{align-self:center;color:#9aa7bb;font-weight:800}
-.route{flex:1 1 175px;min-width:165px;background:var(--fill);border:1px solid #0a1f3d12;border-left:6px solid var(--accent);border-radius:10px;padding:9px 11px}
-.route .lane-title{font-size:12.5px}
-.rules li{margin:8px 0;padding-left:2px}
-footer{margin-top:26px;font-size:12.5px;color:var(--muted)}
-a{color:#2157bd}
-@media (max-width:720px){main{padding:16px 12px 40px}.hero{padding:20px}.tier-row{grid-template-columns:1fr}}
+body{margin:0;background:#fff;color:var(--ink);font:14px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+main{max-width:1120px;margin:0 auto;padding:40px 24px 80px}
+header{border-bottom:1px solid var(--line);padding-bottom:18px;margin-bottom:8px}
+h1{font-size:22px;font-weight:600;margin:0 0 8px;letter-spacing:-.01em}
+h2{font-size:15px;font-weight:600;margin:30px 0 10px}
+h3{font-size:13px;font-weight:600;margin:18px 0 8px;color:#374151}
+p{margin:6px 0;color:var(--muted)}
+code{font:12.5px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;background:#f4f5f7;border-radius:4px;padding:1px 4px;color:#374151}
+a{color:#2563eb;text-decoration:none}
+a:hover{text-decoration:underline}
+.legend{display:flex;flex-wrap:wrap;gap:4px 16px;font-size:12px;color:var(--muted)}
+.dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--accent);margin-right:5px;vertical-align:1px}
+.cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(330px,1fr));gap:26px}
+.lane{padding:7px 11px;border-left:2px solid var(--accent);background:var(--fill);border-radius:4px;margin:5px 0}
+.lane strong,.cell strong{font-weight:600;font-size:13px}
+.kind{font-size:11px;color:var(--accent);font-weight:600;margin-right:6px}
+.rank{font-size:11px;color:var(--accent);font-weight:600;margin-right:6px}
+.tier{font-size:11px;color:var(--tone);font-weight:600;margin-right:6px}
+.detail{font-size:12px;color:var(--muted);margin-top:2px}
+.table-scroll{overflow-x:auto;border:1px solid var(--line);border-radius:6px}
+table{border-collapse:collapse;width:100%;min-width:1040px;font-size:12px}
+th,td{border-bottom:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top}
+thead th{color:var(--muted);font-weight:600;background:#fafafa}
+tbody th{font-weight:600;background:#fafafa;width:110px}
+.cell{border-left-width:2px}
+.chain{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:8px}
+.route{padding:7px 10px;border-left:2px solid var(--accent);background:var(--fill);border-radius:4px;min-width:170px}
+.rules{padding-left:20px;color:#374151}
+.rules li{margin:6px 0}
+footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--line);font-size:12px;color:var(--muted)}
+@media (max-width:720px){main{padding:24px 14px 60px}}
 </style>`
 }
 
 function legend(): string {
-  const kinds = (Object.keys(LANES) as LaneKind[]).map(kind =>
-    `<div class="legend-item"><strong><span class="swatch" style="--accent:${LANES[kind].accent};--fill:${LANES[kind].fills[2]}"></span>${LANES[kind].label}</strong>` +
-    `<span class="muted">Lane kind — the hue and left border tell you where the assignment runs.</span></div>`).join("\n")
-  const scale = ["low", "medium", "high", "xhigh", "max"].map((name, index) =>
-    `<span class="scale-step"><i style="background:${LANES.primary.fills[index]}"></i><em>${name}</em></span>`).join("")
+  const items = (Object.keys(LANES) as LaneKind[]).map(kind =>
+    `<span><i class="dot" style="--accent:${LANES[kind].accent}"></i>${LANES[kind].label}</span>`).join("")
   return [
-    '<section id="legend">',
-    '<h2>Reading the lanes</h2>',
-    '<div class="panel"><div class="legend-grid">',
-    kinds,
-    `<div class="legend-item"><strong>Strength / model effort</strong><span class="muted">Fill shade and the small bar grow with model effort.</span><div class="scale">${scale}</div></div>`,
-    '<div class="legend-item"><strong>Route rank</strong><span class="muted"><span class="rank rank-primary">P1</span> is the primary route; <span class="rank rank-fallback">P2</span> and later are ordered fallbacks, tried only before edits.</span></div>',
-    '<div class="legend-item"><strong>Tier badges</strong><span class="muted">scout (read-only) → mechanic → worker → expert. Expert is terminal and native everywhere; no `god` tier exists.</span></div>',
-    '</div></div>',
-    '</section>',
+    '<div class="legend">',
+    items,
+    '<span>Tint depth = model effort (low → max)</span>',
+    '<span>Route rank: P1 primary, P2+ fallbacks</span>',
+    '<span>Tier labels = assignment tier</span>',
+    '</div>',
   ].join("\n")
 }
 
@@ -219,7 +182,7 @@ function decisionGraph(): string {
   const nativeLanes: LaneOptions[] = []
   for (const tier of ["scout", "mechanic", "worker"] as const) {
     nativeLanes.push({ kind: "native", strength: level(opencode.efforts[tier]), tier, title: "OpenCode native tier agent", detail: `${opencode.model}#${opencode.efforts[tier]}` })
-    nativeLanes.push({ kind: "native", strength: level(COMMAND_EFFORT(tier)), tier, title: "Command Code native agent", detail: `${command[tier].name} · ${command[tier].model}, ${COMMAND_EFFORT(tier)}` })
+    nativeLanes.push({ kind: "native", strength: level(commandEffort(tier)), tier, title: "Command Code native agent", detail: `${command[tier].name} · ${command[tier].model}, ${commandEffort(tier)}` })
     const agyTier = agy.tiers[tier]
     nativeLanes.push({ kind: "native", strength: level(agyTier.effort), tier, title: "Antigravity native agent", detail: `${agyTier.name} → ${agyTier.model} · selector ${agyTier.selector}; verify actual model and effort` })
   }
@@ -227,54 +190,27 @@ function decisionGraph(): string {
   nativeLanes.push({ kind: "native", strength: 1, title: "Devin subagent_general", detail: "writes; no per-tier pin" })
   nativeLanes.push({ kind: "pilot", strength: 2, tier: "worker", title: "HY4-medium worker pilot", detail: `${command.pilot.name} · ${command.pilot.model}, ${command.pilot.effort} — explicit comparison only` })
 
-  const bridgeRoutes = POLICY.rootRoutes.worker.map((route, index) => ({
-    kind: index === 0 ? "primary" as const : "fallback" as const,
-    strength: level(route.effort),
-    title: `${executorLabel(route)} · ${modelOf(route)}`,
-    rank: index + 1,
-  }))
-
-  const quotaLanes = POLICY.nativeFallback.tiers.map(tier => ({
-    kind: "native" as const,
-    strength: level(POLICY.nativeFallback.claudeModels[tier as "scout"]),
-    title: "Claude Code native fallback",
-    detail: `${tier} → ${POLICY.nativeFallback.claudeModels[tier as "scout"]}`,
-  }))
+  const plan = POLICY.rootRoutes.worker.map(route => modelOf(route)).join(" → ")
+  const quota = POLICY.nativeFallback.tiers.map(tier => `${tier} ${claude[tier as "scout"]}`).join(" · ")
 
   return [
-    '<section id="decision">',
+    '<section>',
     '<h2>Decision graph</h2>',
-    '<div class="panel flow">',
-    '<div class="node">Parent agent wants a coding subagent</div>',
-    '<div class="arrow">↓</div>',
-    '<div class="node">Which tier?</div>',
-    '<div class="arrow">↓</div>',
-    '<div class="branches">',
-    '<div class="branch"><div class="branch-head">' + tierBadge("expert") + 'Expert — native in every harness</div><div class="lane-list">',
-    expertLanes.map(laneCard).join("\n"),
+    '<p>Parent agent wants a coding subagent → choose a tier.</p>',
+    '<div class="cols">',
+    '<div><h3>' + tierLabel("expert") + 'native in every harness</h3>',
+    expertLanes.map(laneRow).join("\n"),
+    '</div>',
+    '<div><h3>scout / mechanic / worker — top-level native parents</h3>',
+    '<p>OpenCode, Devin, Command Code and Antigravity parents never use the bridge.</p>',
+    nativeLanes.map(laneRow).join("\n"),
+    '<h3>otherwise → pi-subagent-bridge</h3>',
+    laneRow({ kind: "primary", strength: 3, title: "Admitted ordered plan per tier", detail: "command-code → ordered Pi fallback → codex; `worker` ladder: " + plan }),
+    '<p>First route available → admitted → watch / worker_status; parent verifies proof and diff. No route before edits → next route. No approved backend → tier-matched native subagents (Claude Code), then back to bridge when capacity recovers.</p>',
+    '<p>Quota fallback: ' + inline(quota) + '</p>',
     '</div></div>',
-    '<div class="branch"><div class="branch-head">scout / mechanic / worker <span class="branch-note">top-level native parents never use the bridge</span></div><div class="lane-list">',
-    nativeLanes.map(laneCard).join("\n"),
-    '</div><div class="flow" style="margin-top:12px">',
-    '<div class="node native">Otherwise → pi-subagent-bridge: worker_model_check → worker_start</div>',
-    '<div class="arrow">↓</div>',
-    '<div class="lane" style="' + laneStyle("primary", 3) + '"><div class="lane-top"><span class="kind">Bridge primary</span>' + rankBadge(1) + '</div><div class="lane-title">Admitted ordered plan per tier ' + meter() + '</div><div class="lane-detail">' + inline("command-code → ordered Pi fallback → codex; `worker` ladder: " + bridgeRoutes.map(route => modelOf(POLICY.rootRoutes.worker[route.rank! - 1]!)).join(" → ")) + '</div></div>',
-    '<div class="arrow">↓</div>',
-    '<div class="arrow">first route available? yes → admitted · no → next route, only before edits</div>',
-    '<div class="node native">watch / worker_status — parent verifies proof and diff independently</div>',
-    '<div class="arrow">↓</div>',
-    '<div class="branch-note">no approved backend (quota or exhausted) →</div>',
-    '<div class="lane" style="' + laneStyle("native", 3) + '"><div class="lane-top"><span class="kind">Native</span></div><div class="lane-title">Tier-matched native subagents (Claude Code) ' + meter() + '</div><div class="lane-detail">same brief, worktree, scope; independent parent review; return to bridge when capacity recovers</div></div>',
-    '</div></div>',
-    '</div></div>',
-    '<div class="muted" style="margin-top:10px">Quota fallback pins: ' + quotaLanes.map(lane => inline(lane.detail!)).join(" · ") + '</div>',
     '</section>',
   ].join("\n")
-}
-
-function COMMAND_EFFORT(tier: "scout" | "mechanic" | "worker"): string {
-  const pin = POLICY.commandNative[tier]
-  return "effort" in pin ? pin.effort : "medium"
 }
 
 function laneMap(): string {
@@ -282,7 +218,7 @@ function laneMap(): string {
   const agy = POLICY.antigravityDirect
   const command = POLICY.commandNative
   const claude = POLICY.nativeFallback.claudeModels
-  const head = ["Assignment", "OpenCode (top-level)", "Devin (top-level)", "Command Code (top-level)", "Codex", "Pi", "Claude Code", "Antigravity CLI"]
+  const head = ["Assignment", "OpenCode", "Devin", "Command Code", "Codex", "Pi", "Claude Code", "Antigravity"]
   const rows: string[] = []
 
   rows.push("<tr><th>expert</th>" + [
@@ -297,19 +233,20 @@ function laneMap(): string {
 
   for (const tier of ["scout", "mechanic", "worker"] as const) {
     const agyTier = agy.tiers[tier]
-    const bridgeDetail = `bridge → ${tier} ladder (see below)`
+    const bridge = `bridge → ${tier} ladder`
+    const bridgeStrength = level(POLICY.rootRoutes[tier][0]!.effort)
     rows.push(`<tr><th>${tier}</th>` + [
       mapCell({ kind: "native", strength: level(opencode.efforts[tier]), title: "native tier agent", detail: `${opencode.model}#${opencode.efforts[tier]}` }),
       mapCell({ kind: "native", strength: 1, title: "run_subagent", detail: tier === "scout" ? "subagent_explore (read-only)" : "subagent_general" }),
-      mapCell({ kind: "native", strength: level(COMMAND_EFFORT(tier)), title: command[tier].name, detail: `${command[tier].model}, ${COMMAND_EFFORT(tier)}` }),
-      mapCell({ kind: "primary", strength: level(POLICY.rootRoutes[tier][0]!.effort), title: "bridge", detail: bridgeDetail }),
-      mapCell({ kind: "primary", strength: level(POLICY.rootRoutes[tier][0]!.effort), title: "bridge", detail: bridgeDetail }),
-      mapCell({ kind: "primary", strength: level(POLICY.rootRoutes[tier][0]!.effort), title: "bridge", detail: bridgeDetail }),
+      mapCell({ kind: "native", strength: level(commandEffort(tier)), title: command[tier].name, detail: `${command[tier].model}, ${commandEffort(tier)}` }),
+      mapCell({ kind: "primary", strength: bridgeStrength, title: "bridge", detail: bridge }),
+      mapCell({ kind: "primary", strength: bridgeStrength, title: "bridge", detail: bridge }),
+      mapCell({ kind: "primary", strength: bridgeStrength, title: "bridge", detail: bridge }),
       mapCell({ kind: "native", strength: level(agyTier.effort), title: agyTier.name, detail: `${agyTier.model} · selector ${agyTier.selector}; verify` }),
     ].join("") + "</tr>")
   }
 
-  rows.push('<tr><th>quota exhaustion<br><span class="branch-note">scout / mechanic / worker</span></th>' + [
+  rows.push('<tr><th>quota exhaustion</th>' + [
     mapCell({ kind: "undefined", strength: 1, title: "never uses the bridge" }),
     mapCell({ kind: "undefined", strength: 1, title: "never uses the bridge" }),
     mapCell({ kind: "undefined", strength: 1, title: "never uses the bridge", detail: "do not silently switch native models" }),
@@ -320,7 +257,7 @@ function laneMap(): string {
   ].join("") + "</tr>")
 
   return [
-    '<section id="lane-map">',
+    '<section>',
     '<h2>Lane map</h2>',
     '<div class="table-scroll"><table><thead><tr>' + head.map(header => `<th>${header}</th>`).join("") + '</tr></thead><tbody>',
     rows.join("\n"),
@@ -331,25 +268,20 @@ function laneMap(): string {
 
 function bridgeRoutes(): string {
   const rows = POLICY.tiers.map(tier => {
-    const routes = POLICY.rootRoutes[tier]
-    const chain = routes.map((route, index) => {
+    const chain = POLICY.rootRoutes[tier].map((route, index) => {
       const kind = index === 0 ? "primary" : "fallback"
-      const strength = level(route.effort)
-      return [
-        `<div class="route" style="${laneStyle(kind, strength)}">`,
-        `<div class="lane-top">${tierBadge(tier)}<span class="kind">${LANES[kind].label}</span>${rankBadge(index + 1)}</div>`,
-        `<div class="lane-title">${esc(executorLabel(route))} · ${esc(modelOf(route))} ${meter()}</div>`,
-        `<div class="lane-detail">effort ${esc(route.effort)}</div>`,
-        "</div>",
-      ].join("\n")
-    }).join('<div class="chain-arrow">→</div>')
-    return `<div class="tier-row"><h3>${tier}</h3><div class="chain">${chain}</div></div>`
+      return `<div class="route" style="${laneStyle(kind, level(route.effort))}">` +
+        `${rankLabel(index + 1)}<span class="kind">${LANES[kind].label}</span>${tierLabel(tier)}` +
+        `<div><strong>${esc(executorLabel(route))} · ${esc(modelOf(route))}</strong></div>` +
+        `<div class="detail">effort ${esc(route.effort)}</div></div>`
+    }).join("<span>→</span>")
+    return `<h3>${tier}</h3><div class="chain">${chain}</div>`
   }).join("\n")
   return [
-    '<section id="bridge-routes">',
+    '<section>',
     '<h2>The bridge, per tier</h2>',
-    '<div class="panel">' + rows + '</div>',
-    '<p class="muted">A task failure, rejected acceptance check or scope change is not a provider failure: an admitted route is never replaced after edits.</p>',
+    rows,
+    '<p>A task failure, rejected acceptance check or scope change is not a provider failure: an admitted route is never replaced after edits.</p>',
     '</section>',
   ].join("\n")
 }
@@ -369,9 +301,9 @@ function hardRules(): string {
     `Ban on delegation of ${banned} families in every harness, including every effort variant.`,
     "The parent owns scope, worktrees, verification and integration in every harness. Agent output is a claim until the parent checks the diff and the acceptance proof.",
   ]
-  return '<section id="hard-rules"><h2>Hard rules</h2><div class="panel"><ol class="rules">' +
+  return '<section><h2>Hard rules</h2><ol class="rules">' +
     rules.map(rule => `<li>${inline(rule)}</li>`).join("\n") +
-    '</ol></div></section>'
+    '</ol></section>'
 }
 
 function html(): string {
@@ -387,12 +319,12 @@ function html(): string {
     "</head>",
     "<body><main>",
     NOTICE,
-    '<header class="hero">',
+    '<header>',
     "<h1>Subagent architecture</h1>",
     `<p>Decision graph for delegating a coding subagent. Tiers: <code>scout</code> (read-only: no <code>bash</code>, <code>edit</code> or <code>write</code>), <code>mechanic</code>, <code>worker</code>, <code>expert</code>. There is no <code>god</code> tier, and the ${banned} families are prohibited everywhere, including every effort variant.</p>`,
-    '<p>Color encodes lane kind; shade and the bar encode model effort; the <code>P</code> badge encodes route rank. Expert is native everywhere; the bridge serves only <code>scout</code>/<code>mechanic</code>/<code>worker</code> in harnesses without a native top-level exception.</p>',
-    "</header>",
+    '<p>Expert is native everywhere; the bridge serves only <code>scout</code>/<code>mechanic</code>/<code>worker</code> in harnesses without a native top-level exception.</p>',
     legend(),
+    '</header>',
     decisionGraph(),
     laneMap(),
     bridgeRoutes(),
