@@ -23,10 +23,14 @@ EVENTS = {"claude": ("SessionStart",), "codex": ("SessionStart", "SubagentStart"
 MODELS = {"claude": "claude-opus-5-5", "codex": "gpt-6.2-sol"}
 
 
-def run_hook(harness: str, payload: object, script: Path = HOOK) -> subprocess.CompletedProcess[str]:
+def run_hook(harness: str, payload: object, script: Path = HOOK,
+             delegation: str | None = None) -> subprocess.CompletedProcess[str]:
+    env = {key: value for key, value in os.environ.items() if key != "USR_DELEGATION"}
+    if delegation is not None:
+        env["USR_DELEGATION"] = delegation
     return subprocess.run(
         [sys.executable, "-I", "-S", str(script), harness],
-        input=json.dumps(payload), text=True, capture_output=True, check=False, timeout=10,
+        input=json.dumps(payload), text=True, capture_output=True, check=False, timeout=10, env=env,
     )
 
 
@@ -58,6 +62,19 @@ class InstructionTests(unittest.TestCase):
                     with self.subTest(harness=harness, event=event, model=model):
                         self.assert_contract(run_hook(harness, {"hook_event_name": event, "model": model}), event, NORMAL)
                 self.assert_contract(run_hook(harness, {"hook_event_name": event}), event, NORMAL)
+
+    def test_native_delegation_switch_appends_one_notice_and_other_values_change_nothing(self):
+        for harness, model in MODELS.items():
+            event = EVENTS[harness][0]
+            payload = {"hook_event_name": event, "model": model}
+            with self.subTest(harness=harness):
+                native = run_hook(harness, payload, delegation="native")
+                self.assertEqual((native.returncode, native.stderr), (0, ""))
+                context = json.loads(native.stdout)["hookSpecificOutput"]["additionalContext"]
+                self.assertTrue(context.startswith(LEAN.read_text()))
+                self.assertIn("`USR_DELEGATION=native`", context[len(LEAN.read_text()):])
+                for other in ("", "bridge", "NATIVE"):
+                    self.assert_contract(run_hook(harness, payload, delegation=other), event, LEAN)
 
     def test_context_rebuilds_reload_the_selected_contract_without_session_state(self):
         for harness, model in MODELS.items():

@@ -140,6 +140,7 @@ class Installer:
         self.env = dict(os.environ if env is None else env)
         self.env.setdefault("HOME", str(self.home))
         self.os_name, self.arch = _uname() if os_name is None else (os_name, arch or _uname()[1])
+        self.musl_loader = musl_loader_present(self.os_name, self.arch)
         self.data_home = Path(self.env.get("XDG_DATA_HOME") or self.home / ".local/share")
         self.state_home = Path(self.env.get("XDG_STATE_HOME") or self.home / ".local/state")
         self.dest = self.home / ".local/bin"
@@ -1104,6 +1105,11 @@ class Installer:
         self.changed = True
         self.ok(f"Installed {self.dest}/{tool}")
 
+    def require_musl_loader(self, tool: str) -> None:
+        if not self.musl_loader:
+            self.skip(tool, f"its Linux build links musl, and /lib/ld-musl-{self.arch}.so.1 is missing; "
+                            "install the distribution's musl package (1.2.5 or newer; python-build#19)")
+
     def install_python3(self) -> None:
         triples = {("darwin", "aarch64"): "aarch64-apple-darwin",
                    ("linux", "x86_64"): "x86_64-unknown-linux-musl",
@@ -1111,6 +1117,7 @@ class Installer:
         if (self.os_name, self.arch) not in triples:
             self.skip("python3", f"no python-build release for {self.os_name}/{self.arch}")
             return
+        self.require_musl_loader("python3")
         triple = triples[(self.os_name, self.arch)]
         found = self.build_release(PYTHON_BUILD_REPO, "cpython", triple)
         if found is None:
@@ -1701,6 +1708,11 @@ class Installer:
                 archive_path.unlink(missing_ok=True)
             if not (staged_bundle / "bin/node").is_file() or not (staged_bundle / "bin/npm").is_file():
                 self.skip("nodejs", "Node.js archive is missing node or npm")
+            node_probe = self.run([str(staged_bundle / "bin/node"), "--version"], capture=True)
+            if node_probe.returncode != 0:
+                detail = (node_probe.stderr or "").strip().splitlines()
+                self.skip("nodejs", "Node.js does not start" + (f": {detail[-1]}" if detail else "")
+                          + ("; install libatomic1" if "libatomic" in (node_probe.stderr or "") else ""))
             npm_latest = self.run(
                 [str(staged_bundle / "bin/npm"), "--version"],
                 capture=True, extra_env={"PATH": str(staged_bundle / "bin") + os.pathsep + self._path}
@@ -2525,6 +2537,7 @@ class Installer:
 
     def install_ffmpeg(self) -> None:
         triple = self.ffmpeg_triple("ffmpeg")
+        self.require_musl_loader("ffmpeg")
         release = self.build_release(FFMPEG_REPO, "ffmpeg-runtime", triple)
         if release is None:
             self.unchecked("ffmpeg", "no release found")
@@ -3286,7 +3299,16 @@ class Installer:
                     self.warn(f"Its target is also untracked: {target}")
 
 
-def default_tools(os_name: str, arch: str, profile: str, server_tools: Path | None = None) -> list[str]:
+MUSL_DYNAMIC_TOOLS = ("python3", "ffmpeg", "player")
+
+
+def musl_loader_present(os_name: str, arch: str, root: Path = Path("/")) -> bool:
+    """Report whether musl-linked python-build and FFmpeg runtime binaries can start on this host."""
+    return os_name != "linux" or (root / f"lib/ld-musl-{arch}.so.1").exists()
+
+
+def default_tools(os_name: str, arch: str, profile: str, server_tools: Path | None = None,
+                  *, musl_loader: bool | None = None) -> list[str]:
     tools = ["fd", "rg"]
     if not (os_name == "linux" and arch == "aarch64"):
         tools.append("jaq")
@@ -3307,6 +3329,8 @@ def default_tools(os_name: str, arch: str, profile: str, server_tools: Path | No
             raise InstallError(f"server tool profile is missing: {server_tools}")
         allowed = set(server_tools.read_text().split())
         tools = [tool for tool in tools if tool in allowed]
+    if not (musl_loader_present(os_name, arch) if musl_loader is None else musl_loader):
+        tools = [tool for tool in tools if tool not in MUSL_DYNAMIC_TOOLS]
     return tools
 
 

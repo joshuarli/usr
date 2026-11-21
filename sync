@@ -154,7 +154,7 @@ case $(uname -s) in
     ;;
 esac
 [ -n "$python" ] && [ -x "$python" ] || {
-  printf '%s\n' 'sync: no working Python 3.9+ that can import tools/sync/main.py found. macOS and Alpine bootstrap the pinned python-build automatically, but it needs a host OS at least as new as the one it was built for; otherwise provide an existing Python 3.9+.' >&2
+  printf '%s\n' 'sync: no working Python 3.9+ that can import tools/sync/main.py found. macOS and Alpine bootstrap the pinned python-build automatically, but it needs a host OS at least as new as the one it was built for; otherwise provide an existing Python 3.9+ (Debian or Ubuntu: apt-get install python3).' >&2
   exit 1
 }
 exec "$python" -I "$root/tools/sync/main.py" "$@"

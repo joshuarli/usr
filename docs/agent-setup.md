@@ -29,6 +29,8 @@ Proactive cleanup uses [disk-pressure events](agent-disk-pressure.md) and runs o
 | Command Code (`cmd`) | `~/.commandcode/AGENTS.md` | `~/.agents/skills/` |
 | Vercel fx (opt-in) | `~/.fx/AGENTS.md` | `~/.agents/skills/` |
 
+**Native-only hosts:** the Pi bridge stays the default. A host or session without bridge providers, such as a cloud agent environment, sets `USR_DELEGATION=native`; the Claude and Codex startup hook then tells the session to use the tier-matched native subagents in `orchestrate`, and the generated policy treats that switch like bridge exhaustion. Any other value, or none, keeps the bridge.
+
 **Routing coverage:** both instruction profiles and all harnesses share [orchestrate](../dotfiles/base/.agents/skills/orchestrate/SKILL.md). OpenCode, Devin, top-level Command Code and Antigravity CLI delegate only through their native subagents; other harnesses use the shared bridge except for the documented lower-tier native quota and host-access exceptions. This is instruction policy, not an interception hook. `decide` is advisory only.
 
 <!-- policy:begin routing-summary -->

@@ -282,7 +282,8 @@ def kache_status(ctx: Context) -> Probe:
 
 def kache_apply(ctx: Context) -> None:
     if ctx.platform == "linux" and not (shutil.which("rustup") or os.access(ctx.home / ".cargo/bin/rustup", os.X_OK)):
-        raise RuntimeError("rustup is required for kache; install it before enabling this task")
+        raise RuntimeError("rustup is required for kache, and ~/.cargo/config.toml runs cargo through kache; "
+                           "install rustup, then rerun sync")
     binary = kache_install_path(ctx)
     if "KACHE" in ctx.env and Path(ctx.env["KACHE"]) != binary:
         raise RuntimeError("KACHE override differs from the managed kache install path")

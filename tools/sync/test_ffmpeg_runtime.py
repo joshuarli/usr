@@ -224,8 +224,10 @@ class RuntimeFixture(unittest.TestCase):
                 routes[f"{base}/{spec.manifest_name()}"] = json.dumps(spec.release_manifest).encode()
         env = {"HOME": str(self.home), "PATH": f"{self.bin}:/usr/bin:/bin", "TMPDIR": str(self.root),
                "MOCK_CODESIGN_STATUS": self.codesign_status}
-        return FakeInstaller(self.home, os_name=os_name, arch="aarch64" if os_name == "darwin" else "x86_64",
+        inst = FakeInstaller(self.home, os_name=os_name, arch="aarch64" if os_name == "darwin" else "x86_64",
                              env=env, routes=routes)
+        inst.musl_loader = True
+        return inst
 
     def release(self, spec):
         return self.home / ".local/share/ffmpeg/releases" / f"{spec.tag}-{spec.triple}-runtime"
