@@ -21,7 +21,7 @@ Each path belongs to one sync layer (see [sync](docs/sync.md)). Do not `cat` or 
 | Model policy ownership and generation | [tools/policy/README.md](tools/policy/README.md) |
 | Markdown audit | [tools/mdtool/README.md](tools/mdtool/README.md) |
 | macOS process sandbox | [docs/sbx-spec.md](docs/sbx-spec.md) |
-| Subagent architecture | [docs/subagents.md](docs/subagents.md) |
+| Subagent architecture | [docs/subagents.html](docs/subagents.html) |
 | Disk pressure, cleanup and worktree CoW | [docs/agent-disk-pressure.md](docs/agent-disk-pressure.md), [docs/worktree-cow.md](docs/worktree-cow.md) |
 | Host CPU budget for heavy jobs | [docs/cpu-slot.md](docs/cpu-slot.md) |
 | Runtime independence and FX migration plan | [docs/CAMPAIGN-RUNTIME-INDEPENDENCE-FX.md](docs/CAMPAIGN-RUNTIME-INDEPENDENCE-FX.md) |

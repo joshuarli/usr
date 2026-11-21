@@ -32,9 +32,12 @@ Antigravity native agent tier selectors plus synchronized global instructions.
 `policy` prints that JSON without reading credentials or probing providers.
 Live availability belongs to `worker_model_check`.
 The installed `pi-subagent-bridge policy` command exposes the same pure export.
-`subagent-visualization` renders [`docs/subagents.md`](../../docs/subagents.md), the
-markdown decision graph of the delegation architecture, from the same typed
-export; `check-generated` verifies it stays current.
+`subagent-visualization` renders [`docs/subagents.html`](../../docs/subagents.html),
+a self-contained HTML decision graph of the delegation architecture from the
+same typed export. Lane hue marks the lane kind (native, bridge primary,
+fallback, undefined or opt-in pilot), shade and bar mark model effort, rank
+badges mark the fallback order, and tier pills mark the assignment tier.
+`check-generated` verifies it stays current.
 
 Edit the policy, run `make generate`, and review the generated diff. Session
 defaults, profile descriptions, unrelated harness settings and authored

@@ -1,0 +1,288 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Subagent architecture</title>
+<style>
+:root{--bg:#f5f7fb;--ink:#172033;--muted:#56637a;--line:#dae1ed;--card:#fff}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+main{max-width:1320px;margin:0 auto;padding:28px 24px 64px}
+.hero{background:linear-gradient(135deg,#101f3c 0%,#1d3f7b 60%,#2857a0 100%);color:#fff;border-radius:18px;padding:28px 32px;box-shadow:0 12px 32px #10204a26}
+.hero h1{margin:0 0 6px;font-size:30px;letter-spacing:-.02em}
+.hero p{margin:5px 0;max-width:105ch;color:#dbe6ff}
+code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.88em;background:#edf1f8;border-radius:5px;padding:1px 5px;color:#1e3a6d}
+.hero code{background:#ffffff24;color:#fff}
+section{margin-top:26px}
+h2{font-size:20px;margin:0 0 12px;display:flex;align-items:center;gap:10px}
+h2::before{content:"";width:6px;height:22px;border-radius:3px;background:#2f6bd8}
+h3{margin:0;font-size:15px}
+.panel{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px 20px}
+.muted{color:var(--muted)}
+.legend-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:14px}
+.legend-item{background:#f9fbff;border:1px solid var(--line);border-radius:10px;padding:12px}
+.legend-item strong{display:block;margin-bottom:7px;font-size:13px}
+.swatch{width:18px;height:18px;border-radius:5px;border-left:6px solid var(--accent);background:var(--fill);display:inline-block;vertical-align:middle;margin-right:8px}
+.scale{display:flex;gap:4px;align-items:flex-end;margin-top:4px}
+.scale-step{width:38px;text-align:center}
+.scale-step i{height:14px;border-radius:3px;display:block}
+.scale-step em{font-size:10px;font-style:normal;color:var(--muted)}
+.flow{display:flex;flex-direction:column;align-items:center;gap:9px}
+.node{border-radius:10px;padding:11px 18px;font-weight:650;text-align:center;background:#eef3ff;border:1px solid #b6ccfa;color:#1b3f8c}
+.node.native{background:#eaf7f1;border-color:#a2ddc4;color:#0c5f46}
+.arrow{color:#98a5ba;font-weight:800;line-height:1}
+.branches{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:16px;width:100%;margin-top:8px}
+.branch{background:#f9fbff;border:1px solid var(--line);border-radius:12px;padding:14px}
+.branch-head{font-weight:700;margin-bottom:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.branch-note{font-weight:400;font-size:12px;color:var(--muted)}
+.lane-list{display:grid;grid-template-columns:repeat(auto-fit,minmax(205px,1fr));gap:9px}
+.lane{background:var(--fill);border:1px solid #0a1f3d12;border-left:6px solid var(--accent);border-radius:10px;padding:10px 12px}
+.lane-top,.cell-top{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:5px}
+.kind{font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--accent);font-weight:800}
+.rank{font-size:10px;font-weight:800;border-radius:999px;padding:1px 7px}
+.rank-primary{background:var(--accent);color:#fff}
+.rank-fallback{background:#ffffffaa;border:1px solid var(--accent);color:var(--accent)}
+.tier{font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.04em;color:#fff;background:var(--tone);border-radius:999px;padding:1px 7px}
+.lane-title,.cell-title{font-weight:650;font-size:13.5px}
+.lane-detail,.cell-detail{font-size:12px;color:#334059;margin-top:3px;word-break:break-word}
+.lane-note{font-size:11.5px;color:var(--muted);margin-top:4px;font-style:italic}
+.meter{display:inline-block;width:44px;height:6px;border-radius:3px;background:#ffffffb8;overflow:hidden;vertical-align:middle;margin-left:4px}
+.meter::after{content:"";display:block;height:100%;width:var(--pct);background:var(--accent)}
+.table-scroll{overflow-x:auto;border:1px solid var(--line);border-radius:12px;background:#fff}
+table{border-collapse:collapse;width:100%;min-width:1180px}
+th,td{border-bottom:1px solid var(--line);padding:10px 12px;text-align:left;vertical-align:top}
+thead th{background:#eef3fb;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:#40506b}
+tbody th{background:#f7f9fd;font-size:13px;width:120px}
+.cell{background:var(--fill);border-left:5px solid var(--accent);border-radius:8px;min-width:155px}
+.tier-row{display:grid;grid-template-columns:118px 1fr;gap:12px;align-items:start;padding:13px 0;border-top:1px solid var(--line)}
+.tier-row:first-of-type{border-top:0}
+.chain{display:flex;flex-wrap:wrap;align-items:stretch;gap:8px}
+.chain-arrow{align-self:center;color:#9aa7bb;font-weight:800}
+.route{flex:1 1 175px;min-width:165px;background:var(--fill);border:1px solid #0a1f3d12;border-left:6px solid var(--accent);border-radius:10px;padding:9px 11px}
+.route .lane-title{font-size:12.5px}
+.rules li{margin:8px 0;padding-left:2px}
+footer{margin-top:26px;font-size:12.5px;color:var(--muted)}
+a{color:#2157bd}
+@media (max-width:720px){main{padding:16px 12px 40px}.hero{padding:20px}.tier-row{grid-template-columns:1fr}}
+</style>
+</head>
+<body><main>
+<!-- Generated from tools/policy/subagent-visualization.ts; run make subagent-visualization. -->
+<header class="hero">
+<h1>Subagent architecture</h1>
+<p>Decision graph for delegating a coding subagent. Tiers: <code>scout</code> (read-only: no <code>bash</code>, <code>edit</code> or <code>write</code>), <code>mechanic</code>, <code>worker</code>, <code>expert</code>. There is no <code>god</code> tier, and the <code>gemini-3.8</code> / <code>gemini-4-argon</code> / <code>gemini-4-carbon</code> / <code>gpt-6-astra</code> / <code>gpt-6.1-astra</code> / <code>gpt-6.2-astra</code> / <code>claude-fable</code> / <code>fable</code> families are prohibited everywhere, including every effort variant.</p>
+<p>Color encodes lane kind; shade and the bar encode model effort; the <code>P</code> badge encodes route rank. Expert is native everywhere; the bridge serves only <code>scout</code>/<code>mechanic</code>/<code>worker</code> in harnesses without a native top-level exception.</p>
+</header>
+<section id="legend">
+<h2>Reading the lanes</h2>
+<div class="panel"><div class="legend-grid">
+<div class="legend-item"><strong><span class="swatch" style="--accent:#0e7a58;--fill:#a2ddc4"></span>Native</strong><span class="muted">Lane kind — the hue and left border tell you where the assignment runs.</span></div>
+<div class="legend-item"><strong><span class="swatch" style="--accent:#2459c9;--fill:#b6ccfa"></span>Bridge primary</strong><span class="muted">Lane kind — the hue and left border tell you where the assignment runs.</span></div>
+<div class="legend-item"><strong><span class="swatch" style="--accent:#b56a0a;--fill:#ffd49a"></span>Bridge fallback</strong><span class="muted">Lane kind — the hue and left border tell you where the assignment runs.</span></div>
+<div class="legend-item"><strong><span class="swatch" style="--accent:#8a97a8;--fill:#d9dfe8"></span>Undefined</strong><span class="muted">Lane kind — the hue and left border tell you where the assignment runs.</span></div>
+<div class="legend-item"><strong><span class="swatch" style="--accent:#7a3bb5;--fill:#d4b7ee"></span>Pilot / opt-in</strong><span class="muted">Lane kind — the hue and left border tell you where the assignment runs.</span></div>
+<div class="legend-item"><strong>Strength / model effort</strong><span class="muted">Fill shade and the small bar grow with model effort.</span><div class="scale"><span class="scale-step"><i style="background:#eef3ff"></i><em>low</em></span><span class="scale-step"><i style="background:#dbe6ff"></i><em>medium</em></span><span class="scale-step"><i style="background:#b6ccfa"></i><em>high</em></span><span class="scale-step"><i style="background:#89acf4"></i><em>xhigh</em></span><span class="scale-step"><i style="background:#5590ea"></i><em>max</em></span></div></div>
+<div class="legend-item"><strong>Route rank</strong><span class="muted"><span class="rank rank-primary">P1</span> is the primary route; <span class="rank rank-fallback">P2</span> and later are ordered fallbacks, tried only before edits.</span></div>
+<div class="legend-item"><strong>Tier badges</strong><span class="muted">scout (read-only) → mechanic → worker → expert. Expert is terminal and native everywhere; no `god` tier exists.</span></div>
+</div></div>
+</section>
+<section id="decision">
+<h2>Decision graph</h2>
+<div class="panel flow">
+<div class="node">Parent agent wants a coding subagent</div>
+<div class="arrow">↓</div>
+<div class="node">Which tier?</div>
+<div class="arrow">↓</div>
+<div class="branches">
+<div class="branch"><div class="branch-head"><span class="tier" style="--tone:#8b32c2">expert</span>Expert — native in every harness</div><div class="lane-list">
+<div class="lane" style="--accent:#0e7a58;--fill:#a2ddc4;--pct:60%">
+<div class="lane-top"><span class="tier" style="--tone:#8b32c2">expert</span><span class="kind">Native</span></div>
+<div class="lane-title">OpenCode native expert <span class="meter" aria-hidden="true"></span></div>
+<div class="lane-detail">opencode/hy4-flash-free · effort high</div>
+</div>
+<div class="lane" style="--accent:#0e7a58;--fill:#a2ddc4;--pct:60%">
+<div class="lane-top"><span class="tier" style="--tone:#8b32c2">expert</span><span class="kind">Native</span></div>
+<div class="lane-title">Antigravity native expert <span class="meter" aria-hidden="true"></span></div>
+<div class="lane-detail">usr-expert · gemini-4-neon-high · selector pro</div>
+</div>
+<div class="lane" style="--accent:#0e7a58;--fill:#a2ddc4;--pct:60%">
+<div class="lane-top"><span class="tier" style="--tone:#8b32c2">expert</span><span class="kind">Native</span></div>
+<div class="lane-title">Command Code native expert <span class="meter" aria-hidden="true"></span></div>
+<div class="lane-detail">usr-expert · tencent/hy4, high</div>
+</div>
+<div class="lane" style="--accent:#0e7a58;--fill:#eaf7f1;--pct:20%">
+<div class="lane-top"><span class="tier" style="--tone:#8b32c2">expert</span><span class="kind">Native</span></div>
+<div class="lane-title">Devin native run_subagent <span class="meter" aria-hidden="true"></span></div>
+<div class="lane-detail">subagent_general or subagent_explore · no per-tier pin</div>
+</div>
+<div class="lane" style="--accent:#0e7a58;--fill:#eaf7f1;--pct:20%">
+<div class="lane-top"><span class="tier" style="--tone:#8b32c2">expert</span><span class="kind">Native</span></div>
+<div class="lane-title">Codex native subagent <span class="meter" aria-hidden="true"></span></div>
+<div class="lane-detail">session-config model · no per-tier pin</div>
+</div>
+<div class="lane" style="--accent:#0e7a58;--fill:#39ad84;--pct:100%">
+<div class="lane-top"><span class="tier" style="--tone:#8b32c2">expert</span><span class="kind">Native</span></div>
+<div class="lane-title">Pi native expert profile <span class="meter" aria-hidden="true"></span></div>
+<div class="lane-detail">opencode-go/deepseek-v4.1-flash, max</div>
+</div>
+<div class="lane" style="--accent:#0e7a58;--fill:#6cc6a3;--pct:80%">
+<div class="lane-top"><span class="tier" style="--tone:#8b32c2">expert</span><span class="kind">Native</span></div>
+<div class="lane-title">Claude Code native subagent <span class="meter" aria-hidden="true"></span></div>
+<div class="lane-detail">opus, xhigh effort</div>
+</div>
+<div class="lane" style="--accent:#8a97a8;--fill:#f5f6f8;--pct:20%">
+<div class="lane-top"><span class="kind">Undefined</span></div>
+<div class="lane-title">Any other harness <span class="meter" aria-hidden="true"></span></div>
+<div class="lane-detail">No defined lane in this contract — report to the owner before delegating</div>
+</div>
+</div></div>
+<div class="branch"><div class="branch-head">scout / mechanic / worker <span class="branch-note">top-level native parents never use the bridge</span></div><div class="lane-list">
+<div class="lane" style="--accent:#0e7a58;--fill:#a2ddc4;--pct:60%">
+<div class="lane-top"><span class="tier" style="--tone:#0d8f86">scout</span><span class="kind">Native</span></div>
+<div class="lane-title">OpenCode native tier agent <span class="meter" aria-hidden="true"></span></div>
+<div class="lane-detail">opencode/hy4-flash-free#high</div>
+</div>
+<div class="lane" style="--accent:#0e7a58;--fill:#cceede;--pct:40%">
+<div class="lane-top"><span class="tier" style="--tone:#0d8f86">scout</span><span class="kind">Native</span></div>
+<div class="lane-title">Command Code native agent <span class="meter" aria-hidden="true"></span></div>
+<div class="lane-detail">usr-scout · thinkingmachines/inkling-2-small:free, medium</div>
+</div>
+<div class="lane" style="--accent:#0e7a58;--fill:#eaf7f1;--pct:20%">
+<div class="lane-top"><span class="tier" style="--tone:#0d8f86">scout</span><span class="kind">Native</span></div>
+<div class="lane-title">Antigravity native agent <span class="meter" aria-hidden="true"></span></div>
+<div class="lane-detail">usr-scout → gemini-4-hydrogen-low · selector flash; verify actual model and effort</div>
+</div>
+<div class="lane" style="--accent:#0e7a58;--fill:#a2ddc4;--pct:60%">
+<div class="lane-top"><span class="tier" style="--tone:#4f46c9">mechanic</span><span class="kind">Native</span></div>
+<div class="lane-title">OpenCode native tier agent <span class="meter" aria-hidden="true"></span></div>
+<div class="lane-detail">opencode/hy4-flash-free#high</div>
+</div>
+<div class="lane" style="--accent:#0e7a58;--fill:#a2ddc4;--pct:60%">
+<div class="lane-top"><span class="tier" style="--tone:#4f46c9">mechanic</span><span class="kind">Native</span></div>
+<div class="lane-title">Command Code native agent <span class="meter" aria-hidden="true"></span></div>
+<div class="lane-detail">usr-mechanic · tencent/hy4-flash, high</div>
+</div>
+<div class="lane" style="--accent:#0e7a58;--fill:#eaf7f1;--pct:20%">
+<div class="lane-top"><span class="tier" style="--tone:#4f46c9">mechanic</span><span class="kind">Native</span></div>
+<div class="lane-title">Antigravity native agent <span class="meter" aria-hidden="true"></span></div>
+<div class="lane-detail">usr-mechanic → gemini-4-hydrogen-low · selector flash; verify actual model and effort</div>
+</div>
+<div class="lane" style="--accent:#0e7a58;--fill:#a2ddc4;--pct:60%">
+<div class="lane-top"><span class="tier" style="--tone:#d25a12">worker</span><span class="kind">Native</span></div>
+<div class="lane-title">OpenCode native tier agent <span class="meter" aria-hidden="true"></span></div>
+<div class="lane-detail">opencode/hy4-flash-free#high</div>
+</div>
+<div class="lane" style="--accent:#0e7a58;--fill:#a2ddc4;--pct:60%">
+<div class="lane-top"><span class="tier" style="--tone:#d25a12">worker</span><span class="kind">Native</span></div>
+<div class="lane-title">Command Code native agent <span class="meter" aria-hidden="true"></span></div>
+<div class="lane-detail">usr-worker · deepseek/deepseek-v4.1-flash, high</div>
+</div>
+<div class="lane" style="--accent:#0e7a58;--fill:#a2ddc4;--pct:60%">
+<div class="lane-top"><span class="tier" style="--tone:#d25a12">worker</span><span class="kind">Native</span></div>
+<div class="lane-title">Antigravity native agent <span class="meter" aria-hidden="true"></span></div>
+<div class="lane-detail">usr-worker → gemini-4-hydrogen-high · selector flash; verify actual model and effort</div>
+</div>
+<div class="lane" style="--accent:#0e7a58;--fill:#eaf7f1;--pct:20%">
+<div class="lane-top"><span class="tier" style="--tone:#0d8f86">scout</span><span class="kind">Native</span></div>
+<div class="lane-title">Devin subagent_explore <span class="meter" aria-hidden="true"></span></div>
+<div class="lane-detail">read-only inventory</div>
+</div>
+<div class="lane" style="--accent:#0e7a58;--fill:#eaf7f1;--pct:20%">
+<div class="lane-top"><span class="kind">Native</span></div>
+<div class="lane-title">Devin subagent_general <span class="meter" aria-hidden="true"></span></div>
+<div class="lane-detail">writes; no per-tier pin</div>
+</div>
+<div class="lane" style="--accent:#7a3bb5;--fill:#e9daf8;--pct:40%">
+<div class="lane-top"><span class="tier" style="--tone:#d25a12">worker</span><span class="kind">Pilot / opt-in</span></div>
+<div class="lane-title">HY4-medium worker pilot <span class="meter" aria-hidden="true"></span></div>
+<div class="lane-detail">usr-worker-hy4 · tencent/hy4, medium — explicit comparison only</div>
+</div>
+</div><div class="flow" style="margin-top:12px">
+<div class="node native">Otherwise → pi-subagent-bridge: worker_model_check → worker_start</div>
+<div class="arrow">↓</div>
+<div class="lane" style="--accent:#2459c9;--fill:#b6ccfa;--pct:60%"><div class="lane-top"><span class="kind">Bridge primary</span><span class="rank rank-primary">P1</span></div><div class="lane-title">Admitted ordered plan per tier <span class="meter" aria-hidden="true"></span></div><div class="lane-detail">command-code → ordered Pi fallback → codex; <code>worker</code> ladder: deepseek/deepseek-v4.1-flash → muse-sdk/muse-spark-1.3 → opencode-go/deepseek-v4.1-flash → devin/swe-2-flash → gpt-6.1-terra</div></div>
+<div class="arrow">↓</div>
+<div class="arrow">first route available? yes → admitted · no → next route, only before edits</div>
+<div class="node native">watch / worker_status — parent verifies proof and diff independently</div>
+<div class="arrow">↓</div>
+<div class="branch-note">no approved backend (quota or exhausted) →</div>
+<div class="lane" style="--accent:#0e7a58;--fill:#a2ddc4;--pct:60%"><div class="lane-top"><span class="kind">Native</span></div><div class="lane-title">Tier-matched native subagents (Claude Code) <span class="meter" aria-hidden="true"></span></div><div class="lane-detail">same brief, worktree, scope; independent parent review; return to bridge when capacity recovers</div></div>
+</div></div>
+</div></div>
+<div class="muted" style="margin-top:10px">Quota fallback pins: scout → haiku · mechanic → sonnet · worker → sonnet</div>
+</section>
+<section id="lane-map">
+<h2>Lane map</h2>
+<div class="table-scroll"><table><thead><tr><th>Assignment</th><th>OpenCode (top-level)</th><th>Devin (top-level)</th><th>Command Code (top-level)</th><th>Codex</th><th>Pi</th><th>Claude Code</th><th>Antigravity CLI</th></tr></thead><tbody>
+<tr><th>expert</th><td class="cell" style="--accent:#0e7a58;--fill:#a2ddc4;--pct:60%"><div class="cell-top"><span class="kind">Native</span></div><div class="cell-title">native expert <span class="meter" aria-hidden="true"></span></div><div class="cell-detail">opencode/hy4-flash-free#high</div></td><td class="cell" style="--accent:#0e7a58;--fill:#eaf7f1;--pct:20%"><div class="cell-top"><span class="kind">Native</span></div><div class="cell-title">run_subagent <span class="meter" aria-hidden="true"></span></div><div class="cell-detail">unpinned</div></td><td class="cell" style="--accent:#0e7a58;--fill:#a2ddc4;--pct:60%"><div class="cell-top"><span class="kind">Native</span></div><div class="cell-title">usr-expert <span class="meter" aria-hidden="true"></span></div><div class="cell-detail">tencent/hy4, high</div></td><td class="cell" style="--accent:#0e7a58;--fill:#eaf7f1;--pct:20%"><div class="cell-top"><span class="kind">Native</span></div><div class="cell-title">native subagent <span class="meter" aria-hidden="true"></span></div><div class="cell-detail">unpinned</div></td><td class="cell" style="--accent:#0e7a58;--fill:#39ad84;--pct:100%"><div class="cell-top"><span class="kind">Native</span></div><div class="cell-title">native expert profile <span class="meter" aria-hidden="true"></span></div><div class="cell-detail">opencode-go/deepseek-v4.1-flash, max</div></td><td class="cell" style="--accent:#0e7a58;--fill:#6cc6a3;--pct:80%"><div class="cell-top"><span class="kind">Native</span></div><div class="cell-title">native subagent <span class="meter" aria-hidden="true"></span></div><div class="cell-detail">opus, xhigh effort</div></td><td class="cell" style="--accent:#0e7a58;--fill:#a2ddc4;--pct:60%"><div class="cell-top"><span class="kind">Native</span></div><div class="cell-title">usr-expert <span class="meter" aria-hidden="true"></span></div><div class="cell-detail">gemini-4-neon-high</div></td></tr>
+<tr><th>scout</th><td class="cell" style="--accent:#0e7a58;--fill:#a2ddc4;--pct:60%"><div class="cell-top"><span class="kind">Native</span></div><div class="cell-title">native tier agent <span class="meter" aria-hidden="true"></span></div><div class="cell-detail">opencode/hy4-flash-free#high</div></td><td class="cell" style="--accent:#0e7a58;--fill:#eaf7f1;--pct:20%"><div class="cell-top"><span class="kind">Native</span></div><div class="cell-title">run_subagent <span class="meter" aria-hidden="true"></span></div><div class="cell-detail">subagent_explore (read-only)</div></td><td class="cell" style="--accent:#0e7a58;--fill:#cceede;--pct:40%"><div class="cell-top"><span class="kind">Native</span></div><div class="cell-title">usr-scout <span class="meter" aria-hidden="true"></span></div><div class="cell-detail">thinkingmachines/inkling-2-small:free, medium</div></td><td class="cell" style="--accent:#2459c9;--fill:#dbe6ff;--pct:40%"><div class="cell-top"><span class="kind">Bridge primary</span></div><div class="cell-title">bridge <span class="meter" aria-hidden="true"></span></div><div class="cell-detail">bridge → scout ladder (see below)</div></td><td class="cell" style="--accent:#2459c9;--fill:#dbe6ff;--pct:40%"><div class="cell-top"><span class="kind">Bridge primary</span></div><div class="cell-title">bridge <span class="meter" aria-hidden="true"></span></div><div class="cell-detail">bridge → scout ladder (see below)</div></td><td class="cell" style="--accent:#2459c9;--fill:#dbe6ff;--pct:40%"><div class="cell-top"><span class="kind">Bridge primary</span></div><div class="cell-title">bridge <span class="meter" aria-hidden="true"></span></div><div class="cell-detail">bridge → scout ladder (see below)</div></td><td class="cell" style="--accent:#0e7a58;--fill:#eaf7f1;--pct:20%"><div class="cell-top"><span class="kind">Native</span></div><div class="cell-title">usr-scout <span class="meter" aria-hidden="true"></span></div><div class="cell-detail">gemini-4-hydrogen-low · selector flash; verify</div></td></tr>
+<tr><th>mechanic</th><td class="cell" style="--accent:#0e7a58;--fill:#a2ddc4;--pct:60%"><div class="cell-top"><span class="kind">Native</span></div><div class="cell-title">native tier agent <span class="meter" aria-hidden="true"></span></div><div class="cell-detail">opencode/hy4-flash-free#high</div></td><td class="cell" style="--accent:#0e7a58;--fill:#eaf7f1;--pct:20%"><div class="cell-top"><span class="kind">Native</span></div><div class="cell-title">run_subagent <span class="meter" aria-hidden="true"></span></div><div class="cell-detail">subagent_general</div></td><td class="cell" style="--accent:#0e7a58;--fill:#a2ddc4;--pct:60%"><div class="cell-top"><span class="kind">Native</span></div><div class="cell-title">usr-mechanic <span class="meter" aria-hidden="true"></span></div><div class="cell-detail">tencent/hy4-flash, high</div></td><td class="cell" style="--accent:#2459c9;--fill:#89acf4;--pct:80%"><div class="cell-top"><span class="kind">Bridge primary</span></div><div class="cell-title">bridge <span class="meter" aria-hidden="true"></span></div><div class="cell-detail">bridge → mechanic ladder (see below)</div></td><td class="cell" style="--accent:#2459c9;--fill:#89acf4;--pct:80%"><div class="cell-top"><span class="kind">Bridge primary</span></div><div class="cell-title">bridge <span class="meter" aria-hidden="true"></span></div><div class="cell-detail">bridge → mechanic ladder (see below)</div></td><td class="cell" style="--accent:#2459c9;--fill:#89acf4;--pct:80%"><div class="cell-top"><span class="kind">Bridge primary</span></div><div class="cell-title">bridge <span class="meter" aria-hidden="true"></span></div><div class="cell-detail">bridge → mechanic ladder (see below)</div></td><td class="cell" style="--accent:#0e7a58;--fill:#eaf7f1;--pct:20%"><div class="cell-top"><span class="kind">Native</span></div><div class="cell-title">usr-mechanic <span class="meter" aria-hidden="true"></span></div><div class="cell-detail">gemini-4-hydrogen-low · selector flash; verify</div></td></tr>
+<tr><th>worker</th><td class="cell" style="--accent:#0e7a58;--fill:#a2ddc4;--pct:60%"><div class="cell-top"><span class="kind">Native</span></div><div class="cell-title">native tier agent <span class="meter" aria-hidden="true"></span></div><div class="cell-detail">opencode/hy4-flash-free#high</div></td><td class="cell" style="--accent:#0e7a58;--fill:#eaf7f1;--pct:20%"><div class="cell-top"><span class="kind">Native</span></div><div class="cell-title">run_subagent <span class="meter" aria-hidden="true"></span></div><div class="cell-detail">subagent_general</div></td><td class="cell" style="--accent:#0e7a58;--fill:#a2ddc4;--pct:60%"><div class="cell-top"><span class="kind">Native</span></div><div class="cell-title">usr-worker <span class="meter" aria-hidden="true"></span></div><div class="cell-detail">deepseek/deepseek-v4.1-flash, high</div></td><td class="cell" style="--accent:#2459c9;--fill:#b6ccfa;--pct:60%"><div class="cell-top"><span class="kind">Bridge primary</span></div><div class="cell-title">bridge <span class="meter" aria-hidden="true"></span></div><div class="cell-detail">bridge → worker ladder (see below)</div></td><td class="cell" style="--accent:#2459c9;--fill:#b6ccfa;--pct:60%"><div class="cell-top"><span class="kind">Bridge primary</span></div><div class="cell-title">bridge <span class="meter" aria-hidden="true"></span></div><div class="cell-detail">bridge → worker ladder (see below)</div></td><td class="cell" style="--accent:#2459c9;--fill:#b6ccfa;--pct:60%"><div class="cell-top"><span class="kind">Bridge primary</span></div><div class="cell-title">bridge <span class="meter" aria-hidden="true"></span></div><div class="cell-detail">bridge → worker ladder (see below)</div></td><td class="cell" style="--accent:#0e7a58;--fill:#a2ddc4;--pct:60%"><div class="cell-top"><span class="kind">Native</span></div><div class="cell-title">usr-worker <span class="meter" aria-hidden="true"></span></div><div class="cell-detail">gemini-4-hydrogen-high · selector flash; verify</div></td></tr>
+<tr><th>quota exhaustion<br><span class="branch-note">scout / mechanic / worker</span></th><td class="cell" style="--accent:#8a97a8;--fill:#f5f6f8;--pct:20%"><div class="cell-top"><span class="kind">Undefined</span></div><div class="cell-title">never uses the bridge <span class="meter" aria-hidden="true"></span></div></td><td class="cell" style="--accent:#8a97a8;--fill:#f5f6f8;--pct:20%"><div class="cell-top"><span class="kind">Undefined</span></div><div class="cell-title">never uses the bridge <span class="meter" aria-hidden="true"></span></div></td><td class="cell" style="--accent:#8a97a8;--fill:#f5f6f8;--pct:20%"><div class="cell-top"><span class="kind">Undefined</span></div><div class="cell-title">never uses the bridge <span class="meter" aria-hidden="true"></span></div><div class="cell-detail">do not silently switch native models</div></td><td class="cell" style="--accent:#8a97a8;--fill:#f5f6f8;--pct:20%"><div class="cell-top"><span class="kind">Undefined</span></div><div class="cell-title">not defined <span class="meter" aria-hidden="true"></span></div><div class="cell-detail">report rather than substitute</div></td><td class="cell" style="--accent:#8a97a8;--fill:#f5f6f8;--pct:20%"><div class="cell-top"><span class="kind">Undefined</span></div><div class="cell-title">not defined <span class="meter" aria-hidden="true"></span></div><div class="cell-detail">report rather than substitute</div></td><td class="cell" style="--accent:#0e7a58;--fill:#cceede;--pct:40%"><div class="cell-top"><span class="kind">Native</span></div><div class="cell-title">native subagents <span class="meter" aria-hidden="true"></span></div><div class="cell-detail">scout haiku · mechanic sonnet · worker sonnet; same brief, worktree and scope</div></td><td class="cell" style="--accent:#8a97a8;--fill:#f5f6f8;--pct:20%"><div class="cell-top"><span class="kind">Undefined</span></div><div class="cell-title">never uses bridge <span class="meter" aria-hidden="true"></span></div><div class="cell-detail">block mismatched model</div></td></tr>
+</tbody></table></div>
+</section>
+<section id="bridge-routes">
+<h2>The bridge, per tier</h2>
+<div class="panel"><div class="tier-row"><h3>scout</h3><div class="chain"><div class="route" style="--accent:#2459c9;--fill:#dbe6ff;--pct:40%">
+<div class="lane-top"><span class="tier" style="--tone:#0d8f86">scout</span><span class="kind">Bridge primary</span><span class="rank rank-primary">P1</span></div>
+<div class="lane-title">Command Code · meta/muse-ember <span class="meter" aria-hidden="true"></span></div>
+<div class="lane-detail">effort medium</div>
+</div><div class="chain-arrow">→</div><div class="route" style="--accent:#b56a0a;--fill:#ffe9c8;--pct:40%">
+<div class="lane-top"><span class="tier" style="--tone:#0d8f86">scout</span><span class="kind">Bridge fallback</span><span class="rank rank-fallback">P2</span></div>
+<div class="lane-title">Pi · opencode-go/muse-spark-1.3-contributor <span class="meter" aria-hidden="true"></span></div>
+<div class="lane-detail">effort medium</div>
+</div><div class="chain-arrow">→</div><div class="route" style="--accent:#b56a0a;--fill:#ffe9c8;--pct:40%">
+<div class="lane-top"><span class="tier" style="--tone:#0d8f86">scout</span><span class="kind">Bridge fallback</span><span class="rank rank-fallback">P3</span></div>
+<div class="lane-title">Codex · gpt-6-luna <span class="meter" aria-hidden="true"></span></div>
+<div class="lane-detail">effort medium</div>
+</div></div></div>
+<div class="tier-row"><h3>mechanic</h3><div class="chain"><div class="route" style="--accent:#2459c9;--fill:#89acf4;--pct:80%">
+<div class="lane-top"><span class="tier" style="--tone:#4f46c9">mechanic</span><span class="kind">Bridge primary</span><span class="rank rank-primary">P1</span></div>
+<div class="lane-title">Command Code · meta/muse-ember <span class="meter" aria-hidden="true"></span></div>
+<div class="lane-detail">effort xhigh</div>
+</div><div class="chain-arrow">→</div><div class="route" style="--accent:#b56a0a;--fill:#ffd49a;--pct:60%">
+<div class="lane-top"><span class="tier" style="--tone:#4f46c9">mechanic</span><span class="kind">Bridge fallback</span><span class="rank rank-fallback">P2</span></div>
+<div class="lane-title">Pi · opencode-go/muse-spark-1.3-contributor <span class="meter" aria-hidden="true"></span></div>
+<div class="lane-detail">effort high</div>
+</div><div class="chain-arrow">→</div><div class="route" style="--accent:#b56a0a;--fill:#ffd49a;--pct:60%">
+<div class="lane-top"><span class="tier" style="--tone:#4f46c9">mechanic</span><span class="kind">Bridge fallback</span><span class="rank rank-fallback">P3</span></div>
+<div class="lane-title">Codex · gpt-6-luna <span class="meter" aria-hidden="true"></span></div>
+<div class="lane-detail">effort high</div>
+</div></div></div>
+<div class="tier-row"><h3>worker</h3><div class="chain"><div class="route" style="--accent:#2459c9;--fill:#b6ccfa;--pct:60%">
+<div class="lane-top"><span class="tier" style="--tone:#d25a12">worker</span><span class="kind">Bridge primary</span><span class="rank rank-primary">P1</span></div>
+<div class="lane-title">Command Code · deepseek/deepseek-v4.1-flash <span class="meter" aria-hidden="true"></span></div>
+<div class="lane-detail">effort high</div>
+</div><div class="chain-arrow">→</div><div class="route" style="--accent:#b56a0a;--fill:#f8b964;--pct:80%">
+<div class="lane-top"><span class="tier" style="--tone:#d25a12">worker</span><span class="kind">Bridge fallback</span><span class="rank rank-fallback">P2</span></div>
+<div class="lane-title">Pi · muse-sdk/muse-spark-1.3 <span class="meter" aria-hidden="true"></span></div>
+<div class="lane-detail">effort xhigh</div>
+</div><div class="chain-arrow">→</div><div class="route" style="--accent:#b56a0a;--fill:#ffd49a;--pct:60%">
+<div class="lane-top"><span class="tier" style="--tone:#d25a12">worker</span><span class="kind">Bridge fallback</span><span class="rank rank-fallback">P3</span></div>
+<div class="lane-title">Pi · opencode-go/deepseek-v4.1-flash <span class="meter" aria-hidden="true"></span></div>
+<div class="lane-detail">effort high</div>
+</div><div class="chain-arrow">→</div><div class="route" style="--accent:#b56a0a;--fill:#ffe9c8;--pct:40%">
+<div class="lane-top"><span class="tier" style="--tone:#d25a12">worker</span><span class="kind">Bridge fallback</span><span class="rank rank-fallback">P4</span></div>
+<div class="lane-title">Pi · devin/swe-2-flash <span class="meter" aria-hidden="true"></span></div>
+<div class="lane-detail">effort medium</div>
+</div><div class="chain-arrow">→</div><div class="route" style="--accent:#b56a0a;--fill:#ffd49a;--pct:60%">
+<div class="lane-top"><span class="tier" style="--tone:#d25a12">worker</span><span class="kind">Bridge fallback</span><span class="rank rank-fallback">P5</span></div>
+<div class="lane-title">Codex · gpt-6.1-terra <span class="meter" aria-hidden="true"></span></div>
+<div class="lane-detail">effort high</div>
+</div></div></div></div>
+<p class="muted">A task failure, rejected acceptance check or scope change is not a provider failure: an admitted route is never replaced after edits.</p>
+</section>
+<section id="hard-rules"><h2>Hard rules</h2><div class="panel"><ol class="rules"><li>The bridge admits <code>scout</code>, <code>mechanic</code>, <code>worker</code> only. <code>worker_model_check</code>, <code>worker_start</code>, resume, steer and the MCP schemas reject <code>expert</code>.</li>
+<li>Expert is harness-native everywhere; nothing routes to the bridge. Expert is terminal by lane: use it for exceptional architectural decisions and adversarial review, never as a size-based upgrade.</li>
+<li>Top-level OpenCode, Devin and Command Code sessions never use the bridge, at any tier or as a fallback. Command Code uses native <code>usr-*</code> agents; HY4-medium worker is an explicit pilot, not a default. When the OpenCode top-level model is free, every tier runs a free model (its configured tier agents use <code>opencode/hy4-flash-free</code>).</li>
+<li>Top-level Antigravity CLI sessions use native usr-* subagents only. Its flash/pro model selectors do not enforce exact model IDs or efforts: verify or block the lane. God is a direct main-session mode.</li>
+<li>Claude Code, Codex and Pi sessions use the bridge for <code>scout</code>/<code>mechanic</code>/<code>worker</code>; the bridge owns provider fallback (Command Code → ordered Pi → Codex), only before edits, only along admitted routes.</li>
+<li>Command Code native children cannot spawn another subagent. Native frontmatter pins and parent scoping are instructions, not bridge-enforced admission; model overrides and unsupported effort can bypass intended settings.</li>
+<li>An admitted session keeps its recorded model and route. A task failure, rejected acceptance check or scope change is not a provider failure and never authorizes a replacement worker.</li>
+<li>Codex and Command Code workers are leaves. Pi workers may fan out one nested generation to equal-or-weaker approved tiers; the typed ceiling is enforced per child, depth is 2, and <code>options: { agentScope: &quot;user&quot; }</code> is required for nested calls.</li>
+<li>Ban on delegation of <code>gemini-3.8</code> / <code>gemini-4-argon</code> / <code>gemini-4-carbon</code> / <code>gpt-6-astra</code> / <code>gpt-6.1-astra</code> / <code>gpt-6.2-astra</code> / <code>claude-fable</code> / <code>fable</code> families in every harness, including every effort variant.</li>
+<li>The parent owns scope, worktrees, verification and integration in every harness. Agent output is a claim until the parent checks the diff and the acceptance proof.</li></ol></div></section>
+<footer>See <a href="../dotfiles/base/.agents/skills/orchestrate/SKILL.md">orchestrate</a> for the routing contract and <a href="../tools/pi-subagent-bridge/README.md">the bridge reference</a> for admission, fallback and state semantics.</footer>
+</main></body>
+</html>

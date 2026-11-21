@@ -22,7 +22,7 @@ check-generated: ## Check policy projections without changing files
 policy: ## Export approved model policy as JSON without provider probes
 	@$(NODE) tools/policy/generate.ts --json
 
-subagent-visualization: ## Render docs/subagents.md from the typed policy
+subagent-visualization: ## Render docs/subagents.html from the typed policy
 	@$(NODE) tools/policy/subagent-visualization.ts
 
 skills-check: ## Check skill metadata and generated adapters
@@ -40,6 +40,7 @@ test: ## Run the repository and policy test suites
 	@sh -n dotfiles/base/.local/bin/pk
 	@python3 -I dotfiles/pk-test.py
 	@$(NODE) --test tools/policy/generate.test.ts
+	@$(NODE) --test tools/policy/subagent-visualization.test.ts
 	@$(NODE) --experimental-strip-types --test tools/pi-subagent-bridge/test/devin-provider.test.ts
 	@python3 -I tools/pi/test_runtime_profiles.py
 	@python3 -I tools/pi/test_offline.py
