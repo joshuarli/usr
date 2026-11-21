@@ -3,6 +3,7 @@ import assert from "node:assert/strict"
 import { spawnSync } from "node:child_process"
 import { join } from "node:path"
 import { fileURLToPath } from "node:url"
+import { activeWorktreeOwner, claimWorktree } from "../src/worktree-lease.ts"
 import { Scratch, commandLane, commandResultLine, toolQueued, type Repo } from "./worker-fixtures.ts"
 
 const cli = fileURLToPath(new URL("../src/cli.ts", import.meta.url))
@@ -65,6 +66,41 @@ test("watch rejects malformed arguments", () => {
   const result = run("watch", repo.root, finished, "soon")
   assert.equal(result.status, 2)
   assert.match(result.stderr, /^usage: pi-subagent-bridge watch/)
+})
+
+test("inspect and watch settle a terminal lease but keep a running one", async () => {
+  const gone = await scratch.gone(), alive = scratch.alive()
+  const doneRepo = scratch.repo("settle-inspect-done")
+  const done = commandLane(doneRepo, 20, gone, [commandResultLine("success", { finalText: "settled" })])
+  claimWorktree(doneRepo.directory, doneRepo.cwd, done)
+  assert.equal(activeWorktreeOwner(doneRepo.directory, doneRepo.cwd), done)
+  const inspected = run("inspect", doneRepo.root, done)
+  assert.equal(inspected.status, 0, inspected.stderr)
+  assert.equal(JSON.parse(inspected.stdout).execution_state, "succeeded")
+  assert.equal(activeWorktreeOwner(doneRepo.directory, doneRepo.cwd), null)
+  const liveRepo = scratch.repo("settle-inspect-live")
+  const live = commandLane(liveRepo, 21, alive, [toolQueued("Waiting")])
+  claimWorktree(liveRepo.directory, liveRepo.cwd, live)
+  const liveInspected = run("inspect", liveRepo.root, live)
+  assert.equal(liveInspected.status, 0, liveInspected.stderr)
+  assert.equal(JSON.parse(liveInspected.stdout).execution_state, "running")
+  assert.equal(activeWorktreeOwner(liveRepo.directory, liveRepo.cwd), live)
+  const watchRepo = scratch.repo("settle-watch-done")
+  const watched = commandLane(watchRepo, 22, gone, [commandResultLine("success", { finalText: "watched" })])
+  claimWorktree(watchRepo.directory, watchRepo.cwd, watched)
+  const watchResult = run("watch", watchRepo.root, watched)
+  assert.equal(watchResult.status, 0, watchResult.stderr)
+  assert.equal(activeWorktreeOwner(watchRepo.directory, watchRepo.cwd), null)
+  const shared = scratch.repo("settle-other")
+  const holder = commandLane(shared, 23, gone, [commandResultLine("success", { finalText: "holder" })])
+  const other = commandLane(shared, 24, gone, [commandResultLine("success", { finalText: "other" })])
+  claimWorktree(shared.directory, shared.cwd, holder)
+  const otherInspected = run("inspect", shared.root, other)
+  assert.equal(otherInspected.status, 0, otherInspected.stderr)
+  assert.equal(activeWorktreeOwner(shared.directory, shared.cwd), holder)
+  const holderInspected = run("inspect", shared.root, holder)
+  assert.equal(holderInspected.status, 0, holderInspected.stderr)
+  assert.equal(activeWorktreeOwner(shared.directory, shared.cwd), null)
 })
 
 test("campaign lists, reports, acknowledges and times out", () => {

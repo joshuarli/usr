@@ -397,6 +397,59 @@ class WorktreeRetireTests(unittest.TestCase):
         self.assertTrue(path.exists())
         self.assertTrue(sub.exists())
 
+    def test_terminal_lease_settles_while_running_lease_blocks(self):
+        term_lane = self.lane("term-lane")
+        self.commit(term_lane, "feature", "x\n")
+        self.git(self.repo, "merge", "-q", "--ff-only", "term-lane")
+        term_digest = hashlib.sha256(os.fsencode(term_lane)).hexdigest()
+        term_lease = self.repo / ".work/worker-bridge" / f".active-worktree-{term_digest}"
+        term_lease.mkdir(parents=True)
+        term_sid = "usrw_11111111-1111-1111-1111-111111111111"
+        (term_lease / "owner.json").write_text(json.dumps({"version": 1, "cwd": str(term_lane), "session_id": term_sid}))
+        run_lane = self.lane("run-lane")
+        self.commit(run_lane, "feature", "y\n")
+        self.git(self.repo, "merge", "-q", "--ff-only", "run-lane")
+        run_digest = hashlib.sha256(os.fsencode(run_lane)).hexdigest()
+        run_lease = self.repo / ".work/worker-bridge" / f".active-worktree-{run_digest}"
+        run_lease.mkdir(parents=True)
+        run_sid = "usrw_22222222-2222-2222-2222-222222222222"
+        (run_lease / "owner.json").write_text(json.dumps({"version": 1, "cwd": str(run_lane), "session_id": run_sid}))
+        bindir = Path(self.tmp.name).resolve() / "bin"
+        bindir.mkdir()
+        stub = bindir / "pi-subagent-bridge"
+        stub.write_text("#!/bin/sh\n"
+                        'if [ "$1" = "inspect" ]; then\n'
+                        '  sid="$3"\n'
+                        f'  if [ "$sid" = "{term_sid}" ]; then\n'
+                        f'    for d in "{self.repo}"/.work/worker-bridge/.active-worktree-*; do\n'
+                        '      if [ -f "$d/owner.json" ] && grep -q "$sid" "$d/owner.json" 2>/dev/null; then\n'
+                        '        rm -rf "$d"\n'
+                        '      fi\n'
+                        '    done\n'
+                        f'    echo \'{{"id":"{term_sid}","execution_state":"succeeded"}}\'\n'
+                        '    exit 0\n'
+                        '  else\n'
+                        f'    echo \'{{"id":"{run_sid}","execution_state":"running"}}\'\n'
+                        '    exit 0\n'
+                        '  fi\n'
+                        'fi\n'
+                        'echo unknown >&2\n'
+                        'exit 1\n')
+        stub.chmod(0o755)
+        env = {**self.env, "PATH": str(bindir) + ":" + self.env.get("PATH", "")}
+        term_result = subprocess.run([str(TOOL), str(term_lane), "--into", "main"],
+                                     capture_output=True, text=True, env=env)
+        self.assertEqual(term_result.returncode, 0, term_result.stderr)
+        self.assertFalse(term_lane.exists())
+        self.assertFalse(term_lease.exists())
+        run_result = subprocess.run([str(TOOL), str(run_lane), "--into", "main"],
+                                    capture_output=True, text=True, env=env)
+        self.assertEqual(run_result.returncode, 1, run_result.stdout)
+        self.assertIn(run_sid, run_result.stderr)
+        self.assertIn("running", run_result.stderr)
+        self.assertTrue(run_lane.exists())
+        self.assertTrue(run_lease.is_dir())
+
     def test_checkout_outside_work_wt_is_refused(self):
         path = Path(self.tmp.name).resolve() / "elsewhere"
         self.git(self.repo, "worktree", "add", "-q", "-b", "elsewhere", str(path))

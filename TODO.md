@@ -253,15 +253,6 @@ Next: 131
 - **Fix with:** single-source-of-truth
 - **Effort:** S
 
-### USR-130 · P3 · finished bridge sessions keep worktree leases until someone reads their status
-
-- **Area:** Delegation
-- **Where:** tools/pi-subagent-bridge/src/hybrid.ts (status release path); dotfiles/base/.local/bin/worktree-retire check_bridge_lease
-- **Problem:** A worker's lease is released only when worker_status observes its terminal state. Sessions whose parents never read the final status keep .active-worktree-*/owner.json forever, and worktree-retire then refuses the worktree as an active or unknown bridge lease. On 2026-11-21, 6 xsh and 4 laputa worktrees from finished sessions (succeeded or incomplete) were blocked this way; one worker_status call per session released each lease. xsh/.work/worker-bridge also holds 37 leases, many for worktrees that no longer exist.
-- **Recommendation:** Release leases when a session's run ends (at the receipt or watch exit), or let worktree-retire ask the bridge whether the lease holder is terminal and report the session id and state rather than unknown. Acceptance: a finished session whose status is never read does not block worktree-retire, and a running session still does.
-- **Fix with:** pi-subagent-bridge
-- **Effort:** S
-
 ### USR-73 · P4 · The refactor-web-ui skill has only been applied to agentctl
 
 - **Area:** Skills

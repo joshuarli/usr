@@ -20,6 +20,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import shutil
 import stat
 import subprocess
 import sys
@@ -79,7 +80,47 @@ def check_bridge_lease(primary: Path, path: Path) -> None:
         lease.lstat()
     except FileNotFoundError:
         return
-    raise Kept(f"kept {path}: active or unknown bridge lease at {lease}")
+    session_id: str | None = None
+    try:
+        data = json.loads((lease / "owner.json").read_text())
+        candidate = data.get("session_id") if isinstance(data, dict) else None
+        if isinstance(candidate, str) and candidate.startswith("usrw_") and len(candidate) == 41:
+            session_id = candidate
+    except (OSError, ValueError, UnicodeDecodeError):
+        session_id = None
+    if session_id is None:
+        raise Kept(f"kept {path}: active or unknown bridge lease at {lease}")
+    bridge = shutil.which("pi-subagent-bridge")
+    if bridge is None:
+        raise Kept(f"kept {path}: active bridge lease at {lease} for session {session_id}; "
+                    "bridge unavailable (pi-subagent-bridge not on PATH)")
+    try:
+        proc = subprocess.run([bridge, "inspect", str(primary), session_id],
+                              capture_output=True, text=True, timeout=30,
+                              env={**os.environ, "GIT_OPTIONAL_LOCKS": "0"})
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise Kept(f"kept {path}: active bridge lease at {lease} for session {session_id}; "
+                    f"bridge unavailable ({exc})")
+    reported: str | None = None
+    try:
+        snapshot = json.loads(proc.stdout)
+        if isinstance(snapshot, dict):
+            value = snapshot.get("execution_state", snapshot.get("state"))
+            if isinstance(value, str) and value:
+                reported = value
+    except ValueError:
+        reported = None
+    try:
+        lease.lstat()
+    except FileNotFoundError:
+        return
+    if proc.returncode != 0 and reported is None:
+        detail = proc.stderr.strip() or f"exit {proc.returncode}"
+        raise Kept(f"kept {path}: active bridge lease at {lease} for session {session_id}; "
+                    f"bridge unavailable ({detail})")
+    if reported:
+        raise Kept(f"kept {path}: active bridge lease at {lease} for session {session_id} (state {reported})")
+    raise Kept(f"kept {path}: active bridge lease at {lease} for session {session_id} (state unknown)")
 
 
 def gitlinks(cwd: Path) -> list[tuple[str, str]]:
