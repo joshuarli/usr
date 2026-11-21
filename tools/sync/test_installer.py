@@ -1331,7 +1331,9 @@ sys.exit(1)
         glibc = default_tools("linux", "x86_64", "", musl_loader=False)
         for tool in ("python3", "ffmpeg", "player"):
             self.assertNotIn(tool, glibc)
-        self.assertEqual([t for t in default_tools("linux", "x86_64", "") if t not in ("python3", "ffmpeg", "player")], glibc)
+        self.assertEqual([t for t in default_tools("linux", "x86_64", "", musl_loader=True)
+                          if t not in ("python3", "ffmpeg", "player")], glibc)
+        self.assertIn("python3", default_tools("linux", "x86_64", "", musl_loader=True))
         server_file = self.root / "server.txt"
         server_file.write_text("fd\nrg\n")
         self.assertEqual(default_tools("linux", "x86_64", "server", server_file), ["fd", "rg"])

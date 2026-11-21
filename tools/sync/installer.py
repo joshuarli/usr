@@ -3308,7 +3308,7 @@ def musl_loader_present(os_name: str, arch: str, root: Path = Path("/")) -> bool
 
 
 def default_tools(os_name: str, arch: str, profile: str, server_tools: Path | None = None,
-                  *, musl_loader: bool = True) -> list[str]:
+                  *, musl_loader: bool | None = None) -> list[str]:
     tools = ["fd", "rg"]
     if not (os_name == "linux" and arch == "aarch64"):
         tools.append("jaq")
@@ -3329,7 +3329,7 @@ def default_tools(os_name: str, arch: str, profile: str, server_tools: Path | No
             raise InstallError(f"server tool profile is missing: {server_tools}")
         allowed = set(server_tools.read_text().split())
         tools = [tool for tool in tools if tool in allowed]
-    if not musl_loader:
+    if not (musl_loader_present(os_name, arch) if musl_loader is None else musl_loader):
         tools = [tool for tool in tools if tool not in MUSL_DYNAMIC_TOOLS]
     return tools
 
@@ -3350,8 +3350,7 @@ def main(argv: list[str]) -> int:
     if argv == ["--list"]:
         repo_root = Path(__file__).resolve().parents[2]
         for tool in default_tools(installer.os_name, installer.arch, _profile(installer.env),
-                                  repo_root / "host/alpine/tools-server.txt",
-                                  musl_loader=musl_loader_present(installer.os_name, installer.arch)):
+                                  repo_root / "host/alpine/tools-server.txt"):
             print(tool)
         return 0
     if installer.env.get("DL_RECORD_OWNED") == "true":
@@ -3377,8 +3376,7 @@ def main(argv: list[str]) -> int:
         return 0
     if not argv:
         argv = default_tools(installer.os_name, installer.arch, _profile(installer.env),
-                             Path(__file__).resolve().parents[2] / "host/alpine/tools-server.txt",
-                             musl_loader=musl_loader_present(installer.os_name, installer.arch))
+                             Path(__file__).resolve().parents[2] / "host/alpine/tools-server.txt")
     if len(argv) > 1:
         failed = False
         for tool in argv:

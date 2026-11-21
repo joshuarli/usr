@@ -17,7 +17,7 @@ from dag import Graph, GraphError, Probe, Result, Task, default_jobs
 from links import LinkError, discover
 from link_plan import plan_links
 from link_apply import LinkApplyError, apply as apply_link_plan
-from installer import Installer, SkipInstall, default_tools, musl_loader_present
+from installer import Installer, SkipInstall, default_tools
 import pi_auth
 from pi_extensions import missing as missing_pi_extensions
 from report import TaskLine, render, render_json
@@ -89,8 +89,7 @@ def tool_list(ctx: Context) -> list[str]:
     if arch == "arm64":
         arch = "aarch64"
     return default_tools(ctx.platform, arch, ctx.profile,
-                         ctx.root / "host/alpine/tools-server.txt",
-                         musl_loader=musl_loader_present(ctx.platform, arch))
+                         ctx.root / "host/alpine/tools-server.txt")
 
 
 def _link_plan(ctx: Context):
@@ -392,8 +391,7 @@ def default_goals(ctx: Context) -> list[str]:
         goals.append("host:mac-packages")
     if ctx.profile != "server":
         goals.extend(["claude-mcp", "pi-mcp", "pi-auth", "opencode-mcp", "companions-mcp"])
-    if ctx.platform == "darwin" or os.access(ctx.home / ".cargo/bin/rustup", os.X_OK) \
-            or shutil.which("cargo", path=ctx.env.get("PATH")):
+    if ctx.platform == "darwin" or os.access(ctx.home / ".cargo/bin/rustup", os.X_OK):
         goals.append("kache")
     return goals
 
