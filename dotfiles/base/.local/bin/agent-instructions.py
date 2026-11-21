@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from enum import Enum
 import json
+import os
 from pathlib import Path
 import sys
 
@@ -17,6 +18,10 @@ class Profile(Enum):
     LEAN = ".agents/instructions/lean.md"
 
 
+NATIVE_DELEGATION = (
+    "\n\nThis session's environment sets `USR_DELEGATION=native`: delegate scout, mechanic and worker "
+    "assignments to the tier-matched native subagents in `orchestrate`, and do not start the Pi bridge.\n"
+)
 INPUT_LIMIT = 1048576
 CONTRACT_LIMIT = 32768
 
@@ -74,7 +79,7 @@ def main() -> int:
         return 1
     print(json.dumps({"hookSpecificOutput": {
         "hookEventName": payload["hook_event_name"],
-        "additionalContext": contract,
+        "additionalContext": contract + (NATIVE_DELEGATION if os.environ.get("USR_DELEGATION") == "native" else ""),
     }}))
     return 0
 

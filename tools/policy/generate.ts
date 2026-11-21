@@ -84,7 +84,8 @@ function nativeFallback(policy: Policy): string {
   return `**Claude Code native subagents:** ${code("expert")} assignments always use native subagents pinned to ${expertModel} with ${expertThinking} effort. ` +
     "If that pinned model is unavailable, the expert lane is blocked; never substitute another model. " +
     `When no approved bridge backend can run because it is unavailable or exhausted, ${tiers} use tier-matched native subagents with the same brief, worktree, scope, and independent verification: ${mappings}. ` +
-    "Preserve partial work before relaunch. Register native lanes with `scope-check --register` and record their final check with `scope-check --lane`. No hook gates native subagents. Return to the bridge when capacity recovers."
+    "A host or session whose environment sets `USR_DELEGATION=native`, such as a cloud environment without bridge providers, uses these native subagents directly and does not start the bridge. " +
+    "Preserve partial work before relaunch. Register native lanes with `scope-check --register` and record their final check with `scope-check --lane`. No hook gates native subagents. Return to the bridge when capacity recovers, unless `USR_DELEGATION=native` is set."
 }
 
 function delegation(policy: Policy, lean: boolean): string {
@@ -97,7 +98,7 @@ function delegation(policy: Policy, lean: boolean): string {
     `No ${code("god")} tier exists. ` +
     `Never route to ${policy.bannedModels.map(code).join(" or ")}. ` +
     "On Antigravity, Gemini 3.8 is retired and Carbon is never a fallback; a manual Carbon session requires the owner\'s explicit request. " +
-    `Only ${policy.nativeFallback.tiers.join("/")} may use tier-matched native subagents after bridge quota/backend exhaustion, ` +
+    `Only ${policy.nativeFallback.tiers.join("/")} may use tier-matched native subagents after bridge quota/backend exhaustion or when the environment sets \`USR_DELEGATION=native\`, ` +
     "with the same scope, worktree and independent parent review. " +
     (lean ? "With verified, safely shareable evidence and meaningful tier uncertainty, consult `decide`; unavailable advice does not block." :
       "The parent scopes, verifies, reviews and integrates.")
