@@ -73,15 +73,6 @@ Next: 129
 - **Fix with:** root-cause
 - **Effort:** M
 
-### USR-128 · P2 · sh sync on Ubuntu 24.04 leaves the agent control plane incomplete
-
-- **Area:** Sync · Linux hosts
-- **Where:** sync (entry shim); tools/sync/installer.py:1703 (Node npm check); tools/sync/main.py:393 (kache goal); dotfiles/base/.cargo/config.toml (rustc-wrapper)
-- **Problem:** A pristine ubuntu:24.04 arm64 container (2026-11-21, usr deee8dc2, clone at ~/usr, run as root) cannot set up the agent control plane. (1) `sh sync plan` exits 1: 'no working Python 3.9+'; glibc Linux has no bootstrap, so python3 must preinstall. (2) With python3 and curl installed, `sh sync` fails tool:nodejs with 'Node.js archive does not contain a working bundled npm': the official linux-arm64 node needs libatomic.so.1, which the image lacks and sync never names. Nine tasks block on it, including tool:pi, pnpm, cmd, cf, pi-auth, claude-mcp and pi-mcp, so `pi-subagent-bridge` exits 'node: not found'. (3) tool:python3 and tool:ffmpeg fail with FileNotFoundError on their musl binaries (python-build#19; Ubuntu 24.04 musl is 1.2.4). (4) kache is a default goal only when ~/.cargo/bin/rustup exists at sync time, yet the linked ~/.cargo/config.toml always sets rustc-wrapper = "kache", so cargo fails in every Rust repository until rustup is installed and sync reruns. todo, worktree-retire, mdtool, fastermod, fd, rg and the skills install correctly. jaq is not in the Linux default tool list.
-- **Recommendation:** State the Debian/Ubuntu prerequisites (python3, curl, libatomic1, and rustup before sync) in README and agent-setup, and have sync report a missing libatomic instead of 'no working bundled npm'. Fall back to a verified uv CPython where python-build cannot run (the buildlib shim's fallback). Keep the kache wrapper from breaking cargo when kache is absent, by linking the cargo config only once kache is installed. Acceptance: a fresh ubuntu:24.04 container that follows the documented commands gets todo, pi-subagent-bridge --help, node, pnpm and a working cargo build.
-- **Fix with:** none
-- **Effort:** M
-
 ### USR-75 · P3 · clang plus mold host links intermittently segfault and leave truncated artifacts
 
 - **Area:** rust toolchain
