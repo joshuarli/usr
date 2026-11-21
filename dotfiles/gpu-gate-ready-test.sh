@@ -69,6 +69,8 @@ state 0 500000000 0 1 "$quiet_vm" "$quiet_vm"
 expect 0 'an ignored pid does not count' '' GPU_GATE_IGNORE_PIDS=200
 state 0 0 40 1 "$quiet_vm" "$quiet_vm"
 expect 75 'high device utilization is contended' 'device utilization 40%'
+state 0 0 40 1 "$quiet_vm" "$quiet_vm"
+expect 0 'a post-run check with ignored pids is not decided by utilization' '' GPU_GATE_IGNORE_PIDS=300
 state 0 0 0 2 "$quiet_vm" "$quiet_vm"
 expect 75 'memory pressure warn is contended' 'memory pressure level 2'
 state 0 0 0 1 "$quiet_vm" '300 10 1000 1000'

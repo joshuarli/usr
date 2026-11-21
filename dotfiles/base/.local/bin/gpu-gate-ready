@@ -21,7 +21,8 @@ Environment:
   GPU_GATE_MAX_PRESSURE    maximum memory pressure level: 1 normal, 2 warn, 4 critical (default: 1)
   GPU_GATE_MAX_SWAP_S      maximum swapins plus swapouts per second (default: 100)
   GPU_GATE_MAX_COMPRESS_S  maximum compressions plus decompressions per second (default: 5000)
-  GPU_GATE_IGNORE_PIDS     space-separated pids whose GPU time is not counted (default: none)
+  GPU_GATE_IGNORE_PIDS     space-separated pids whose GPU time is not counted; setting it also stops
+                           device utilization, which includes their trailing work, from deciding (default: none)
 
 Examples:
   gpu-gate-ready -1
@@ -153,7 +154,7 @@ check () {
 			compress_s = ((b[3] - a[3]) + (b[4] - a[4])) / s
 			util = u0 > u1 ? u0 : u1
 			if (gpu_pct > max_gpu) reasons = reasons sprintf("other processes used %.1f%% GPU time (limit %s); ", gpu_pct, max_gpu)
-			if (util > max_util) reasons = reasons sprintf("device utilization %d%% (limit %s); ", util, max_util)
+			if (util > max_util && ignore == "  ") reasons = reasons sprintf("device utilization %d%% (limit %s); ", util, max_util)
 			if (level > max_pressure) reasons = reasons sprintf("memory pressure level %d (limit %s); ", level, max_pressure)
 			if (swap_s > max_swap) reasons = reasons sprintf("swapping %.0f pages/s (limit %s); ", swap_s, max_swap)
 			if (compress_s > max_compress) reasons = reasons sprintf("compressor %.0f pages/s (limit %s); ", compress_s, max_compress)
