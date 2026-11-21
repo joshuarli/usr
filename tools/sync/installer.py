@@ -26,6 +26,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import threading
 from typing import Callable, NoReturn, cast
 from urllib.error import URLError
 from urllib.request import Request, urlopen
@@ -39,6 +40,8 @@ import pi_release  # noqa: E402
 HTTP_TIMEOUT = 30
 NODE_MINIMUM = "26.12.0"
 PYTHON_SMOKE = 'import sqlite3, ssl, subprocess; subprocess.run(["/bin/sh", "-c", ":"], check=True)'
+PYTHON_VERSION = "3.15"
+_UV_INSTALL_LOCK = threading.Lock()
 NODEJS_VERSION = "26.13.1"
 MIRROR_BASE = "https://mirror.17166969.xyz/current"
 # tar.xz SHA-256 pins from the static artifact mirror's SHA256SUMS (bump them
@@ -162,6 +165,7 @@ class Installer:
         self.pi_legacy_root = self.data_home / "pi"
         self.pi_cache = pi_offline.cache_dir(self.home, self.env)
         self.python_build_root = self.data_home / "python-build"
+        self.uv_python_root = self.data_home / "uv-python"
         self.node_build_root = self.data_home / "node-build"
         self.nodejs_root = self.data_home / "nodejs"
         self.pnpm_root = self.data_home / "pnpm-npm"
@@ -928,6 +932,10 @@ class Installer:
         self.install_direct("jaq", f"https://github.com/01mf02/jaq/releases/latest/download/jaq-{target}")
 
     def install_uv(self) -> None:
+        with _UV_INSTALL_LOCK:
+            self._install_uv()
+
+    def _install_uv(self) -> None:
         if (self.os_name, self.arch) in (("darwin", "x86_64"), ("darwin", "aarch64")):
             target = f"{self.arch}-apple-darwin"
         elif (self.os_name, self.arch) in (("linux", "x86_64"), ("linux", "aarch64")):
@@ -1110,14 +1118,23 @@ class Installer:
             self.skip(tool, f"its Linux build links musl, and /lib/ld-musl-{self.arch}.so.1 is missing; "
                             "install the distribution's musl package (1.2.5 or newer; python-build#19)")
 
+    def managed_uv(self) -> Path | None:
+        uv = self.dest / "uv"
+        if uv.is_file() and os.access(uv, os.X_OK):
+            return uv
+        found = self.which("uv")
+        return Path(found) if found else None
+
     def install_python3(self) -> None:
+        if self.os_name == "linux" and not self.musl_loader:
+            self.install_python3_with_uv()
+            return
         triples = {("darwin", "aarch64"): "aarch64-apple-darwin",
                    ("linux", "x86_64"): "x86_64-unknown-linux-musl",
                    ("linux", "aarch64"): "aarch64-unknown-linux-musl"}
         if (self.os_name, self.arch) not in triples:
             self.skip("python3", f"no python-build release for {self.os_name}/{self.arch}")
             return
-        self.require_musl_loader("python3")
         triple = triples[(self.os_name, self.arch)]
         found = self.build_release(PYTHON_BUILD_REPO, "cpython", triple)
         if found is None:
@@ -1130,6 +1147,46 @@ class Installer:
             [("python3", "python/bin/python3.15"), ("python3.15", "python/bin/python3.15")],
             release=(tag, PYTHON_BUILD_REPO, {triple: (asset, expected)}),
             manifest=lambda: self.check_release_manifest("python3", base, tag, "cpython", triple, version, asset, sums))
+
+    def install_python3_with_uv(self) -> None:
+        if self.arch not in ("x86_64", "aarch64"):
+            self.skip("python3", f"uv has no managed CPython for linux/{self.arch}")
+        uv = self.managed_uv()
+        if uv is None:
+            self.install_uv()
+            uv = self.managed_uv()
+        if uv is None:
+            self.skip("python3", "uv is required to install CPython without a musl loader")
+        uv_env = {"UV_PYTHON_INSTALL_DIR": str(self.uv_python_root), "UV_NO_CONFIG": "1"}
+        self.fetch_msg(f"Installing CPython {PYTHON_VERSION} with uv ...")
+        installed = self.run([str(uv), "python", "install", PYTHON_VERSION], capture=True, extra_env=uv_env)
+        if installed.returncode:
+            detail = (installed.stderr or installed.stdout).strip().splitlines()
+            self.unchecked("python3", f"uv python install failed ({detail[-1] if detail else installed.returncode})")
+        found = self.run([str(uv), "python", "find", "--managed-python", PYTHON_VERSION],
+                         capture=True, extra_env=uv_env)
+        interpreter = Path(found.stdout.strip())
+        if found.returncode or not interpreter.is_absolute() or not interpreter.is_file() \
+                or not interpreter.resolve().is_relative_to(self.uv_python_root.resolve()):
+            self.unchecked("python3", "uv did not report a managed CPython under its install directory")
+        if self.run([str(interpreter), "-c", PYTHON_SMOKE], capture=True).returncode:
+            self.unchecked("python3", "the uv-installed CPython failed its sqlite3/ssl/subprocess smoke test")
+        record = f"uv:{PYTHON_VERSION}:{interpreter}"
+        current = self._state_text("python3") == record and all(
+            (self.dest / name).is_symlink() and os.readlink(self.dest / name) == str(interpreter)
+            for name in ("python3", "python3.15"))
+        self.own_dir(self.uv_python_root)
+        if current:
+            for name in ("python3", "python3.15"):
+                self.own_file(self.dest / name)
+            self.own_file(self.state / "python3")
+            self.current(f"python3 is current ({interpreter})")
+            return
+        for name in ("python3", "python3.15"):
+            self.link_symlink(self.dest / name, str(interpreter))
+        self.write_state("python3", record)
+        self.changed = True
+        self.ok(f"Installed {self.dest}/python3 ({interpreter})")
 
     def install_nodebuild(self) -> None:
         triples = {("darwin", "aarch64"): "aarch64-apple-darwin",
@@ -3145,6 +3202,30 @@ class Installer:
             if self.installed(prog):
                 self.own_file(self.dest / prog)
 
+    def python3_install_dir(self, target: str) -> Path | None:
+        inner = "/python/bin/python3.15"
+        if target.startswith(str(self.python_build_root) + os.sep) and target.endswith(inner):
+            return Path(target.removesuffix(inner))
+        if target.startswith(str(self.uv_python_root) + os.sep) and target.endswith("/bin/python3.15"):
+            return self.uv_python_root
+        return None
+
+    def record_python3_install(self) -> None:
+        state = self.state / "python3"
+        if not state.is_file() or state.stat().st_size == 0:
+            return
+        launcher = self.dest / "python3"
+        target = os.readlink(launcher) if launcher.is_symlink() else ""
+        installed = self.python3_install_dir(target)
+        if installed is None or not installed.is_dir():
+            return
+        self.own_dir(installed)
+        self.own_file(launcher)
+        self.own_file(state)
+        sibling = self.dest / "python3.15"
+        if sibling.is_symlink() and os.readlink(sibling) == target:
+            self.own_file(sibling)
+
     def record_managed_installs(self) -> None:
         for prog in ("fd", "rg", "jaq", "fastermod", "tm", "ish", "img", "stuff", "e", "fz",
                      "srv", "mactop", "view", "vault", "gh", "bylaws", "mold", "cf", "player", "soulseek-rs",
@@ -3173,16 +3254,7 @@ class Installer:
         if (self.state / "mold").is_file() and (self.state / "mold").stat().st_size > 0 \
                 and (self.dest / "ld.mold").is_symlink() and os.readlink(self.dest / "ld.mold") == "mold":
             self.own_file(self.dest / "ld.mold")
-        if (self.state / "python3").is_file() and (self.state / "python3").stat().st_size > 0:
-            target = os.readlink(self.dest / "python3") if (self.dest / "python3").is_symlink() else ""
-            if target.startswith(str(self.python_build_root) + os.sep) and target.endswith("/python/bin/python3.15"):
-                own_dir = Path(target.removesuffix("/python/bin/python3.15"))
-                if own_dir.is_dir():
-                    self.own_dir(own_dir)
-                    self.own_file(self.dest / "python3")
-                    self.own_file(self.state / "python3")
-                    if (self.dest / "python3.15").is_symlink() and os.readlink(self.dest / "python3.15") == target:
-                        self.own_file(self.dest / "python3.15")
+        self.record_python3_install()
         if (self.state / "node-build").is_file() and (self.state / "node-build").stat().st_size > 0:
             target = os.readlink(self.dest / "node-build") if (self.dest / "node-build").is_symlink() else ""
             if target.startswith(str(self.node_build_root) + os.sep) and target.endswith("/node/bin/node"):
@@ -3299,7 +3371,7 @@ class Installer:
                     self.warn(f"Its target is also untracked: {target}")
 
 
-MUSL_DYNAMIC_TOOLS = ("python3", "ffmpeg", "player")
+MUSL_ONLY_TOOLS = ("ffmpeg", "player")
 
 
 def musl_loader_present(os_name: str, arch: str, root: Path = Path("/")) -> bool:
@@ -3330,7 +3402,7 @@ def default_tools(os_name: str, arch: str, profile: str, server_tools: Path | No
         allowed = set(server_tools.read_text().split())
         tools = [tool for tool in tools if tool in allowed]
     if not (musl_loader_present(os_name, arch) if musl_loader is None else musl_loader):
-        tools = [tool for tool in tools if tool not in MUSL_DYNAMIC_TOOLS]
+        tools = [tool for tool in tools if tool not in MUSL_ONLY_TOOLS]
     return tools
 
 
