@@ -180,6 +180,16 @@ class TailnetTests(unittest.TestCase):
         self.assertEqual(self.credential.read_bytes(), before)
         self.assertEqual(self.call("doctor", "--connect").returncode, 1)
 
+    def test_11b_pinned_node_is_found_off_a_non_login_path(self):
+        managed = self.home / ".local/share/nodejs/current/bin"
+        managed.mkdir(parents=True)
+        (self.bin / "node").rename(managed / "node")
+        result = self.call("doctor")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        result = self.call("revoke", "--session", "session-1")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout)["argv"][-3:], ["revoke", "--session", "session-1"])
+
     def test_12_full_profile_uses_its_bundled_loader(self):
         for name in ("broker", "tailnet-admin"):
             (self.package / f"broker/{name}.js").rename(self.package / f"broker/{name}.ts")

@@ -7,7 +7,6 @@ import ipaddress
 import json
 import os
 from pathlib import Path
-import shutil
 import socket
 import stat
 import sys
@@ -93,7 +92,7 @@ def runtime_command(entry: str) -> list[str]:
     target = package / f"broker/{entry}.{suffix}"
     if not target.is_file():
         raise IntercomError(f"incomplete Pi runtime: missing {target}")
-    node = shutil.which("node")
+    node = companions.managed_binary("node", dict(os.environ))
     if not node:
         raise IntercomError("Node.js is missing; install the pinned tools with sh sync")
     return [node, *loader_args, str(target)]
