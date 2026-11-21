@@ -160,6 +160,17 @@ class MainTests(unittest.TestCase):
         with patch.object(main, "tool_list", return_value=["python3"]):
             self.assertIn("pi-auth", main.default_goals(self.ctx))
 
+    def test_kache_is_a_linux_goal_once_cargo_is_on_path(self):
+        linux = main.Context(self.ctx.root, self.ctx.home, "linux", "", {**self.ctx.env, "PATH": str(self.ctx.home / "nobin")})
+        with patch.object(main, "tool_list", return_value=[]):
+            self.assertNotIn("kache", main.default_goals(linux))
+            cargo_bin = self.ctx.home / "cargo-bin"
+            cargo_bin.mkdir()
+            (cargo_bin / "cargo").write_text("#!/bin/sh\n")
+            (cargo_bin / "cargo").chmod(0o755)
+            with_cargo = main.Context(self.ctx.root, self.ctx.home, "linux", "", {**self.ctx.env, "PATH": str(cargo_bin)})
+            self.assertIn("kache", main.default_goals(with_cargo))
+
     def test_server_profile_omits_mcp_bridges_from_default_sync(self):
         server = main.Context(self.ctx.root, self.ctx.home, "linux", "server", self.ctx.env)
         with patch.object(main, "tool_list", return_value=["python3"]):

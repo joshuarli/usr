@@ -168,7 +168,9 @@ sys.exit(1)
                    "npm@latest": "11.9.0"})}
         if extra_bin:
             env["PATH"] = f"{extra_bin}:{env['PATH']}"
-        return FakeInstaller(self.home, os_name=os_name, arch=arch, env=env, routes=routes or {})
+        inst = FakeInstaller(self.home, os_name=os_name, arch=arch, env=env, routes=routes or {})
+        inst.musl_loader = True
+        return inst
 
     def dest_path(self, name):
         return self.home / ".local/bin" / name
@@ -706,6 +708,41 @@ sys.exit(1)
         self.assertFalse(release.exists())
         for tool in ("node", "npm", "npx"):
             self.assertEqual(os.readlink(self.dest_path(tool)), str(current / "bin" / tool))
+
+    def test_nodejs_that_cannot_load_reports_the_loader_error(self):
+        url = "https://mirror.17166969.xyz/current/node-v26.13.1-darwin-arm64.tar.xz"
+        inst = self.make({url: b"candidate"}, os_name="darwin", arch="aarch64")
+        def extract(_archive, staged, *, strip=0):
+            (staged / "bin").mkdir()
+            for tool, body in (("node", "#!/bin/sh\necho 'node: error while loading shared libraries: libatomic.so.1: "
+                                        "cannot open shared object file' >&2\nexit 127\n"),
+                               ("npm", "#!/bin/sh\nexit 127\n"), ("npx", "#!/bin/sh\nexit 127\n")):
+                target = staged / "bin" / tool
+                target.write_text(body)
+                target.chmod(0o755)
+            return True
+        with patch.object(inst, "sha256_file", return_value=installer.NODE_MIRROR_SHA256["darwin-arm64"]), \
+             patch.object(inst, "extract_tar", side_effect=extract), self.assertRaises(SkipInstall) as ctx:
+            inst.install_nodejs()
+        self.assertIn("libatomic.so.1", str(ctx.exception))
+        self.assertIn("install libatomic1", str(ctx.exception))
+        self.assertFalse(self.dest_path("node").exists())
+
+    def test_musl_builds_are_refused_without_the_musl_loader(self):
+        inst = self.make(os_name="linux", arch="aarch64")
+        inst.musl_loader = False
+        for install in (inst.install_python3, inst.install_ffmpeg):
+            with self.assertRaises(SkipInstall) as ctx:
+                install()
+            self.assertIn("/lib/ld-musl-aarch64.so.1 is missing", str(ctx.exception))
+        self.assertEqual(inst.fetched, [])
+
+    def test_musl_loader_probe(self):
+        self.assertTrue(installer.musl_loader_present("darwin", "aarch64", self.root))
+        self.assertFalse(installer.musl_loader_present("linux", "x86_64", self.root))
+        (self.root / "lib").mkdir(exist_ok=True)
+        (self.root / "lib/ld-musl-x86_64.so.1").write_text("")
+        self.assertTrue(installer.musl_loader_present("linux", "x86_64", self.root))
 
     def test_nodejs_managed_uses_bundled_npm_without_registry(self):
         release = self.home / ".local/share/nodejs/26.13.1-npm12.2.2-darwin-arm64"
@@ -1291,6 +1328,10 @@ sys.exit(1)
         self.assertNotIn("player", linux_arm)
         self.assertIn("gluon", linux_arm)
         self.assertIn("lz", default_tools("linux", "x86_64", ""))
+        glibc = default_tools("linux", "x86_64", "", musl_loader=False)
+        for tool in ("python3", "ffmpeg", "player"):
+            self.assertNotIn(tool, glibc)
+        self.assertEqual([t for t in default_tools("linux", "x86_64", "") if t not in ("python3", "ffmpeg", "player")], glibc)
         server_file = self.root / "server.txt"
         server_file.write_text("fd\nrg\n")
         self.assertEqual(default_tools("linux", "x86_64", "server", server_file), ["fd", "rg"])
