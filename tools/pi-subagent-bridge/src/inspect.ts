@@ -14,7 +14,7 @@ import {
 import type { Effort, Tier } from "./tier-policy.ts"
 
 const QUOTA = /\b(429|rate[ -]?limit(ed)?|quota|usage[ -]?limit|allowance exhausted|insufficient credits|credits? exhausted|resource_exhausted|too many requests)\b/i
-const PROVIDER_UNAVAILABLE = /\b(model (?:is |was )?(?:unavailable|not available|not found|unsupported)|unknown model|unsupported model|no such model|model does not exist|provider unavailable|provider not found|not logged in|not authenticated|authentication required|missing credentials)\b/i
+const PROVIDER_UNAVAILABLE = /\b(model (?:is |was )?(?:unavailable|not available|not found|unsupported)|unknown model|unsupported model|no such model|model does not exist|provider unavailable|provider not found|not logged in|not authenticated|authentication required|missing credentials|flagged for possible cybersecurity risk)\b/i
 const PI_LOG_TAIL_BYTES = 500
 const EVENT_LOG_TAIL_BYTES = 65536
 const EVENT_LOG_TAIL_LINES = 50

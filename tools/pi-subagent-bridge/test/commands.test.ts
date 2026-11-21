@@ -23,6 +23,15 @@ test("every command decodes once into its typed shape", () => {
   assert.deepEqual(decodeCommand("cancel", { cwd: "/w", session_id }), { name: "cancel", cwd: "/w", session_id })
 })
 
+test("start accepts a scope that an MCP client sent as a JSON-encoded object", () => {
+  assert.deepEqual(decodeCommand("start", { cwd: "/w", title: "t", tier: "worker", scope: JSON.stringify(scope), brief: "b" }),
+    { name: "start", cwd: "/w", title: "t", tier: "worker", scope, brief: "b" })
+  for (const encoded of ["[]", "null", "\"x\"", "{not json"])
+    assert.throws(() => decodeCommand("start", { cwd: "/w", title: "t", tier: "worker", scope: encoded, brief: "b" }), /scope must be an object/, encoded)
+  assert.throws(() => decodeCommand("start", { cwd: "/w", title: "t", tier: "worker", scope: JSON.stringify({ ...scope, extra: 1 }), brief: "b" }),
+    /Unknown scope field: extra/)
+})
+
 test("malformed arguments are refused before any value reaches the bridge", () => {
   const valid = { cwd: "/w", title: "t", tier: "scout", scope: { ...scope, writable_paths: [] }, brief: "b" }
   const cases: Array<[Parameters<typeof decodeCommand>[0], unknown, RegExp]> = [

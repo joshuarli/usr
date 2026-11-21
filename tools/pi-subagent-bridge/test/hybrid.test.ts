@@ -1241,6 +1241,34 @@ test("Codex quota failure after an edit does not replay the task", async () => {
   } finally { f.close() }
 })
 
+const CODEX_CYBER_REFUSAL = "This content was flagged for possible cybersecurity risk. You're approved for Daybreak Blue, but this request needs additional verification: use a compatible FIDO2 hardware security key"
+
+test("a Codex cybersecurity refusal falls back before edits and needs attention after them", async () => {
+  for (const edited of [false, true]) {
+    const f = fixture()
+    try {
+      const m = fake(f.cwd)
+      const codex = { ...noCodex, available: () => true,
+        start: () => ({ pid: 123, output: "fake", errors: "fake", started_at: "now" }),
+        status: () => ({ state: "failed", result: { subtype: "error" as const, error: CODEX_CYBER_REFUSAL }, stderr: null }) }
+      const bridge = makeHybridBridge(piAdapter(m.api), m.command, codex)
+      const started = await bridge.start(f.cwd, "repair", "worker", f.scope, "Do scoped work")
+      assert.equal(started.backend, "codex")
+      if (edited) writeFileSync(join(f.cwd, "README"), "partial")
+      const status = await bridge.status(f.cwd, started.session_id)
+      if (edited) {
+        assert.equal(status.state, "blocked_partial_work")
+        assert.equal(commandCalls(m.calls).length, 0)
+      } else {
+        assert.equal(status.backend, "command-code")
+        assert.notEqual(status.fallback_reason, null)
+        assert.match(status.fallback_detail ?? "", /cybersecurity risk/)
+        assert.equal(commandCalls(m.calls).length, 1)
+      }
+    } finally { f.close() }
+  }
+})
+
 test("an interrupted Codex run never triggers fallback", async () => {
   const f = fixture()
   try {

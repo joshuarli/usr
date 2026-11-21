@@ -82,6 +82,12 @@ function parseJson(text: string): unknown {
   return JSON.parse(text)
 }
 
+/** Some MCP clients send object-typed tool arguments as JSON-encoded strings. */
+function objectArgument(value: unknown): unknown {
+  if (typeof value !== "string") return value
+  try { return parseJson(value) } catch { return value }
+}
+
 export function decodeCommand(name: CommandName, args: unknown): Command {
   if (!isRecord(args)) throw new Error("Tool arguments must be an object")
   const fields = COMMANDS[name].fields
@@ -97,7 +103,7 @@ export function decodeCommand(name: CommandName, args: unknown): Command {
     case "start": {
       const requested = FIELDS.tier.decode(args.tier)
       return { name, cwd: dir, title: FIELDS.title.decode(args.title), tier: requested,
-        scope: parseScope(args.scope, requested), brief: FIELDS.brief.decode(args.brief) }
+        scope: parseScope(objectArgument(args.scope), requested), brief: FIELDS.brief.decode(args.brief) }
     }
     case "status": return { name, cwd: dir, session_id: FIELDS.session_id.decode(args.session_id) }
     case "resume": {
