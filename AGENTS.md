@@ -61,7 +61,7 @@ Run with `TMPDIR="$PWD/.work/tmp"`, Python 3.10+, and pinned Node 26.13.1 for th
 - Policy generation and projections: `tools/policy/generate.test.ts`; skills metadata: `tools/skills/skills.test.ts`.
 - Alpine provisioner CLI and configuration: `host/alpine/tests/test_provision.py`, `test_tuning.py`; VM journey is separate.
 - macOS setup sequence: `host/macos/sync-test.py`; macOS utilities: `host/macos/macos-test.py`, `lean-test.py`.
-- `intercom-tailnet` CLI: `tools/intercom-tailnet/test_intercom_tailnet.py`; font utilities, `src/wol.py`, `src/su-exec.c`: none.
+- `intercom-tailnet` CLI: `tools/intercom-tailnet/test_intercom_tailnet.py`; `src/wol.py` CLI: `src/test_wol.py`; font utilities, `src/su-exec.c`: none.
 - Network endpoints and live provider behavior: none; fixture checks do not establish live service behavior.
 - Performance workload: `cd tools/pi-subagent-bridge && npm run bench:runtime` compares local adapter/bridge samples; no repository-wide workload.
 - Vendored PyYAML revision and source: `tools/pinact/src/pinact/_vendor/yaml/PROVENANCE.txt`.

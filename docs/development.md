@@ -45,6 +45,7 @@ Run the narrowest check that covers the change. `sh sync check-parallel` runs th
 | zsh shim | `(cd dotfiles && sh zsh-shim-test.sh)` |
 | a hook or `mdtool` | `python3 -I tools/mdtool/src/mdtool.py selftest`, `sh tools/mdtool/tests/mdtool-test.sh`, and `sh FILE` for each changed match |
 | `perf-gate-ready` | `sh dotfiles/perf-gate-ready-test.sh` and `dash dotfiles/perf-gate-ready-test.sh` |
+| `src/wol.py` | `TMPDIR="$PWD/.work/tmp" python3 -I src/test_wol.py` |
 | `host/setup-linux` | `sh host/setup-linux-test.sh` and `shellcheck -s sh host/setup-linux host/setup-linux-test.sh` |
 | macOS sync side effects | `python3 -I host/macos/sync-test.py` |
 | Linux `power-policy` or its test harness | `sh dotfiles/power-policy-test.sh`, `dash dotfiles/power-policy-test.sh`, `busybox ash dotfiles/power-policy-test.sh`, and `shellcheck -s sh dotfiles/linux/.local/bin/power-policy dotfiles/power-policy-test.sh` |

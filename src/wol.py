@@ -45,7 +45,7 @@ def get_mac_addresses_from_file(filename):
         with open(filename, 'r') as f:
             for line in f:
                 line = line.strip()
-                if not line or len(line) < 17:
+                if not line:
                     continue
                 try:
                     mac_bytes = parse_mac(line)

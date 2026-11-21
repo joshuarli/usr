@@ -82,6 +82,7 @@ HOOKS = Area("git hooks and worktree helpers")
 ZSH = Area("zsh shim")
 MDTOOL = Area("a hook or `mdtool`")
 PERF_GATE = Area("`perf-gate-ready`")
+WOL = Area("`src/wol.py`")
 SETUP_LINUX = Area("`host/setup-linux`")
 MACOS_SYNC = Area("macOS sync side effects")
 POWER = Area("Linux `power-policy` or its test harness")
@@ -214,6 +215,7 @@ REGISTRY: tuple[Check, ...] = (
     Check("mdtool-hook-test", (MDTOOL,), ("sh", "{file}"), ("tools/mdtool/tests/*-test.sh",), per_file=True),
     Check("perf-gate-ready", (PERF_GATE,), ("sh", "dotfiles/perf-gate-ready-test.sh"), ("dotfiles/base/.local/bin/perf-gate-ready", "dotfiles/perf-gate-ready-test.sh")),
     Check("perf-gate-ready-dash", (PERF_GATE,), ("dash", "dotfiles/perf-gate-ready-test.sh"), ("dotfiles/base/.local/bin/perf-gate-ready", "dotfiles/perf-gate-ready-test.sh"), needs=("dash",)),
+    Check("wol", (WOL,), py("src/test_wol.py"), ("src/wol.py", "src/test_wol.py"), tmpdir=True),
     Check("setup-linux", (SETUP_LINUX,), ("sh", "host/setup-linux-test.sh"), ("host/setup-linux", "host/setup-linux-test.sh")),
     Check("setup-linux-shellcheck", (SETUP_LINUX,), ("shellcheck", "-s", "sh", "host/setup-linux", "host/setup-linux-test.sh"), ("host/setup-linux", "host/setup-linux-test.sh"), needs=("shellcheck",)),
     Check("macos-sync", (MACOS_SYNC,), py("host/macos/sync-test.py"), ("host/macos/", "tools/sync/main.py")),
@@ -237,7 +239,7 @@ SUITE: tuple[str, ...] = (
     "pi-git-guard", "pinact", "pinact-yaml", "pinact-lint-rules", "pinact-expressions", "pinact-security",
     "pinact-fix", "pinact-pins", "pi-profile", "policy-generated", "policy-generator", "orchestrate", "sbx",
     "reset-agents", "pre-push", "worktree-remove", "worktree-retire", "disk-pressure", "pi-disk-pressure", "campaign-closeout",
-    "zsh-shim", "harness-lean", "mdtool-suite", "decide", "skills", "project-skills", "skills-campaign",
+    "zsh-shim", "harness-lean", "mdtool-suite", "decide", "skills", "project-skills", "skills-campaign", "wol",
 )
 
 BY_ID = {check.id: check for check in REGISTRY}
