@@ -1,5 +1,13 @@
 Prefix: USR
-Next: 134
+Next: 135
+### USR-134 · P3 · gpu-gate-ready counts an idle desktop's compositor as GPU contention
+
+- **Area:** Dotfiles · gpu-gate-ready
+- **Where:** dotfiles/base/.local/bin/gpu-gate-ready (check, the other-process GPU-time criterion)
+- **Problem:** On the M5 Max with a normal desktop session, ghostty (16.8%) and WindowServer (8.7%) alone accumulate about 25% of a 3 s window in AGXDeviceUserClient accumulatedGPUTime while IOAccelerator device utilization reads 0%. The default 5% limit therefore reports contended for 30+ minutes on an otherwise idle host, and a TensorFold benchmark lane gave up on it. accumulatedGPUTime appears to count submission time that overlaps other work, so it overstates the load from tiny render jobs.
+- **Recommendation:** Judge other-process GPU time against device utilization: count a process's share only when utilization is above a small floor, or use a per-process limit that discounts known compositor and terminal clients, and print which rule decided. Acceptance: on an idle desktop with only the terminal and WindowServer active, `gpu-gate-ready -1` exits 0, and it still exits 75 while another process runs a GPU benchmark.
+- **Fix with:** none
+- **Effort:** S
 
 ### USR-83 · P2 · running sessions on two hosts cannot reach each other over intercom
 
