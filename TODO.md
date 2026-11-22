@@ -1,14 +1,5 @@
 Prefix: USR
-Next: 135
-
-### USR-134 · P3 · gpu-gate-ready counts an idle desktop's compositor as GPU contention
-
-- **Area:** Dotfiles · gpu-gate-ready
-- **Where:** dotfiles/base/.local/bin/gpu-gate-ready (check, the other-process GPU-time criterion)
-- **Problem:** On the M5 Max with a normal desktop session, ghostty (16.8%) and WindowServer (8.7%) alone accumulate about 25% of a 3 s window in AGXDeviceUserClient accumulatedGPUTime while IOAccelerator device utilization reads 0%. The default 5% limit therefore reports contended for 30+ minutes on an otherwise idle host, and a TensorFold benchmark lane gave up on it. accumulatedGPUTime appears to count submission time that overlaps other work, so it overstates the load from tiny render jobs.
-- **Recommendation:** Judge other-process GPU time against device utilization: count a process's share only when utilization is above a small floor, or use a per-process limit that discounts known compositor and terminal clients, and print which rule decided. Acceptance: on an idle desktop with only the terminal and WindowServer active, `gpu-gate-ready -1` exits 0, and it still exits 75 while another process runs a GPU benchmark.
-- **Fix with:** none
-- **Effort:** S
+Next: 136
 
 ### USR-83 · P2 · running sessions on two hosts cannot reach each other over intercom
 
@@ -91,12 +82,12 @@ Next: 135
 - **Fix with:** none
 - **Effort:** S
 
-### USR-132 · P3 · worktree-retire keeps lanes whose commits master carries as equal patches
+### USR-135 · P2 · cc-rs prefixes the kache rustc wrapper onto HOST_CXX=cargo-wrapper-cxx, which kache rejects
 
-- **Area:** Worktree lifecycle
-- **Where:** worktree-retire integration check (ancestor-only)
-- **Problem:** On 2026-11-21 in xsh, four completed lanes (lane/debloat-xsh, integrate, lane/lean-effects, integrate-xsh-147) were kept as "not integrated" although `git cherry master BRANCH` reports every commit as an equal patch already on master (each was rebased or cherry-picked before landing). The ancestor-only check cannot prove these, so their worktrees (about 1.7 GiB with ignored build caches) stay until someone hand-reviews them, and the cleanup rule forbids forcing them out. A `--dry-run` also stops at the ignored-files notice before the integration check, so it reports "review ignored files" for lanes it will then refuse.
-- **Recommendation:** Accept a lane when every commit beyond the merge base has an equal patch id on the target (`git cherry` reports only `-`), keep the branch in that case (it is not an ancestor) and say so in the output. Run the integration check before the ignored-files notice so a dry run reports the decisive refusal. Acceptance: a fixture lane whose two commits were cherry-picked onto the target is retired with its branch kept; a lane with one unmatched commit is still refused; a dry run on an unintegrated lane with ignored files prints the integration refusal.
+- **Area:** Dotfiles · cargo wrappers
+- **Where:** dotfiles/base/.cargo/config.toml ([build] rustc-wrapper, [env] CC_KNOWN_WRAPPER_CUSTOM, HOST_CC, HOST_CXX)
+- **Problem:** On macOS ARM64 (kache 1.0.0 at ~/.cargo/bin/kache, cc crate 1.5.1, cmake 4.4.5), `cargo build --locked --profile dist --features build-binary` in ~/d/img fails in jpegli-sys: cc-rs runs `kache cargo-wrapper-cxx -O3 ... -c adaptive_quantization.cc` and kache exits 2 with `error: unrecognized subcommand 'cargo-wrapper-cxx'`. cc-rs treats the rustc-wrapper file name `kache` as a known cache wrapper (CC_KNOWN_WRAPPER_CUSTOM=kache) and prefixes it onto the HOST_CXX value, so the config comment's claim that this key only applies to multi-word compiler values does not hold here. A configure that dies this way also leaves stale CMake caches in cmake-crate OUT_DIRs (ENABLE_TESTS=ON, default install prefix) that make later builds fail until those OUT_DIRs are removed. Workaround: export HOST_CC=clang HOST_CXX=clang++.
+- **Recommendation:** Either make kache accept the wrapper names as compilers, or stop setting HOST_CC/HOST_CXX to wrappers when the rustc wrapper is named kache (cc-rs then runs `kache clang`). Acceptance: a cold `cargo build` of a crate whose build script compiles C++ with cc 1.5.1 succeeds under the stock config with kache installed, and dotfiles/cargo-wrappers-test.sh covers the cc-rs invocation shape `kache <HOST_CXX> ARGS`.
 - **Fix with:** none
 - **Effort:** S
 
@@ -278,6 +269,24 @@ Next: 135
 - **Problem:** uvx resolves whatever ruff and ty version is cached or newest; ty is pre-1.0 and ty.toml enables many rules by name at error severity, so lint results can change or break on rule renames without a repository change and differ between hosts and CI.
 - **Recommendation:** Pin ruff and ty versions in one place that both ./lint and checks.py read. Acceptance: no unpinned uvx ruff or uvx ty invocation remains.
 - **Fix with:** single-source-of-truth
+- **Effort:** S
+
+### USR-132 · P3 · worktree-retire keeps lanes whose commits master carries as equal patches
+
+- **Area:** Worktree lifecycle
+- **Where:** worktree-retire integration check (ancestor-only)
+- **Problem:** On 2026-11-21 in xsh, four completed lanes (lane/debloat-xsh, integrate, lane/lean-effects, integrate-xsh-147) were kept as "not integrated" although `git cherry master BRANCH` reports every commit as an equal patch already on master (each was rebased or cherry-picked before landing). The ancestor-only check cannot prove these, so their worktrees (about 1.7 GiB with ignored build caches) stay until someone hand-reviews them, and the cleanup rule forbids forcing them out. A `--dry-run` also stops at the ignored-files notice before the integration check, so it reports "review ignored files" for lanes it will then refuse.
+- **Recommendation:** Accept a lane when every commit beyond the merge base has an equal patch id on the target (`git cherry` reports only `-`), keep the branch in that case (it is not an ancestor) and say so in the output. Run the integration check before the ignored-files notice so a dry run reports the decisive refusal. Acceptance: a fixture lane whose two commits were cherry-picked onto the target is retired with its branch kept; a lane with one unmatched commit is still refused; a dry run on an unintegrated lane with ignored files prints the integration refusal.
+- **Fix with:** none
+- **Effort:** S
+
+### USR-134 · P3 · gpu-gate-ready counts an idle desktop's compositor as GPU contention
+
+- **Area:** Dotfiles · gpu-gate-ready
+- **Where:** dotfiles/base/.local/bin/gpu-gate-ready (check, the other-process GPU-time criterion)
+- **Problem:** On the M5 Max with a normal desktop session, ghostty (16.8%) and WindowServer (8.7%) alone accumulate about 25% of a 3 s window in AGXDeviceUserClient accumulatedGPUTime while IOAccelerator device utilization reads 0%. The default 5% limit therefore reports contended for 30+ minutes on an otherwise idle host, and a TensorFold benchmark lane gave up on it. accumulatedGPUTime appears to count submission time that overlaps other work, so it overstates the load from tiny render jobs.
+- **Recommendation:** Judge other-process GPU time against device utilization: count a process's share only when utilization is above a small floor, or use a per-process limit that discounts known compositor and terminal clients, and print which rule decided. Acceptance: on an idle desktop with only the terminal and WindowServer active, `gpu-gate-ready -1` exits 0, and it still exits 75 while another process runs a GPU benchmark.
+- **Fix with:** none
 - **Effort:** S
 
 ### USR-73 · P4 · The refactor-web-ui skill has only been applied to agentctl
