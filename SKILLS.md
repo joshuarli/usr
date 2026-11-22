@@ -96,7 +96,7 @@ Repo upkeep and getting work merged.
 | `green` | Explicit | Get CI green for where you stand, with unattended execution: on a feature branch, bring its open PR to merge-ready (conflicts, bot comments, required CI); on the default branch, fix its CI. It never merges. |
 | `upgrade` | Explicit | Bump dependencies and pins to the newest stable versions, then run focused checks. |
 | `docs-refresh` | Explicit | Bring docs up to date with the code and make them shorter. Edits docs and comments, never behavior. |
-| `settle` | Explicit | Before moving to another computer: find unmerged and local-only work and separate what must travel from what regenerates. |
+| `settle` | Explicit | Make the default branch the cutting edge: merge every open and partial branch, pull request and lane into it, push what remains, then prune merged local branches with `git-branch-consolidation --delete`. |
 | `linux-capsule` | Explicit | Prove a fresh Linux host can set up the repo from scratch: run its bootstrap and full checks in a pristine container from a clean clone, and fix what breaks. |
 
 ## Keep the skills themselves honest
