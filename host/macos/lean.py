@@ -52,6 +52,15 @@ disabled.plist — re-run --audit + apply afterwards. Siri / Apple
 Intelligence / analytics policy is better enforced via MDM restriction
 profiles, which survive upgrades; launchctl covers what profiles can't.
 
+Siri AI.app (macOS 27+)
+-----------------------
+Apple Intelligence's Siri is a separate app, /System/Applications/Siri AI.app,
+launched by the ``com.apple.campo`` user agent. Disabling that label stops the
+app; the ``com.apple.Siri`` and ``com.apple.CloudSubscriptionFeatures.optIn``
+keys below turn off the Apple Intelligence feature flags that a launchd-only
+disable leaves in place. A major upgrade resets disabled.plist, so re-run
+--audit and apply afterwards: this is how the campo agent comes back.
+
 Maintaining across macOS versions
 ---------------------------------
 Apple changes three things independently between releases: plist
@@ -171,6 +180,7 @@ DISABLE_SECTIONS: list[tuple[str, str, list[str]]] = [
         "com.apple.ContextStoreAgent",
         "com.apple.duetexpertd",
         "com.apple.siriappintentsd",
+        "com.apple.campo",
     ]),
     ("Apple Intelligence & ML", "user", [
         "com.apple.intelligenceplatformd",
@@ -568,6 +578,9 @@ USER_DEFAULTS: dict[str, list[DefaultSpec]] = {
         DefaultSpec("com.apple.Siri", "StatusMenuVisible", "0", "-bool", "false"),
         DefaultSpec("com.apple.Siri", "UserHasDeclinedEnable", "1", "-bool", "true"),
         DefaultSpec("com.apple.Siri", "VoiceTriggerUserEnabled", "0", "-bool", "false"),
+        DefaultSpec("com.apple.Siri", "AppleIntelligenceEnabled", "0", "-bool", "false"),
+        DefaultSpec("com.apple.Siri", "LLMEnable", "0", "-bool", "false"),
+        DefaultSpec("com.apple.CloudSubscriptionFeatures.optIn", "545129924", "0", "-bool", "false"),
         DefaultSpec("com.apple.lookup.shared", "LookupSuggestionsDisabled", "1", "-bool", "true"),
     ],
     "App Store Preferences": [
@@ -649,7 +662,7 @@ DISABLED_RE = re.compile(r'"([^"]+)"\s*=>\s*(disabled|true)\b')
 PID_RE = re.compile(r"pid\s*=\s*(\d+)")
 VPN_SKIP_RE = re.compile(r"[Tt]ailscale|VPN|[Vv]pn|utun")
 AUDIT_CANDIDATE_RE = re.compile(
-    r"intellig|siri|analytic|telemetry|biome|trial|diagnos|genmoji|playground"
+    r"intellig|siri|campo|analytic|telemetry|biome|trial|diagnos|genmoji|playground"
     r"|writing\.tool|backgroundtask|background\.task", re.IGNORECASE)
 
 
@@ -1059,6 +1072,7 @@ def apply_spotlight_tmutil(state: State) -> None:
 USER_DEFAULTS_PREVIEW = {
     "System Preferences": [
         "  would disable Siri (assistant, menu bar, voice trigger)",
+        "  would disable Apple Intelligence (feature flags and on-device LLM)",
         "  would disable Spotlight suggestions",
     ],
     "App Store Preferences": [
@@ -1080,6 +1094,9 @@ USER_DEFAULTS_REVERT = {
         ("com.apple.Siri", "StatusMenuVisible"),
         ("com.apple.Siri", "UserHasDeclinedEnable"),
         ("com.apple.Siri", "VoiceTriggerUserEnabled"),
+        ("com.apple.Siri", "AppleIntelligenceEnabled"),
+        ("com.apple.Siri", "LLMEnable"),
+        ("com.apple.CloudSubscriptionFeatures.optIn", "545129924"),
         ("com.apple.lookup.shared", "LookupSuggestionsDisabled"),
     ],
     "App Store Preferences": [
@@ -1101,6 +1118,7 @@ USER_DEFAULTS_REVERT = {
 USER_DEFAULTS_DONE = {
     "System Preferences": [
         "  Siri fully disabled (assistant, menu bar, voice trigger)",
+        "  Apple Intelligence disabled (feature flags and on-device LLM)",
         "  Spotlight suggestions disabled",
     ],
     "App Store Preferences": [

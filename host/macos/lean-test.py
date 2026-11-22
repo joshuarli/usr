@@ -19,6 +19,16 @@ sys.modules[spec.name] = lean
 spec.loader.exec_module(lean)
 
 
+class ManagedPreferenceTests(unittest.TestCase):
+    def test_every_managed_default_is_reverted_and_described(self):
+        for title, specs in lean.USER_DEFAULTS.items():
+            with self.subTest(title=title):
+                reverted = set(lean.USER_DEFAULTS_REVERT[title])
+                self.assertEqual({(s.domain, s.key) for s in specs}, reverted)
+                self.assertIn(title, lean.USER_DEFAULTS_PREVIEW)
+                self.assertIn(title, lean.USER_DEFAULTS_DONE)
+
+
 class CommandFailureTests(unittest.TestCase):
     def run_sudo(self, argv, *, check):
         return subprocess.run(argv, capture_output=True, text=True, check=check)
