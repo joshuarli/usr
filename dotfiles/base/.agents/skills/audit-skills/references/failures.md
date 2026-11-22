@@ -24,3 +24,7 @@ Take the strongest mechanism available. A weaker guard becomes the next template
 Fix the most frequent classes first, one logical change per commit. Prove each new check fails on a real past mistake by running it against the old code. A check agents will not run is not a check, so keep it fast enough to run on every change. Allow an exception only on the offending line, with a reason, an expiry, and a human's approval.
 
 A rule nothing enforces is a repeat: fix it higher in the same change. Drop a rule once its mistake can no longer happen.
+
+## Recorded cutoffs
+
+- **2026-11-22T21:09:56Z** (commit `ae123235`): zsh word splitting. Agents repeatedly wrote bash-style unquoted `$VAR` loops under zsh; failures surfaced as exit 127, "file name too long", no-op commits and false monitor alerts. Agent-context zsh now runs with `SH_WORD_SPLIT`, and the shared contract asks for POSIX sh and Python. When auditing whether the class is gone, count only sessions after this timestamp. A fatal refusal on direct shim calls was implemented and reverted the same day because it broke legitimate harness calls such as `pwd`; do not reintroduce it.
