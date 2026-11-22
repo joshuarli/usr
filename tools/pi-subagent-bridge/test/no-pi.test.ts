@@ -100,6 +100,10 @@ printf '%s\\n' '{"type":"item.completed","item":{"type":"agent_message","text":"
       throw new Error("fixture worker did not terminate")
     }
     assert.equal((await wait()).state, "succeeded")
+    const launched = readFileSync(join(root, "args"), "utf8")
+    assert.match(launched, /--enable\ngoals\n/)
+    assert.doesNotMatch(launched, /--ignore-user-config/)
+    assert.match(launched, /call create_goal with the required acceptance proof as its objective/)
     assert.equal(cli("inspect", root, started.session_id).execution_state, "succeeded")
     assert.equal(cliText("watch", "--state", root, started.session_id).trim(), "succeeded")
     assert.ok(cli("campaign", "list", "--json", root).some((job: { id: string }) => job.id === started.session_id))

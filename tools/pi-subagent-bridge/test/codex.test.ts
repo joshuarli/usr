@@ -31,7 +31,8 @@ test("Codex captures the thread and completed turn and resumes with the same mod
     const next = startCodex(request(root, { prompt: "correction", resume: "thread-1" }))
     for (let i = 0; i < 200 && codexResult(next).state === "running"; i++) await delay()
     assert.match(readFileSync(args, "utf8"), /resume\nthread-1\ncorrection/)
-    assert.match(readFileSync(args, "utf8"), /--ignore-user-config/)
+    assert.doesNotMatch(readFileSync(args, "utf8"), /--ignore-user-config/)
+    assert.match(readFileSync(args, "utf8"), /--enable\ngoals\n-c\nagents\.enabled=false\n--disable\nmulti_agent/)
     assert.match(readFileSync(args, "utf8"), /--sandbox\ndanger-full-access/)
     assert.doesNotMatch(readFileSync(args, "utf8"), /workspace-write|network_access/)
     const admittedPin = { model: "fixture-historical-codex", effort: "high" } as const
@@ -56,6 +57,8 @@ test("Codex refuses a forbidden family and a read-only run is unsandboxed but ha
     for (let i = 0; i < 200 && codexResult(run).state === "running"; i++) await delay()
     const recorded = readFileSync(args, "utf8")
     assert.match(recorded, /--sandbox\ndanger-full-access/)
+    assert.match(recorded, /--ignore-user-config/)
+    assert.doesNotMatch(recorded, /--enable\ngoals/)
     for (const feature of ["shell_tool", "unified_exec", "computer_use", "browser_use", "in_app_browser"])
       assert.match(recorded, new RegExp("--disable\n" + feature + "\n"), feature)
     assert.doesNotMatch(recorded, /--disable\ncode_mode_host\n/)

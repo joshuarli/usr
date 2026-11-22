@@ -23,7 +23,12 @@ export function startCodex(request: LaunchRequest): CommandRun {
   const readOnly = access.kind === "read-only"
   const suffix = randomUUID(), output = request.planned_run?.output ?? `${logDirectory}/${suffix}.codex.ndjson`, errors = request.planned_run?.errors ?? `${logDirectory}/${suffix}.codex.stderr`
   const stdout = openSync(output, "wx", 0o600), stderr = openSync(errors, "wx", 0o600)
-  const args = ["exec", "--json", "--ignore-user-config", "--disable", "multi_agent", "-c", 'model_provider="openai"',
+  // Write runs load the user's Codex config so its goals, memories and instructions apply; the
+  // flags below still pin the model, effort, sandbox and approval, and keep the worker a leaf.
+  // Read-only scouts ignore it: their guarantee rests on having no tools, and the user config can
+  // add plugins and MCP servers.
+  const userConfig = readOnly ? ["--ignore-user-config"] : ["--enable", "goals", "-c", "agents.enabled=false"]
+  const args = ["exec", "--json", ...userConfig, "--disable", "multi_agent", "-c", 'model_provider="openai"',
     "-c", `model_reasoning_effort="${effort}"`, "-c", 'approval_policy="never"',
     "--sandbox", "danger-full-access", "--model", model,
     ...(readOnly ? ["--disable", "shell_tool", "--disable", "unified_exec",

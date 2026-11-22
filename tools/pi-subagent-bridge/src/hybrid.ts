@@ -141,6 +141,7 @@ function prompt(s: Session): string {
     "Native Pi workers may delegate at most one generation to equal-or-weaker typed tiers within the assigned worktree and scope.",
     "A nested child may not delegate again; never launch a new pi-subagent-bridge CLI/MCP session yourself.",
     "Codex and Command Code workers remain leaves: do not spawn subagents.",
+    ...(s.tier !== "scout" && executorOf(s) === "codex" ? ["Before other work, call create_goal with the required acceptance proof as its objective. Mark the goal complete only when that proof is met; a listed stop condition ends the run with the goal still active."] : []),
     s.tier === "scout" ? "Do not commit, switch branches, merge, push, add dependencies, or edit outside writable paths." :
       "You may commit your work on the current branch of this worktree (Conventional Commits, explaining why); do not amend or rewrite commits that existed at admission, merge, rebase, switch branches, push, add dependencies, or edit outside writable paths.",
     "The brief's acceptance proof is the goal: keep working until it is met or a listed stop condition truly applies. Resolve ambiguity from the brief, code, or repository conventions; that ambiguity is not a stop condition. A needed commit, missing scratch directory, slow command, or recoverable tool error is not a blocker. Stopping early without a named stop condition from the brief counts as an incomplete run.",
