@@ -1,5 +1,6 @@
 Prefix: USR
 Next: 135
+
 ### USR-134 · P3 · gpu-gate-ready counts an idle desktop's compositor as GPU contention
 
 - **Area:** Dotfiles · gpu-gate-ready
