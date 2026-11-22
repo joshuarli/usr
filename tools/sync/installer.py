@@ -86,6 +86,7 @@ OXISH_COMMANDS = ["oxish-server", "oxish-session"]
 GLUON_COMMANDS = ["meson", "ninja", "gluon-build"]
 BCTL_COMMANDS = ["bctl"]
 BCTL_REPO = "joshuarli/bctl"
+FX_SETTINGS = Path(__file__).with_name("fx-settings.json")
 FFMPEG_COMMANDS = ["ffmpeg", "ffprobe"]
 OPENCODE2_SHIM = '#!/bin/sh\nexec "${HOME}/.opencode/bin/opencode" "$@"'
 GIT_COMMANDS = ["git", "git-shell", "git-upload-archive", "git-upload-pack", "git-receive-pack", "git-submodule", "git-submodule--helper", "git-sh-setup", "git-sh-i18n", "git-sh-i18n--envsubst"]
@@ -984,6 +985,47 @@ class Installer:
         archive_path.unlink(missing_ok=True)
 
     def install_fx(self) -> None:
+        try:
+            self._install_fx_binary()
+        finally:
+            if (self.dest / "fx").is_file():
+                self.apply_fx_settings()
+
+    def apply_fx_settings(self) -> None:
+        """Merge the tracked preferences into ~/.fx/settings.json as a regular file.
+
+        fx reads its settings only from a regular file in a folder it owns, never through a symlink, so the file is
+        written in place rather than linked. Keys fx saved itself are kept; tracked top-level keys win, and tracked
+        objects such as `models` are merged one level deep."""
+        desired = json.loads(FX_SETTINGS.read_text())
+        folder = self.home / ".fx"
+        path = folder / "settings.json"
+        folder.mkdir(mode=0o700, exist_ok=True)
+        current: dict = {}
+        if path.is_symlink():
+            path.unlink()
+        elif path.is_file():
+            try:
+                current = json.loads(path.read_text() or "{}")
+            except json.JSONDecodeError:
+                self.warn(f"Warning: {path} is not valid JSON; fx settings left unchanged")
+                return
+        merged = dict(current)
+        for key, value in desired.items():
+            if isinstance(value, dict) and isinstance(current.get(key), dict):
+                merged[key] = {**current[key], **value}
+            else:
+                merged[key] = value
+        if path.is_file() and merged == current:
+            return
+        staged = path.with_name(f".settings.json.{os.getpid()}")
+        staged.write_text(json.dumps(merged, indent=2) + "\n")
+        staged.chmod(0o600)
+        os.replace(staged, path)
+        self.changed = True
+        self.ok(f"Wrote {path}")
+
+    def _install_fx_binary(self) -> None:
         platforms = {("darwin", "aarch64"): "macos-aarch64", ("darwin", "x86_64"): "macos-x86_64",
                      ("linux", "aarch64"): "linux-aarch64", ("linux", "x86_64"): "linux-x86_64"}
         if (self.os_name, self.arch) not in platforms:

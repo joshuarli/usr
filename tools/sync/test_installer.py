@@ -1462,3 +1462,50 @@ if __name__ == "__main__":
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class FxSettingsTests(unittest.TestCase):
+    """fx refuses settings reached through a symlink, so sync writes ~/.fx/settings.json as a regular file."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.home = Path(self.tmp.name)
+        self.inst = Installer(self.home, os_name="darwin", arch="aarch64", env={"HOME": str(self.home)})
+        self.path = self.home / ".fx/settings.json"
+        self.desired = json.loads(installer.FX_SETTINGS.read_text())
+
+    def test_a_linked_settings_file_becomes_a_private_regular_file(self):
+        (self.home / ".fx").mkdir()
+        target = self.home / "dotfiles-settings.json"
+        target.write_text('{"provider": "stale"}')
+        self.path.symlink_to(target)
+        self.inst.apply_fx_settings()
+        self.assertFalse(self.path.is_symlink())
+        self.assertEqual(json.loads(self.path.read_text()), self.desired)
+        self.assertEqual(self.path.stat().st_mode & 0o777, 0o600)
+        self.assertEqual(target.read_text(), '{"provider": "stale"}')
+
+    def test_keys_fx_saved_itself_are_kept_and_tracked_keys_win(self):
+        (self.home / ".fx").mkdir()
+        self.path.write_text(json.dumps({"theme": "dark", "provider": "codex",
+                                         "models": {"codex": "gpt-x"}}))
+        self.inst.apply_fx_settings()
+        merged = json.loads(self.path.read_text())
+        self.assertEqual(merged["theme"], "dark")
+        self.assertEqual(merged["provider"], self.desired["provider"])
+        self.assertEqual(merged["models"], {"codex": "gpt-x", **self.desired["models"]})
+
+    def test_a_converged_file_is_not_rewritten(self):
+        self.inst.apply_fx_settings()
+        before = self.path.stat().st_mtime_ns
+        self.inst.changed = False
+        self.inst.apply_fx_settings()
+        self.assertFalse(self.inst.changed)
+        self.assertEqual(self.path.stat().st_mtime_ns, before)
+
+    def test_invalid_json_is_left_alone(self):
+        (self.home / ".fx").mkdir()
+        self.path.write_text("{not json")
+        self.inst.apply_fx_settings()
+        self.assertEqual(self.path.read_text(), "{not json")
