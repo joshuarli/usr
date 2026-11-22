@@ -51,3 +51,15 @@ lint: ## Run repository lint checks
 bench: ## Time representative sync, pinact, mdtool and todo journeys (BENCH_ARGS=--rounds N)
 	@mkdir -p .work/tmp
 	@TMPDIR="$$PWD/.work/tmp" python3 -I tools/bench/bench.py $(BENCH_ARGS)
+
+.PHONY: clean
+clean: ## Remove local Python test caches for sync and Pi
+	@if test -L ./tools; then printf '%s\n' 'make clean: ./tools must be a local directory' >&2; exit 1; fi
+	@if test -L ./tools/pi; then printf '%s\n' 'make clean: ./tools/pi must be a local directory' >&2; exit 1; fi
+	@if test -L ./tools/sync; then printf '%s\n' 'make clean: ./tools/sync must be a local directory' >&2; exit 1; fi
+	@for artifact in ./tools/pi/__pycache__ ./tools/sync/__pycache__; do \
+	  if test -L "$$artifact" || { test -e "$$artifact" && ! test -d "$$artifact"; }; then \
+	    printf '%s\n' "make clean: $$artifact must be a local build directory" >&2; exit 1; \
+	  fi; \
+	done
+	rm -rf -- ./tools/pi/__pycache__ ./tools/sync/__pycache__
