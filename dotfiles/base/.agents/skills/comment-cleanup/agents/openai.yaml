@@ -1,5 +1,5 @@
 interface:
   display_name: "Comment Cleanup"
-  short_description: "Delete comments and fix the code they excuse"
+  short_description: "Enforce constraints before removing their warnings"
 policy:
   allow_implicit_invocation: false

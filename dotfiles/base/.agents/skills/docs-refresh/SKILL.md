@@ -8,7 +8,7 @@ metadata:
 
 # Docs Refresh
 
-Make the docs true, short, and findable, in the standard shape below. Docs and public API doc comments are the only files you change. Every other comment is deleted, never added or reworded. Prose rots, so a doc claim that a type, test, or lint could enforce is reported as a candidate to enforce and then cut. When the code is what is wrong, leave it and report it.
+Make the docs true, short, and findable, in the standard shape below. Edit docs and public API doc comments; handle other source comments through `comment-cleanup` without changing behavior. Report claims a type, test, or lint could enforce as candidates for enforcement; keep unresolved constraints visible. When the code is what is wrong, leave it and report it.
 
 ## Standard format
 
@@ -21,7 +21,7 @@ Size the layout to the repo. A small repo, with under about 200 lines of docs or
 
 ## Scope
 
-Default to every doc surface in the repo: README, AGENTS.md and CLAUDE.md, `docs/`, the `TODO.md` backlog with its RFCs and campaign docs, contributing notes, `--help` text, config examples, and public API doc comments. When asked to refresh only a change, cover just the docs that change made stale or should have updated, and the public API doc comments it touched. Delete any other comment it added or changed.
+Default to every doc surface in the repo: README, AGENTS.md and CLAUDE.md, `docs/`, the `TODO.md` backlog with its RFCs and campaign docs, contributing notes, `--help` text, config examples, and public API doc comments. When asked to refresh only a change, cover just the docs that change made stale or should have updated, and the public API doc comments it touched. Apply `comment-cleanup` to other source comments in that scope.
 
 ## Rules
 
@@ -30,7 +30,7 @@ Default to every doc surface in the repo: README, AGENTS.md and CLAUDE.md, `docs
 - **Make it shorter.** Count Markdown lines in scope before you edit (`git ls-files -z '*.md' '*.mdx' '*.rst' | xargs -0 cat | wc -l`). The count goes down. A net increase needs a stated reason, such as a topic that had no doc. Cut what is outdated, duplicated, or restates what the code shows. Give each fact one home and link to it rather than copy it (`single-source-of-truth`). Keep the why, constraints, invariants, commands, and hazards. Do not reword for taste.
 - **Point at code, do not copy it.** A list that mirrors one file, such as the env vars one function reads or a route table, becomes a pointer to that file. Setup steps the product already shows, on a home page or in `--help`, become a link.
 - **A doc code reads is load-bearing.** Before you move, split, rename, or cut a doc, search source and build files for its path: embeds such as `include_str!`, tests that read or compile it, hashes, and checks of its layout. Report what you find to every writer, and leave such a doc's structure to the code that reads it.
-- **Comments** go through `comment-cleanup` in its review mode. Only public API contract doc comments are doc surface; every other comment is a defect, not documentation. Rationale a deleted comment carried lands once in the `docs/` topic that owns it, never back in source.
+- **Comments** follow `comment-cleanup` with comment edits allowed and behavior edits forbidden. Only public API contract doc comments are doc surface. Irreducible rationale from a safely deleted comment lands once in the `docs/` topic that owns it, never back in source.
 - **Clear done work.** Check each open ticket in scope against the code, its commit history, and any recorded release. Close one that is done or obsolete with `todo close`, citing the commit or record that shows it. Narrow a partly done ticket to what remains. A completed RFC or campaign doc is not a dated record: per `todo`, land each fact a reader still needs in the topic doc that owns it, drop links to it, and delete it in the same change. Run `todo check` afterwards.
 - **Leave dated records alone** (changelog, ADRs, release notes), marking a superseded one rather than rewriting it. For generated docs, edit the source and the generator input, not the output.
 - **One writer** per file, so edits do not overlap. Create a doc file only for a topic that has no home and would make its nearest existing doc too long to scan.

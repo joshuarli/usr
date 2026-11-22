@@ -5,7 +5,7 @@
 - Keep scope fixed; no repo-wide sweeps unless asked. Surface changes to APIs, types, schemas, permissions, invariants, and transaction boundaries; update affected code, tests, and docs together. An agent-authored plan does not authorize execution.
 - Prefer precise domain names/types and narrow interfaces. No speculative abstractions, backward-compatibility shims, silent defaults, or bookkeeping without a concrete consumer or failure to address. Delete dead code. Vet dependencies for maintenance, transitive weight, license, and performance cost; explain the choice and remove unused dependencies.
 - Do not run formatters, change pinned Rust nightlies, or work on CI unless explicitly asked. "fix ci" authorizes reproducing locally (repo Dockerfiles on Linux), committing, pushing, retriggering with `gh`, and iterating until green.
-- No code comments except external constraints, public API contracts, legal/lint/safety requirements, justified suppressions, or explanatory issue/PR links. State the constraint directly, never through roadmap/phase references; remove failing comments you touch. Explain unavoidable workarounds and their removal conditions in the reply.
+- No code comments except external constraints, public API contracts, legal/lint/safety requirements, justified suppressions, or explanatory issue/PR links. State the constraint directly, never through roadmap/phase references; follow `comment-cleanup` for existing unresolved constraint warnings and remove other failing comments you touch. Explain unavoidable workarounds and their removal conditions in the reply.
 
 ## Execution
 
