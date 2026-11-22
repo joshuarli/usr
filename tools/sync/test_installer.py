@@ -1207,6 +1207,7 @@ sys.exit(1)
         self.assertEqual(self.make({}).available_archive(base, "a", "zip"), "")
 
     def _bctl_release(self, tag, script):
+        """Publishes a fake release to a fake `gh` and returns the directory to put on PATH."""
         import hashlib
         triple = "x86_64-unknown-linux-musl"
         top = f"bctl-0.1.0-abc-{triple}"
@@ -1222,27 +1223,46 @@ sys.exit(1)
             info.mode = 0o755
             archive.addfile(info, io.BytesIO(script))
         payload = buffer.getvalue()
-        base = f"https://github.com/joshuarli/bctl/releases/download/{tag}"
-        return {"https://github.com/joshuarli/bctl/releases.atom": atom([("2024-01-01", tag)]),
-                f"{base}/{top}.tar.xz": (payload, {"ETag": tag}),
-                f"{base}/SHA256SUMS-{triple}": f"{hashlib.sha256(payload).hexdigest()}  {top}.tar.xz\n".encode()}
+        image = b"image zip " + tag.encode()
+        published = self.root / "gh-releases" / tag
+        published.mkdir(parents=True)
+        (published / f"{top}.tar.xz").write_bytes(payload)
+        (published / f"nanos-hydrogen-{triple}.zip").write_bytes(image)
+        (published / f"SHA256SUMS-{triple}").write_text(
+            f"{hashlib.sha256(payload).hexdigest()}  {top}.tar.xz\n{hashlib.sha256(image).hexdigest()}  nanos-hydrogen-{triple}.zip\n")
+        (self.root / "gh-releases/list").write_text(f"{tag}\nrelease-older\n")
+        fake = self.root / "gh-bin"
+        fake.mkdir(exist_ok=True)
+        gh = fake / "gh"
+        gh.write_text(f"""#!/bin/sh
+root={self.root}/gh-releases
+case "$1 $2" in
+    "release list") [ "$3 $4" = "-R joshuarli/bctl" ] && cat "$root/list" ;;
+    "release download") [ "$4 $5 $6" = "-R joshuarli/bctl -p" ] && [ "$8" = -D ] && cp "$root/$3/$7" "$9/" ;;
+    *) exit 1 ;;
+esac
+""")
+        gh.chmod(0o755)
+        return fake
 
     def test_bctl_installs_after_image_pull_and_doctor_pass(self):
         log = self.root / "bctl.log"
-        routes = self._bctl_release("release-aaa", f"#!/bin/sh\necho \"$*\" >> {log}\n".encode())
-        inst = self.make(routes)
+        script = f"#!/bin/sh\necho \"$*\" >> {log}\n[ \"$1\" = image ] && cat \"$5\" >> {log}\necho >> {log}\n".encode()
+        inst = self.make(extra_bin=self._bctl_release("release-aaa", script))
         inst.install_bctl()
-        self.assertEqual(log.read_text(), "image pull\ndoctor\n")
+        zip_path = self.home / ".local/share/bctl/releases/.nanos-hydrogen-x86_64-unknown-linux-musl.zip"
+        self.assertEqual(log.read_text(), f"image pull nanos-hydrogen --archive {zip_path}\nimage zip release-aaa\ndoctor\n\n")
+        self.assertFalse(zip_path.exists())
         link = self.dest_path("bctl")
         self.assertEqual(os.readlink(link), str(self.home / ".local/share/bctl/current/bin/bctl"))
         self.assertTrue((self.home / ".local/share/bctl/current/bin/bctl").is_file())
 
     def test_bctl_keeps_the_installed_release_when_image_pull_fails(self):
-        self.make(self._bctl_release("release-aaa", b"#!/bin/sh\nexit 0\n")).install_bctl()
+        self.make(extra_bin=self._bctl_release("release-aaa", b"#!/bin/sh\nexit 0\n")).install_bctl()
         current = self.home / ".local/share/bctl/current"
         before = os.readlink(current)
         with self.assertRaises(SkipInstall):
-            self.make(self._bctl_release("release-bbb", b"#!/bin/sh\n[ \"$1\" = image ] && exit 1\nexit 0\n")).install_bctl()
+            self.make(extra_bin=self._bctl_release("release-bbb", b"#!/bin/sh\n[ \"$1\" = image ] && exit 1\nexit 0\n")).install_bctl()
         self.assertEqual(os.readlink(current), before)
         self.assertEqual([p.name for p in (self.home / ".local/share/bctl/releases").iterdir() if not p.name.startswith(".")], ["release-aaa-x86_64-unknown-linux-musl"])
 

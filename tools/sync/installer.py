@@ -85,6 +85,7 @@ SSH_COMMANDS = ["ssh", "ssh-keygen", "ssh-agent", "ssh-add", "sftp", "scp"]
 OXISH_COMMANDS = ["oxish-server", "oxish-session"]
 GLUON_COMMANDS = ["meson", "ninja", "gluon-build"]
 BCTL_COMMANDS = ["bctl"]
+BCTL_REPO = "joshuarli/bctl"
 FFMPEG_COMMANDS = ["ffmpeg", "ffprobe"]
 OPENCODE2_SHIM = '#!/bin/sh\nexec "${HOME}/.opencode/bin/opencode" "$@"'
 GIT_COMMANDS = ["git", "git-shell", "git-upload-archive", "git-upload-pack", "git-receive-pack", "git-submodule", "git-submodule--helper", "git-sh-setup", "git-sh-i18n", "git-sh-i18n--envsubst"]
@@ -2138,7 +2139,8 @@ class Installer:
     def _archive_bundle(self, tool: str, home: Path, commands: list[str], state_name: str, *,
                         in_bin: bool, asset: str, url: str, sums_url: str, release_dir: Path,
                         validate, ok_message: str, install_message: str, on_current=None,
-                        manifest: Callable[[], None] | None = None) -> None:
+                        manifest: Callable[[], None] | None = None,
+                        fetch: tuple[str, Callable[[str, Path], bool]] | None = None) -> None:
         for command in commands:
             existing = self.dest / command
             if existing.exists() or existing.is_symlink():
@@ -2152,7 +2154,7 @@ class Installer:
         current = home / "current"
         if current.exists() and not current.is_symlink():
             self.skip(tool, f"{current} is not a dl-managed symlink")
-        record = self.asset_id(url)
+        record, download = fetch if fetch is not None else (self.asset_id(url), self.download)
         if not record:
             self.unchecked(tool, f"{asset} is unavailable")
             return
@@ -2179,11 +2181,11 @@ class Installer:
         self.fetch_msg(f"Downloading {asset} ...")
         with tempfile.NamedTemporaryFile(delete=False) as stream:
             archive_path = Path(stream.name)
-        if not self.download(url, archive_path):
+        if not download(url, archive_path):
             archive_path.unlink(missing_ok=True)
             self.skip(tool, f"{asset} download failed")
         sums_path = Path(tempfile.mkstemp()[1])
-        if not self.download(sums_url, sums_path):
+        if not download(sums_url, sums_path):
             archive_path.unlink(missing_ok=True)
             sums_path.unlink(missing_ok=True)
             self.skip(tool, "SHA256SUMS download failed")
@@ -2335,25 +2337,47 @@ class Installer:
                 self.removed.add(entry)
                 self.changed = True
 
+    def bctl_latest_tag(self) -> str:
+        listed = self.run(["gh", "release", "list", "-R", BCTL_REPO, "--exclude-drafts", "--exclude-pre-releases",
+                           "--limit", "50", "--json", "tagName", "--jq", ".[].tagName"], capture=True)
+        if listed.returncode:
+            return ""
+        return next((tag for tag in listed.stdout.split() if tag.startswith("release-")), "")
+
+    def bctl_download(self, tag: str, name: str, target: Path) -> bool:
+        with tempfile.TemporaryDirectory(dir=target.parent) as directory:
+            fetched = self.run(["gh", "release", "download", tag, "-R", BCTL_REPO, "-p", name, "-D", directory], capture=True)
+            source = Path(directory) / name
+            if fetched.returncode or not source.is_file() or source.is_symlink():
+                return False
+            os.replace(source, target)
+        return True
+
     def install_bctl(self) -> None:
         triples = {("darwin", "aarch64"): "aarch64-apple-darwin", ("linux", "x86_64"): "x86_64-unknown-linux-musl"}
         if (self.os_name, self.arch) not in triples:
             self.skip("bctl", f"no bctl release for {self.os_name}/{self.arch}")
         triple = triples[(self.os_name, self.arch)]
-        tag = self.latest_tag("https://github.com/joshuarli/bctl/releases.atom", prefix="release-")
+        if not self.which("gh"):
+            self.unchecked("bctl", f"{BCTL_REPO} is private and gh is not installed")
+            return
+        tag = self.bctl_latest_tag()
         if not tag:
-            self.unchecked("bctl", "no release found")
+            self.unchecked("bctl", "no release found; is gh authenticated?")
             return
-        base = f"https://github.com/joshuarli/bctl/releases/download/{tag}"
-        sums_url = f"{base}/SHA256SUMS-{triple}"
-        pattern = re.compile(rf"bctl-[0-9A-Za-z._-]+-{re.escape(triple)}\.tar\.xz")
-        assets = [fields[1] for line in self.fetch_text(sums_url).splitlines()
-                  if len(fields := line.split()) == 2 and pattern.fullmatch(fields[1])]
-        if len(assets) != 1:
-            self.unchecked("bctl", f"{tag} has no {triple} archive")
+        sums_name = f"SHA256SUMS-{triple}"
+        sums_path = Path(tempfile.mkstemp()[1])
+        sums = sums_path.read_text() if self.bctl_download(tag, sums_name, sums_path) else ""
+        sums_path.unlink(missing_ok=True)
+        names = [fields[1] for line in sums.splitlines() if len(fields := line.split()) == 2]
+        archives = [name for name in names if re.fullmatch(rf"bctl-[0-9A-Za-z._-]+-{re.escape(triple)}\.tar\.xz", name)]
+        images = [name for name in names if re.fullmatch(rf"[0-9a-z-]+-{re.escape(triple)}\.zip", name)]
+        if len(archives) != 1 or len(images) != 1:
+            self.unchecked("bctl", f"{tag} has no {triple} archive and image")
             return
-        asset = assets[0]
+        asset, image_zip = archives[0], images[0]
         top = asset.removesuffix(".tar.xz")
+        image = image_zip.removesuffix(f"-{triple}.zip")
 
         def validate(staged: Path) -> bool:
             bundle = staged / top
@@ -2365,17 +2389,26 @@ class Installer:
             bctl = staged / "bin/bctl"
             if not (bctl.is_file() and os.access(bctl, os.X_OK)):
                 return False
-            for argv in ([str(bctl), "image", "pull"], [str(bctl), "doctor"]):
-                if self.run(argv).returncode:
-                    self.warn(f"bctl {' '.join(argv[1:])} failed for {tag}; keeping the installed release")
+            zip_path = staged.parent / f".{image_zip}"
+            try:
+                self.fetch_msg(f"Downloading {image_zip} ...")
+                if not self.bctl_download(tag, image_zip, zip_path):
+                    self.warn(f"{image_zip} download failed; keeping the installed release")
                     return False
+                for argv in ([str(bctl), "image", "pull", image, "--archive", str(zip_path)], [str(bctl), "doctor"]):
+                    if self.run(argv).returncode:
+                        self.warn(f"bctl {argv[1]} failed for {tag}; keeping the installed release")
+                        return False
+            finally:
+                zip_path.unlink(missing_ok=True)
             return True
 
         self._archive_bundle("bctl", self.bctl_releases_home, BCTL_COMMANDS, "bctl", in_bin=True,
-                             asset=asset, url=f"{base}/{asset}", sums_url=sums_url,
+                             asset=asset, url=asset, sums_url=sums_name,
                              release_dir=self.bctl_releases_home / "releases" / f"{tag}-{triple}",
                              validate=validate, ok_message=f"bctl is current ({tag})",
-                             install_message=f"Installed {self.dest}/bctl ({tag})")
+                             install_message=f"Installed {self.dest}/bctl ({tag})",
+                             fetch=(f"{tag}/{asset}", lambda name, target: self.bctl_download(tag, name, target)))
         self.prune_bctl_releases()
 
     def install_gluon(self) -> None:
