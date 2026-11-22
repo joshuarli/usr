@@ -245,6 +245,28 @@ class FleetTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual([name for name, _, _ in fake.calls], ["lisa"])
 
+    def test_all_selects_every_host_and_rejects_explicit_hosts(self):
+        fake = Fake({name: {"repo": done(REPO_OK), "sync": done(plan_json(("links", "current", "links match")))}
+                     for name in POLICY["hosts"]})
+        code, _ = self.run_fleet(["plan", "--all"], fake)
+        self.assertEqual(code, 0)
+        self.assertEqual({name for name, _, script in fake.calls if script.startswith("sh sync")},
+                         set(POLICY["hosts"]))
+        with self.assertRaisesRegex(ValueError, "--all"):
+            self.run_fleet(["plan", "--all", "lisa"], fake)
+
+    def test_show_all_lists_up_to_date_tasks(self):
+        fake = Fake({"work": {"repo": done(REPO_OK),
+                              "sync": done(plan_json(("links", "current", "links match")))},
+                     "lisa": {"repo": done(REPO_OK),
+                              "sync": done(plan_json(("links", "current", "links match")))},
+                     "tr": {"repo": done(REPO_OK),
+                            "sync": done(plan_json(("links", "current", "links match")))}})
+        plain, _ = self.run_fleet(["plan"], fake)
+        verbose, out = self.run_fleet(["plan", "--show-all"], fake)
+        self.assertEqual(plain, verbose)
+        self.assertIn("links match", out)
+
 
 class ReportTests(unittest.TestCase):
     def test_summary_names_only_what_needs_attention(self):

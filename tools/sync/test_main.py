@@ -170,6 +170,28 @@ class MainTests(unittest.TestCase):
         self.assertNotIn("opencode-mcp", defaults)
         self.assertIn("tool:python3", defaults)
 
+    def test_all_delegates_apply_plan_and_doctor_to_the_fleet(self):
+        with patch("fleet.main", return_value=0) as fleet_main:
+            self.assertEqual(main.main(["apply", "--all"]), 0)
+            self.assertEqual(main.main(["plan", "--all"]), 0)
+            self.assertEqual(main.main(["doctor", "--all", "--show-all"]), 0)
+        self.assertEqual([call.args[0] for call in fleet_main.call_args_list],
+                         [["apply"], ["plan"], ["doctor", "--show-all"]])
+
+    def test_all_rejects_display_only_commands_and_json(self):
+        with self.assertRaisesRegex(main.GraphError, "hosts apply"):
+            main.main(["links", "--all"])
+        with patch("fleet.main") as fleet_main:
+            with self.assertRaisesRegex(main.GraphError, "--json"):
+                main.main(["apply", "--all", "--json"])
+            with self.assertRaisesRegex(main.GraphError, "lisa"):
+                main.main(["apply", "--all", "lisa"])
+        fleet_main.assert_not_called()
+
+    def test_show_all_is_the_display_flag(self):
+        self.assertEqual(main.output_flags(["--show-all", "--json"]), ([], True, True))
+        self.assertEqual(main.output_flags([]), ([], False, False))
+
 
 if __name__ == "__main__":
     unittest.main()

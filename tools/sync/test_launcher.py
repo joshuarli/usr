@@ -65,7 +65,7 @@ class LauncherTests(unittest.TestCase):
                 self.assertEqual(result.stdout, reference)
         for command in commands:
             self.assertIn("sh sync " + command, reference)
-        for option in ("--all", "--json", "--plan", "--changed", "--base REV", "--check"):
+        for option in ("--all", "--show-all", "--json", "--plan", "--changed", "--base REV", "--check"):
             self.assertIn(option, reference)
         examples = reference.split("Examples:\n", 1)[1].splitlines()
         self.assertTrue(examples)

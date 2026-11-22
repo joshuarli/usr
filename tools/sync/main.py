@@ -396,10 +396,28 @@ def default_goals(ctx: Context) -> list[str]:
     return goals
 
 
+FLEET_OPS = ("apply", "plan", "doctor")
+
+
 def output_flags(argv: list[str]) -> tuple[list[str], bool, bool]:
     as_json = "--json" in argv
-    show_all = "--all" in argv
-    return [arg for arg in argv if arg not in ("--json", "--all")], as_json, show_all
+    show_all = "--show-all" in argv
+    return [arg for arg in argv if arg not in ("--json", "--show-all")], as_json, show_all
+
+
+def all_machines(argv: list[str], command_name: str) -> list[str] | None:
+    if "--all" not in argv:
+        return None
+    rest = [arg for arg in argv if arg != "--all"]
+    if command_name not in FLEET_OPS:
+        raise GraphError(f"{command_name} --all: --all selects all machines; use 'sh sync hosts apply' to sync every machine")
+    if "--json" in rest:
+        raise GraphError("--all --json: a fleet run has no JSON output; use 'sh sync plan --json' for this machine")
+    show_all = "--show-all" in rest
+    rest = [arg for arg in rest if arg != "--show-all"]
+    if rest:
+        raise GraphError(f"{command_name} --all: unexpected argument '{rest[0]}'; use 'sh sync hosts {command_name} HOST' to select machines")
+    return [command_name] + (["--show-all"] if show_all else [])
 
 
 def main(argv: list[str]) -> int:
@@ -407,6 +425,12 @@ def main(argv: list[str]) -> int:
     if command_name == "hosts":
         from fleet import main as fleet_main
         return fleet_main(argv)
+    if command_name == "--all":
+        raise GraphError("--all needs a command; use 'sh sync apply --all' to sync every machine")
+    fleet_argv = all_machines(argv, command_name)
+    if fleet_argv is not None:
+        from fleet import main as fleet_main
+        return fleet_main(fleet_argv)
     if command_name == "launchers":
         for tool in argv:
             print(tool, *TOOL_EXECUTABLES.get(tool, (tool,)))
@@ -469,7 +493,7 @@ def main(argv: list[str]) -> int:
                     observed.add(relative)
         return 0
     if command_name not in {"apply", "plan", "doctor", "links", "tools", "bridge"}:
-        raise GraphError("usage: sync [plan|doctor|links|tools NAME...|list|bridge|uninstall|hosts|check|check-parallel|layers] [--all] [--json]")
+        raise GraphError("usage: sync [plan|doctor|links|tools NAME...|list|bridge|uninstall|hosts|check|check-parallel|layers] [--all|--show-all] [--json]")
     argv, as_json, show_all = output_flags(argv)
     host = os.uname().nodename.split(".")[0]
     emit = (lambda lines: render_json(command_name, host, lines)) if as_json else (lambda lines: render(command_name, host, lines, show_all))

@@ -8,18 +8,18 @@ Usage: sh sync [COMMAND] [OPTIONS]
 Reconcile the home configuration and managed tools; omitting COMMAND runs apply.
 
 Commands:
-  sh sync apply [--all] [--json]
+  sh sync apply [--show-all] [--json]
     Reconcile the full home (also the default with no command).
-  sh sync plan [--all] [--json]
+  sh sync plan [--show-all] [--json]
     Preview the full reconciliation and conflicts.
-  sh sync doctor [--all] [--json]
+  sh sync doctor [--show-all] [--json]
     Inspect task postconditions and environment diagnostics.
-  sh sync links [--all] [--json]
+  sh sync links [--show-all] [--json]
     Reconcile layer links only.
-  sh sync tools [NAME...] [--all] [--json]
+  sh sync tools [NAME...] [--show-all] [--json]
     Install or update named tools and prerequisites; no names selects defaults.
     NAME...  Optional, repeated tool names; see list for the defaults.
-  sh sync bridge [--all] [--json]
+  sh sync bridge [--show-all] [--json]
     Reconcile bridge registrations and their prerequisites.
   sh sync list
     List default tools for this host and profile.
@@ -39,22 +39,25 @@ Commands:
     Run the Python checks in parallel.
   sh sync layers
     Check the active layers for duplicate link owners.
-  sh sync hosts [pull|plan|doctor|apply] [HOST...] [--all]
+  sh sync hosts [pull|plan|doctor|apply] [HOST...] [--all] [--show-all]
     Run a fleet operation on hosts in the tailnet policy; default is plan.
     HOST...  Optional, repeated host names; default is all policy hosts.
-    --all    Show all tasks in host results.
-  sh sync hosts pull [HOST...] [--all]
+    --all    Select all policy hosts; not combined with HOST....
+    --show-all  Show every task in host results.
+  sh sync hosts pull [HOST...] [--all] [--show-all]
     Fetch and fast-forward each selected host's main branch.
-  sh sync hosts plan [HOST...] [--all]
+  sh sync hosts plan [HOST...] [--all] [--show-all]
     Fetch and preview reconciliation on selected hosts.
-  sh sync hosts doctor [HOST...] [--all]
+  sh sync hosts doctor [HOST...] [--all] [--show-all]
     Fetch and inspect selected hosts.
-  sh sync hosts apply [HOST...] [--all]
+  sh sync hosts apply [HOST...] [--all] [--show-all]
     Update and reconcile selected hosts.
 
 Options for apply, plan, doctor, links, tools, and bridge:
-  --all   Show every task, including up-to-date tasks.
-  --json  Output one machine-readable JSON object.
+  --all   Select all machines for apply, plan or doctor; shorthand for
+          `sh sync hosts <command>` and exclusive with --json and host names.
+  --show-all  Show every task, including up-to-date tasks.
+  --json  Output one machine-readable JSON object for this machine.
   -h, --help  Show this reference; also available after a command.
 
 Environment:
@@ -69,6 +72,7 @@ Environment:
 
 Examples:
   sh sync apply --all
+  sh sync apply --show-all
   sh sync plan --json
   sh sync doctor
   sh sync links
@@ -85,7 +89,7 @@ Examples:
   sh sync layers
   sh sync hosts
   sh sync hosts pull
-  sh sync hosts plan --all
+  sh sync hosts plan --show-all
   sh sync hosts doctor
   sh sync hosts apply
 EOF

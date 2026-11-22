@@ -262,11 +262,15 @@ def render(command: str, outcomes: list[Outcome], show_all: bool, stream: TextIO
 
 
 def main(argv: list[str], run: Runner = ssh_runner, policy: dict[str, Any] | None = None, mine: set[str] | None = None) -> int:
-    args = [arg for arg in argv if arg != "--all"]
-    show_all = len(args) != len(argv)
+    show_all = "--show-all" in argv
+    args = [arg for arg in argv if arg != "--show-all"]
+    every_host = "--all" in args
+    args = [arg for arg in args if arg != "--all"]
     command = args.pop(0) if args and args[0] in COMMANDS else "plan"
     if any(arg.startswith("-") for arg in args):
-        raise ValueError("usage: sync hosts [pull|plan|doctor|apply] [HOST...] [--all]")
+        raise ValueError("usage: sync hosts [pull|plan|doctor|apply] [HOST...] [--all] [--show-all]")
+    if every_host and args:
+        raise ValueError("hosts: use either --all or host names, not both")
     hosts = fleet(policy if policy is not None else read_policy(), local_ips() if mine is None else mine, args)
     started = time.monotonic()
     print(f"sync hosts {command}: {' '.join(host.name for host in hosts)}", file=sys.stderr)
