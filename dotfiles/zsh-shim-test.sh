@@ -20,7 +20,8 @@ chmod +x "$scratch/withzsh/zsh"
 expect () {
     description=$1 wanted_status=$2 wanted_out=$3 dir=$4
     shift 4
-    out=$(XDG_CONFIG_HOME="$scratch/config" PATH="$dir" "$shim" "$@" 2>/dev/null)
+    out=$(env -u AGENT -u AI_AGENT -u CLAUDECODE -u CLAUDE_CODE_SESSION_ID -u OPENCODE_SESSION_ID -u CODEX_THREAD_ID \
+        XDG_CONFIG_HOME="$scratch/config" PATH="$dir" "$shim" "$@" 2>/dev/null)
     status=$?
     if [ "$status" = "$wanted_status" ] && [ "$out" = "$wanted_out" ]; then
         printf 'ok: %s\n' "$description"
@@ -34,15 +35,29 @@ expect 'a real zsh receives the arguments unchanged' 0 'real-zsh [-c] [-l] [echo
 expect 'a command is refused when no zsh exists' 127 '' "$scratch/empty" -c 'echo ran'
 expect 'a login command is refused when no zsh exists' 127 '' "$scratch/empty" -lc 'echo ran'
 
+# Agent contexts get zsh SH_WORD_SPLIT on every invocation, including plain tool calls.
+out=$(env -u AGENT -u AI_AGENT -u CLAUDE_CODE_SESSION_ID -u OPENCODE_SESSION_ID -u CODEX_THREAD_ID CLAUDECODE=1 \
+    XDG_CONFIG_HOME="$scratch/config" PATH="$scratch/withzsh" "$shim" -c 'echo hi' 2>/dev/null)
+if [ "$out" = "real-zsh [-o] [SH_WORD_SPLIT] [-c] [echo hi]" ]; then
+    printf 'ok: agent zsh receives SH_WORD_SPLIT\n'
+else
+    printf 'FAIL: agent zsh (got %s)\n' "$out"
+    nfailed=$((nfailed + 1))
+fi
+
 # The shared config must not move user directories ahead of a caller's PATH.
 mkdir -p "$scratch/home/.local/bin" "$scratch/first"
 for name in zsh bash; do
-    printf '#!/bin/sh\nprintf %%s "${PATH%%%%:*}"\n' > "$scratch/first/$name"
+    cat > "$scratch/first/$name" <<'EOF'
+#!/bin/sh
+printf %s "${PATH%%:*}"
+EOF
     chmod +x "$scratch/first/$name"
 done
 managed=$(HOME="$scratch/home" PATH=/usr/bin:/bin sh -c '. "$1"; printf %s "$PATH"' sh "${PWD}/base/.config/sh/config.sh")
 for shell in "${PWD}/darwin/.local/bin/zsh" "${PWD}/base/.local/bin/bash"; do
-    out=$(HOME="$scratch/home" XDG_CONFIG_HOME="${PWD}/base/.config" PATH="$scratch/first:$managed" "$shell" -c : 2>/dev/null)
+    out=$(env -u AGENT -u AI_AGENT -u CLAUDECODE -u CLAUDE_CODE_SESSION_ID -u OPENCODE_SESSION_ID -u CODEX_THREAD_ID \
+        HOME="$scratch/home" XDG_CONFIG_HOME="${PWD}/base/.config" PATH="$scratch/first:$managed" "$shell" -c : 2>/dev/null)
     if [ "$out" = "$scratch/first" ]; then
         printf 'ok: %s keeps the caller PATH order\n' "${shell##*/}"
     else

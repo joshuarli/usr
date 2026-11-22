@@ -35,4 +35,7 @@ if [ -z "$real" ]; then
     echo "$name: no system shell found" >&2
     exit 127
 fi
+if [ -n "${AGENT-}${AI_AGENT-}${CLAUDECODE-}${CLAUDE_CODE_SESSION_ID-}${OPENCODE_SESSION_ID-}${CODEX_THREAD_ID-}" ]; then
+    set -- -o SH_WORD_SPLIT "$@"
+fi
 exec "$real" "$@"
