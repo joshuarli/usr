@@ -10,14 +10,6 @@
   "tui": {
     "foreign_context_notice_shown": true
   },
-  "mcpServers": {
-    "notion": {
-      "url": "https://mcp.notion.com/mcp"
-    },
-    "sentry": {
-      "url": "https://mcp.sentry.dev/mcp"
-    }
-  },
   "contributor_mode_enabled": true,
   "contributor_mode_disclosure_acknowledged": true,
   "permissions": {

@@ -35,7 +35,7 @@ native launcher bypasses only its shim; tracked configuration still applies.
 | Devin | `auto_update=false` stops automatic downloads/installation; update checks may still occur. Existing Claude/Cloud import opt-outs remain. |
 | DeepSeek Harness | Its existing launcher sets `DSH_TELEMETRY_DISABLED=1` for both TUI and headless paths. This disables OTel delivery, not the separate session-log contribution plugin. |
 | Pi | Existing offline package policy, four core coding tools and explicit extensions remain. No additional shim or browser toggle needed for this profile. |
-| Muse | Existing telemetry opt-out and MCP configuration remain. No additional browser/tool removal was verified. |
+| Muse | Existing telemetry opt-out remains; the Notion and Sentry MCP servers were removed from the tracked settings. No browser/tool removal was verified. |
 | Antigravity CLI | Native settings remain upstream-owned. Its documented `/browser` is on demand; no supported persistent browser-off switch was verified. |
 | Vercel fx | Existing automatic-update and generated-title opt-outs remain. No additional browser automation integration was found in the reviewed profile. |
 | Command Code | Existing native-tier agents and host-local taste-learning opt-out remain alongside the shim defaults. |
