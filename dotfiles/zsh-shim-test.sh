@@ -36,13 +36,40 @@ expect 'a command is refused when no zsh exists' 127 '' "$scratch/empty" -c 'ech
 expect 'a login command is refused when no zsh exists' 127 '' "$scratch/empty" -lc 'echo ran'
 
 # Agent contexts get zsh SH_WORD_SPLIT on every invocation, including plain tool calls.
-out=$(env -u AGENT -u AI_AGENT -u CLAUDE_CODE_SESSION_ID -u OPENCODE_SESSION_ID -u CODEX_THREAD_ID CLAUDECODE=1 \
-    XDG_CONFIG_HOME="$scratch/config" PATH="$scratch/withzsh" "$shim" -c 'echo hi' 2>/dev/null)
-if [ "$out" = "real-zsh [-o] [SH_WORD_SPLIT] [-c] [echo hi]" ]; then
-    printf 'ok: agent zsh receives SH_WORD_SPLIT\n'
+agent_env () {
+    env -u AGENT -u AI_AGENT -u CLAUDE_CODE_SESSION_ID -u OPENCODE_SESSION_ID -u CODEX_THREAD_ID "$@"
+}
+for marker in AGENT AI_AGENT CLAUDECODE CLAUDE_CODE_SESSION_ID OPENCODE_SESSION_ID CODEX_THREAD_ID; do
+    out=$(agent_env "$marker=1" XDG_CONFIG_HOME="$scratch/config" PATH="$scratch/withzsh" "$shim" -c 'echo hi' 2>/dev/null)
+    if [ "$out" = "real-zsh [-o] [SH_WORD_SPLIT] [-c] [echo hi]" ]; then
+        printf 'ok: %s enables SH_WORD_SPLIT\n' "$marker"
+    else
+        printf 'FAIL: %s (got %s)\n' "$marker" "$out"
+        nfailed=$((nfailed + 1))
+    fi
+done
+
+wrapper='source /Users/josh/.claude/shell-snapshots/snapshot-zsh-test.sh 2>/dev/null || true && \builtin setopt NO_EXTENDED_GLOB 2>/dev/null || true && eval "echo hi"'
+out=$(agent_env CLAUDECODE=1 XDG_CONFIG_HOME="$scratch/config" PATH="$scratch/withzsh" "$shim" -c "$wrapper" 2>/dev/null)
+if [ "$out" = "real-zsh [-o] [SH_WORD_SPLIT] [-c] [$wrapper]" ]; then
+    printf 'ok: claude wrapper shape keeps SH_WORD_SPLIT\n'
 else
-    printf 'FAIL: agent zsh (got %s)\n' "$out"
+    printf 'FAIL: claude wrapper shape (got %s)\n' "$out"
     nfailed=$((nfailed + 1))
+fi
+
+if [ -x /bin/zsh ]; then
+    mkdir -p "$scratch/realzsh"
+    ln -sf /bin/zsh "$scratch/realzsh/zsh"
+    # shellcheck disable=SC2016 # the expansions belong to the inner zsh, not this test shell
+    out=$(agent_env CLAUDECODE=1 XDG_CONFIG_HOME="$scratch/config" PATH="$scratch/realzsh:/usr/bin:/bin" \
+        "$shim" -c 'x="a b c"; for i in $x; do printf "[%s]" "$i"; done' 2>/dev/null)
+    if [ "$out" = '[a][b][c]' ]; then
+        printf 'ok: real zsh word-splits through the shim\n'
+    else
+        printf 'FAIL: real zsh word splitting (got %s)\n' "$out"
+        nfailed=$((nfailed + 1))
+    fi
 fi
 
 # The shared config must not move user directories ahead of a caller's PATH.
@@ -56,8 +83,7 @@ EOF
 done
 managed=$(HOME="$scratch/home" PATH=/usr/bin:/bin sh -c '. "$1"; printf %s "$PATH"' sh "${PWD}/base/.config/sh/config.sh")
 for shell in "${PWD}/darwin/.local/bin/zsh" "${PWD}/base/.local/bin/bash"; do
-    out=$(env -u AGENT -u AI_AGENT -u CLAUDECODE -u CLAUDE_CODE_SESSION_ID -u OPENCODE_SESSION_ID -u CODEX_THREAD_ID \
-        HOME="$scratch/home" XDG_CONFIG_HOME="${PWD}/base/.config" PATH="$scratch/first:$managed" "$shell" -c : 2>/dev/null)
+    out=$(agent_env HOME="$scratch/home" XDG_CONFIG_HOME="${PWD}/base/.config" PATH="$scratch/first:$managed" "$shell" -c : 2>/dev/null)
     if [ "$out" = "$scratch/first" ]; then
         printf 'ok: %s keeps the caller PATH order\n' "${shell##*/}"
     else

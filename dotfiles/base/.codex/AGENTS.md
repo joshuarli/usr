@@ -73,7 +73,9 @@ macOS and Linux. For shell search always use `rg` (never `grep`/`egrep`/`grep -r
 
 ## Shell commands
 
-Write POSIX sh for shell commands and scripts. Never rely on zsh or bash extensions: unquoted-variable word splitting, arrays, `${=var}`, `[[`, or `setopt` are not portable. Prefer Python when a command is more than a few lines or needs conditionals, loops, or parsing. Do not invoke `zsh` or `bash` explicitly; the tool shell already runs zsh with `SH_WORD_SPLIT` for agents.
+Write POSIX sh for shell commands and scripts. Never rely on zsh or bash extensions: unquoted-variable word splitting, arrays, `${=var}`, `[[`, or `setopt` are not portable. Prefer Python when a command is more than a few lines or needs conditionals, loops, or parsing. On macOS the agent tool shell enables `SH_WORD_SPLIT`; Linux and harnesses that pin an absolute shell path do not, so never depend on it. Shell state does not persist between tool calls: pass values in each command or write them under `.work/tmp`.
+
+Never use `pkill -f`: the pattern can match your own ssh or tool shell and kill the session. Resolve PIDs with `pgrep -f` or a service PID file, exclude `$$`, `$PPID` and their ancestors, then signal the remaining PIDs. For Unix sockets, use a short path under `$HOME/.s/`; deep repo paths exceed the 104-byte limit on macOS. For non-login `ssh`, set `PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin` explicitly in the remote command; minimal remote PATHs hide `apk` and `sysctl`.
 
 ## Structured data
 
