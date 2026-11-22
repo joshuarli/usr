@@ -334,12 +334,12 @@ Next: 136
 - **Fix with:** none
 - **Effort:** M
 
-### USR-93 · P4 · FX workers lack the planned pinned research tools (pi-web-access MCP)
+### USR-93 · P4 · Pi-lane and FX workers lack the planned pinned research tools (pi-web-access MCP)
 
 - **Area:** Delegation
-- **Where:** docs/CAMPAIGN-RUNTIME-INDEPENDENCE-FX.md (Phase 3 parked, grant shape); tools/pi-subagent-bridge/src/fx-acp-supervisor.ts (mcp_servers)
-- **Problem:** Phase 3 needs pi-web-access 0.48.0 in a pinned closure plus separate search credentials; the npm tarball gitHead 896d75be differs from the campaign record 438e58be, and nothing packages it yet. It is an addition, not Pi parity.
-- **Recommendation:** If wanted, package pi-web-access through a pinned release, re-verify its source revision, supply it as a per-tool-granted ACP MCP server for approved roles only, and prove search, fetch, citation and restart offline before any live check.
+- **Where:** docs/CAMPAIGN-RUNTIME-INDEPENDENCE-FX.md (Phase 3 parked, grant shape); docs/verification/fx-subagent-parity-audit-2026-11-19.md (tool inventory); tools/pi-subagent-bridge/src/tier-policy.ts (TIER_TOOLS); tools/pi-subagent-bridge/src/fx-acp-supervisor.ts (mcp_servers); dotfiles/base/.pi/agent/settings.json (defaultExtensions)
+- **Problem:** Scoped workers have no managed web tools on either lane: TIER_TOOLS grants only local discovery, coding and subagent tools, Pi child defaults carry no web extension, and FX built-ins are ungated by permissions. Phase 3 needs pi-web-access 0.48.0 in a pinned closure plus separate search credentials; the npm tarball gitHead 896d75be differs from the campaign record 438e58be, and nothing packages it yet. It is an addition, not parity.
+- **Recommendation:** If wanted, package pi-web-access through a pinned release, re-verify its source revision, grant it per-tool to approved roles through the typed tool allowlist and Pi child extensions on Pi lanes and through a scoped ACP mcp_servers entry on FX lanes, and prove search, fetch, citation and restart offline before any live check.
 - **Fix with:** none
 - **Effort:** L
 
