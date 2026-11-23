@@ -239,8 +239,8 @@ function validatePolicy(policy: Policy): void {
   }
   for (const [tier, pin] of Object.entries(policy.copilotNative)) {
     if (pin.name !== `usr-${tier}`) throw new Error(`Invalid Copilot native agent name: ${pin.name}`)
-    validateModel(pin.model)
-    if (pin.model === "auto") throw new Error("Copilot native agents cannot use Auto")
+    validateModel(pin.model.toLowerCase())
+    if (pin.model.toLowerCase() === "auto") throw new Error("Copilot native agents cannot use Auto")
     code(pin.effort)
   }
   for (const value of Object.values(policy.nativeFallback.claudeModels)) validateModel(value)
@@ -344,7 +344,7 @@ export function renderOutputs(root: string, policy: Policy = POLICY): Output[] {
   for (const pin of Object.values(policy.copilotNative)) {
     const path = `dotfiles/base/.copilot/agents/${pin.name}.agent.md`
     const previous = read(path)
-    const fields = [`model: ${pin.model}`, `reasoningEffort: ${pin.effort}`, "modelPolicy: required"]
+    const fields = [`model: ${pin.model}`, `reasoning-effort: ${pin.effort}`, "model-policy: required"]
     emit(path, replaceBlocks(previous, { "native-agent": fields.join("\n") }, true), previous)
   }
   for (const pin of Object.values(policy.commandNative)) {

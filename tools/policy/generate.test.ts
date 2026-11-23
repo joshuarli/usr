@@ -251,6 +251,8 @@ const dimensions: Dimension[] = [
   ]),
   { name: "Copilot banned model", mutate: p => { p.copilotNative.worker.model = "claude-fable-5-2" }, rejects: /Prohibited model in active policy/ },
   { name: "Copilot Auto model", mutate: p => { p.copilotNative.scout.model = "auto" }, rejects: /cannot use Auto/ },
+  { name: "Copilot uppercase Auto model", mutate: p => { p.copilotNative.scout.model = "Auto" }, rejects: /cannot use Auto/ },
+  { name: "Copilot case-insensitive banned model", mutate: p => { p.copilotNative.worker.model = "Anthropic/Claude-Fable-5-2" }, rejects: /Prohibited model in active policy/ },
   { name: "command native scout model", mutate: p => { p.commandNative.scout.model = FIXTURE_MODEL } },
   { name: "command native mechanic model", mutate: p => { p.commandNative.mechanic.model = FIXTURE_MODEL } },
   { name: "command native mechanic effort", mutate: p => { p.commandNative.mechanic.effort = "low" } },
