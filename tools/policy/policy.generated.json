@@ -231,7 +231,7 @@
   "antigravityDirect": {
     "models": [
       "gemini-4-neon-high",
-      "gemini-4-neon-medium",
+      "gemini-4-neon-xhigh",
       "gemini-4-neon-low",
       "gemini-4-hydrogen-low"
     ],
@@ -240,8 +240,8 @@
       "effort": "high"
     },
     "god": {
-      "model": "gemini-4-neon-high",
-      "effort": "high"
+      "model": "gemini-4-neon-xhigh",
+      "effort": "xhigh"
     },
     "tiers": {
       "scout": {
@@ -264,8 +264,8 @@
       },
       "expert": {
         "name": "usr-expert",
-        "model": "gemini-4-neon-medium",
-        "effort": "medium",
+        "model": "gemini-4-neon-high",
+        "effort": "high",
         "selector": "pro"
       }
     },

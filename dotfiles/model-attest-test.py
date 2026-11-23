@@ -31,7 +31,7 @@ class AttestationTests(unittest.TestCase):
 
     def test_worker_blocks_wrong_model_and_effort(self):
         for change in [{"observed_model": "gemini-4-hydrogen-high"},
-                       {"observed_model": "gemini-4-neon-medium"}, {"observed_effort": "medium"}]:
+                       {"observed_model": "gemini-4-neon-high"}, {"observed_effort": "high"}]:
             with self.subTest(change=change):
                 self.assertTrue(module.evaluate({**self.sample, **change}))
 

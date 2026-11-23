@@ -81,12 +81,12 @@ test("only the Contributor Spark model is admitted from the Muse family", () => 
 
 test("Antigravity uses native-only Neon and Hydrogen tiers", () => {
   assert.deepEqual(ANTIGRAVITY_DIRECT.main, { model: "gemini-4-neon-high", effort: "high" })
-  assert.deepEqual(ANTIGRAVITY_DIRECT.god, { model: "gemini-4-neon-high", effort: "high" })
+  assert.deepEqual(ANTIGRAVITY_DIRECT.god, { model: "gemini-4-neon-xhigh", effort: "xhigh" })
   assert.deepEqual(ANTIGRAVITY_DIRECT.tiers, {
     scout: { name: "usr-scout", model: "gemini-4-hydrogen-low", effort: "low", selector: "flash" },
     mechanic: { name: "usr-mechanic", model: "gemini-4-hydrogen-low", effort: "low", selector: "flash" },
     worker: { name: "usr-worker", model: "gemini-4-neon-low", effort: "low", selector: "pro" },
-    expert: { name: "usr-expert", model: "gemini-4-neon-medium", effort: "medium", selector: "pro" },
+    expert: { name: "usr-expert", model: "gemini-4-neon-high", effort: "high", selector: "pro" },
   })
   assert.deepEqual(new Set(ANTIGRAVITY_DIRECT.models), new Set([
     ANTIGRAVITY_DIRECT.main.model, ANTIGRAVITY_DIRECT.god.model,

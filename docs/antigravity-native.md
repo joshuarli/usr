@@ -5,13 +5,13 @@ Google AI Ultra, November 18, 2026. A top-level `agy` session delegates **exclus
 | Assignment | Intended model | Effort | Native agent | Custom-agent tier hint |
 | --- | --- | --- | --- | --- |
 | Main | `gemini-4-neon-high` | `high` | primary session | n/a |
-| God | `gemini-4-neon-high` | `high` | primary session | n/a |
+| God | `gemini-4-neon-xhigh` | `xhigh` | primary session | n/a |
 | scout | `gemini-4-hydrogen-low` | `low` | `usr-scout` | `flash` |
 | mechanic | `gemini-4-hydrogen-low` | `low` | `usr-mechanic` | `flash` |
 | worker | `gemini-4-neon-low` | `low` | `usr-worker` | `pro` |
-| expert | `gemini-4-neon-medium` | `medium` | `usr-expert` | `pro` |
+| expert | `gemini-4-neon-high` | `high` | `usr-expert` | `pro` |
 
-The `god` label is a direct parent-session mode; it does not create a new bridge tier or a god subagent. Start `agy --model gemini-4-neon-high` for normal or god-mode sessions; both use the same high-effort Neon parent. Run `agy models` to verify model availability with the authenticated Google AI Ultra account; inspect `/agents` for the custom agent roster.
+The `god` label is a direct parent-session mode; it does not create a new bridge tier or a god subagent. Start `agy --model gemini-4-neon-high` for normal sessions, or explicitly `agy --model gemini-4-neon-xhigh` for the highest-effort parent. Run `agy models` to verify model availability with the authenticated Google AI Ultra account; inspect `/agents` for the custom agent roster.
 
 ## Per-agent model selection limitation
 
