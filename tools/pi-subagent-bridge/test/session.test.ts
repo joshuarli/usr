@@ -1,7 +1,8 @@
 import { piAdapter } from "../src/pi-adapter.ts"
 import test, { after } from "node:test"
 import assert from "node:assert/strict"
-import { readFileSync } from "node:fs"
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync } from "node:fs"
+import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { OpenCodePort } from "../src/bridge.ts"
 import { codexSession } from "../src/codex.ts"
@@ -149,6 +150,18 @@ test("unknown versions, removed tiers and malformed state fail at the boundary",
   assert.throws(() => decode(lower({ pi_candidates: [null] })))
   assert.throws(() => decode(lower({ remaining_pi: ["other"] })))
   assert.throws(() => decodeSession(null, cwd, id), /Invalid/)
+})
+
+test("a session recorded under a renamed checkout's old path decodes when that path resolves to the worktree", () => {
+  const root = mkdtempSync(join(tmpdir(), "usr-session-rename-"))
+  after(() => rmSync(root, { recursive: true, force: true }))
+  const renamed = join(root, "tf")
+  mkdirSync(renamed)
+  symlinkSync("tf", join(root, "old"))
+  const worktree = realpathSync(renamed)
+  assert.equal(decodeSession(record({ cwd: join(root, "old") }), worktree, id).cwd, worktree)
+  assert.throws(() => decodeSession(record({ cwd: join(root, "missing") }), worktree, id), /different worktree/)
+  assert.throws(() => decodeSession(record({ tier: "god" }), cwd, id), /tier/)
 })
 
 test("an admitting parent identity round trips unchanged and stays absent on records that never declared one", () => {

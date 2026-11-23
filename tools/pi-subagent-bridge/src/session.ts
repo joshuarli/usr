@@ -1,3 +1,4 @@
+import { realpathSync } from "node:fs"
 import type { FxSelection } from "./fx.ts"
 import type { CommandRun, Effort } from "./command.ts"
 import type { PlannedRun } from "./launch.ts"
@@ -380,12 +381,19 @@ function withoutRetiredScopeFields(scope: unknown): unknown {
   return rest
 }
 
+function sameDirectory(recorded: string, cwd: string): boolean {
+  if (recorded === cwd) return true
+  try { return realpathSync(recorded) === realpathSync(cwd) } catch { return false }
+}
+
 export function decodeSession(value: unknown, cwd: string, id: string): Session {
   if (!isRecord(value)) throw new Error("Invalid persisted worker session")
   const version = value.schema_version
   if (version !== undefined && version !== 1 && version !== 2 && version !== 3 && version !== SESSION_VERSION)
     throw new Error("Unsupported worker session version; manual reconciliation required")
-  if (value.cwd !== cwd || value.id !== id || !isBridgeTier(value.tier)) throw new Error("Unsupported persisted worker tier; manual reconciliation required")
+  if (typeof value.cwd !== "string" || !sameDirectory(value.cwd, cwd)) throw new Error("Persisted worker session belongs to a different worktree; manual reconciliation required")
+  if (value.id !== id) throw new Error("Persisted worker session id does not match; manual reconciliation required")
+  if (!isBridgeTier(value.tier)) throw new Error("Unsupported persisted worker tier; manual reconciliation required")
   const { plan, execution } = (version === SESSION_VERSION || version === 3 || version === 2) ? decodeCurrent(value) : decodeLegacy(value)
   if (version === 2 && (plan.kind === "leaf" || plan.kind === "fx-fallback" || destinationOf(execution).executor === "fx"))
     throw new Error("FX/leaf routes require session schema 3; manual reconciliation required")
