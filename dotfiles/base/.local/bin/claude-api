@@ -15,8 +15,9 @@ jsonq() {
 }
 
 help() {
-	echo "usage: claude-api [--budget usd] [--model name] [--] <prompt...>"
+	echo "usage: claude-api [--budget usd] [--model name] [--effort level] [--] <prompt...>"
 	echo "       claude-api --help"
+	echo "Defaults: unlimited budget, claude-opus-5-5, medium effort."
 	echo "With no prompt, opens \$EDITOR to compose one."
 	echo "Print mode (claude -p) invokes only the first /skill-name at the start of the prompt."
 	echo "Remaining text, including later /skill-name tokens, is passed as arguments to the first skill, not invoked separately."
@@ -27,13 +28,15 @@ usage() {
 	exit 2
 }
 
-budget=100
-model=claude-sonnet-5-5
+budget=
+model=claude-opus-5-5
+effort=medium
 while [ $# -gt 0 ]; do
 	case $1 in
 	--help|-h) help; exit 0 ;;
 	--budget) [ $# -ge 2 ] || usage; budget=$2; shift 2 ;;
 	--model) [ $# -ge 2 ] || usage; model=$2; shift 2 ;;
+	--effort) [ $# -ge 2 ] || usage; effort=$2; shift 2 ;;
 	--) shift; break ;;
 	-*) usage ;;
 	*) break ;;
@@ -119,7 +122,8 @@ def cost($model; $u):
 		  + ($u.cache_read_input_tokens // 0) * $p.r + $w5 * 1.25 * $p.i + $w1 * 2 * $p.i ) / 1000000
 	  end;
 def money: ((. * 100 | round) / 100);
-foreach inputs as $e ({seen: {}, total: 0, unknown: false};
+(if $budget == "" then "" else " / $\($budget)" end) as $budget_label
+| foreach inputs as $e ({seen: {}, total: 0, unknown: false};
 	if $e.type == "assistant" and $e.message.id != null then
 		cost($e.message.model; $e.message.usage // {}) as $c
 		| .total += (($c // 0) - (.seen[$e.message.id] // 0))
@@ -130,7 +134,7 @@ foreach inputs as $e ({seen: {}, total: 0, unknown: false};
 	| if .type == "assistant" then
 		.message.content[]
 		| if .type == "text" then "\(.text)\n"
-		  elif .type == "tool_use" then "> **\(.name)** `\(.input | tostring | .[0:120] | gsub("`"; "\u0027"))` `~$\($s.total | money)\(if $s.unknown then "?" else "" end) / $\($budget)`\n"
+		  elif .type == "tool_use" then "> **\(.name)** `\(.input | tostring | .[0:120] | gsub("`"; "\u0027"))` `~$\($s.total | money)\(if $s.unknown then "?" else "" end)\($budget_label)`\n"
 		  else empty end
 	  elif .type == "user" then
 		.message.content[]?
@@ -140,15 +144,21 @@ foreach inputs as $e ({seen: {}, total: 0, unknown: false};
 		"> cost: estimated `~$\($s.total | money)\(if $s.unknown then "?" else "" end)`, actual `$\(.total_cost_usd)`\n"
 	  else empty end)'
 
+if [ -n "$budget" ]; then
+	set -- --max-budget-usd "$budget"
+else
+	set --
+fi
+
 start=$(date +%s)
 vault ANTHROPIC_API_KEY -- claude -p "$prompt" \
-	--max-budget-usd "$budget" \
+	"$@" \
 	--dangerously-skip-permissions \
 	--model "$model" \
-	--effort high \
+	--effort "$effort" \
 	--output-format stream-json --verbose |
 	tee "$log" |
-	jsonq -nr --argjson budget "$budget" "$filter" |
+	jsonq -nr --arg budget "$budget" "$filter" |
 	while IFS= read -r line; do
 		case $line in
 		'> '*)

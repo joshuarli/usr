@@ -37,6 +37,7 @@ cat >"$bin/claude" <<'EOF'
 #!/bin/sh
 printf '%s\n' "$@" >"$CLAUDE_API_ARGS"
 printf '%s\n' called >>"$CLAUDE_API_CALLS"
+printf '%s\n' '{"type":"assistant","message":{"id":"m1","model":"claude-opus-5-5","usage":{"input_tokens":1000000,"output_tokens":0},"content":[{"type":"tool_use","name":"Bash","input":{"command":"echo hi"}}]}}'
 printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"result":"completed","num_turns":1,"duration_ms":0,"total_cost_usd":0}'
 EOF
 
@@ -72,11 +73,12 @@ grep -q 'only the first /skill-name' "$output" || fail "help omitted the print-m
 grep -q 'later /skill-name tokens' "$output" || fail "help omitted how later skill tokens are handled"
 # shellcheck disable=SC2016 # $EDITOR is literal help text
 grep -Fq 'opens $EDITOR' "$output" || fail "help omitted editor composition"
+grep -Fq 'Defaults: unlimited budget, claude-opus-5-5, medium effort.' "$output" || fail "help omitted the defaults"
 
 : >"$calls"
 mkdir -p "$repo/.work/logs"
 chmod 777 "$repo/.work/logs"
-run --budget 7 --model test-model Review the cache /skill1 /skill2
+run --budget 7 --model test-model --effort low Review the cache /skill1 /skill2
 log=$(sed -n 's/^raw log: //p' "$error")
 python3 -c 'import os, sys; assert os.stat(sys.argv[1]).st_mode & 0o777 == 0o700; assert os.stat(sys.argv[2]).st_mode & 0o777 == 0o600' "$repo/.work/logs" "$log" || fail "log paths were not private"
 cat >"$expected" <<'EOF'
@@ -88,30 +90,34 @@ Review the cache /skill1 /skill2
 --model
 test-model
 --effort
-high
+low
 --output-format
 stream-json
 --verbose
 EOF
 cmp -s "$expected" "$args" || fail "prompt and options were not forwarded"
+# shellcheck disable=SC2016 # $7 is literal budget text
+grep -Fq '/ $7' "$output" || fail "capped budget was not shown in the cost display"
 [ "$(grep -c '^called$' "$calls")" -eq 1 ] || fail "launcher made an unexpected number of Claude calls"
 
 run -- '/skill1 /skill2 inspect src/'
 cat >"$expected" <<'EOF'
 -p
 /skill1 /skill2 inspect src/
---max-budget-usd
-100
 --dangerously-skip-permissions
 --model
-claude-sonnet-5-5
+claude-opus-5-5
 --effort
-high
+medium
 --output-format
 stream-json
 --verbose
 EOF
 cmp -s "$expected" "$args" || fail "default budget or prompt was wrong"
+grep -Fq '**Bash**' "$output" || fail "cost display did not render the tool use"
+if grep -Fq '/ $' "$output"; then
+	fail "unlimited budget was rendered as a cap"
+fi
 [ "$(grep -c '^called$' "$calls")" -eq 2 ] || fail "skill preflight called Claude separately"
 
 EDITOR="$bin/editor --wait"
@@ -129,13 +135,11 @@ cat >"$expected" <<'EOF'
 -p
 Review the cache from the editor
 and check /skill1
---max-budget-usd
-100
 --dangerously-skip-permissions
 --model
-claude-sonnet-5-5
+claude-opus-5-5
 --effort
-high
+medium
 --output-format
 stream-json
 --verbose
