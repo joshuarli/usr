@@ -3459,13 +3459,13 @@ def default_tools(os_name: str, arch: str, profile: str, server_tools: Path | No
     tools = ["fd", "rg"]
     if not (os_name == "linux" and arch == "aarch64"):
         tools.append("jaq")
-    tools += "codex claude devin opencode2 pi fastermod tm ish stuff e fz srv git python3 uv cf agent-browser rage".split()
+    tools += "codex claude devin opencode2 pi fastermod tm ish stuff e fz srv git python3 uv cf agent-browser rage vault".split()
     if (os_name, arch) in (("darwin", "aarch64"), ("linux", "x86_64"), ("linux", "aarch64")):
         tools += ["ffmpeg", "nodejs", "pnpm", "cmd", "syncthing", "shuck", "img", "gluon", "lz"]
     if (os_name, arch) in (("linux", "x86_64"), ("linux", "aarch64")):
         tools.append("zzz")
     if os_name == "darwin":
-        tools += ["mactop", "view", "vault", "ghostty-custom"]
+        tools += ["mactop", "view", "ghostty-custom"]
     tools.append("gh")
     if (os_name, arch) == ("linux", "x86_64"):
         tools += ["mold", "player"]

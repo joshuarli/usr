@@ -1341,8 +1341,12 @@ esac
         self.assertNotIn("lz", default_tools("darwin", "x86_64", ""))
         self.assertIn("ghostty-custom", darwin)
         self.assertIn("jaq", darwin)
+        self.assertIn("vault", darwin)
+        self.assertEqual(darwin.count("vault"), 1)
         linux_arm = default_tools("linux", "aarch64", "")
         self.assertNotIn("jaq", linux_arm)
+        self.assertIn("vault", linux_arm)
+        self.assertIn("vault", default_tools("linux", "x86_64", ""))
         self.assertIn("lz", linux_arm)
         self.assertIn("mold", linux_arm)
         self.assertNotIn("player", linux_arm)
@@ -1362,6 +1366,8 @@ esac
         server_file = self.root / "server.txt"
         server_file.write_text("fd\nrg\n")
         self.assertEqual(default_tools("linux", "x86_64", "server", server_file), ["fd", "rg"])
+        alpine_profile = Path(__file__).resolve().parents[2] / "host/alpine/tools-server.txt"
+        self.assertIn("vault", default_tools("linux", "x86_64", "server", alpine_profile))
 
     def fake_uv(self, directory=None):
         directory = directory or self.bin
