@@ -1,0 +1,47 @@
+#!/bin/sh
+# helium — launch Helium.app (imputnet's Chromium fork) on macOS with the
+# CDP remote-debugging port enabled, so tooling can attach over
+# http://127.0.0.1:<port> (agent-browser, playwright connectOverCDP, curl).
+#
+# Usage: helium [chromium args...]
+#
+# Env:
+#   HELIUM_REMOTE_DEBUGGING_PORT  remote debugging port (default 9222;
+#                                 "0" disables the flag entirely)
+#   HELIUM_APP                    app bundle path (default /Applications/Helium.app)
+#
+# Chrome 136+ ignores --remote-debugging-port on the default user data
+# directory. If the port does not open on a fresh launch, relaunch with an
+# explicit non-default profile:
+#   helium --user-data-dir="$HOME/Library/Application Support/net.imput.helium-debug"
+# (remember: your sessions and the unpacked extension live in the default
+# profile; a non-default one starts empty).
+#
+# The port binds 127.0.0.1 and stays open for as long as Helium runs; any
+# local process can then drive the browser. Set HELIUM_REMOTE_DEBUGGING_PORT=0
+# for ordinary daily browsing.
+#
+# Chromium hands off to an already-running Helium instead of starting a new
+# one, and the flag would be silently lost; this warns instead of pretending.
+set -eu
+
+app=${HELIUM_APP:-/Applications/Helium.app}
+bin="$app/Contents/MacOS/Helium"
+
+if [ ! -x "$bin" ]; then
+	printf 'helium: %s not found or not executable\n' "$bin" >&2
+	exit 127
+fi
+
+port=${HELIUM_REMOTE_DEBUGGING_PORT:-9222}
+
+if pgrep -x Helium >/dev/null 2>&1; then
+	printf 'helium: Helium is already running; the debugging flag only takes effect on a fresh launch (quit Helium first)\n' >&2
+fi
+
+if [ "$port" = "0" ]; then
+	exec "$bin" "$@"
+fi
+
+printf 'helium: remote debugging on 127.0.0.1:%s (HELIUM_REMOTE_DEBUGGING_PORT=0 to disable)\n' "$port" >&2
+exec "$bin" --remote-debugging-port="$port" "$@"
