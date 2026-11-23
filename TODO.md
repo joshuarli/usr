@@ -1,5 +1,5 @@
 Prefix: USR
-Next: 136
+Next: 137
 
 ### USR-83 · P2 · running sessions on two hosts cannot reach each other over intercom
 
@@ -88,6 +88,15 @@ Next: 136
 - **Where:** dotfiles/base/.cargo/config.toml ([build] rustc-wrapper, [env] CC_KNOWN_WRAPPER_CUSTOM, HOST_CC, HOST_CXX)
 - **Problem:** On macOS ARM64 (kache 1.0.0 at ~/.cargo/bin/kache, cc crate 1.5.1, cmake 4.4.5), `cargo build --locked --profile dist --features build-binary` in ~/d/img fails in jpegli-sys: cc-rs runs `kache cargo-wrapper-cxx -O3 ... -c adaptive_quantization.cc` and kache exits 2 with `error: unrecognized subcommand 'cargo-wrapper-cxx'`. cc-rs treats the rustc-wrapper file name `kache` as a known cache wrapper (CC_KNOWN_WRAPPER_CUSTOM=kache) and prefixes it onto the HOST_CXX value, so the config comment's claim that this key only applies to multi-word compiler values does not hold here. A configure that dies this way also leaves stale CMake caches in cmake-crate OUT_DIRs (ENABLE_TESTS=ON, default install prefix) that make later builds fail until those OUT_DIRs are removed. Workaround: export HOST_CC=clang HOST_CXX=clang++.
 - **Recommendation:** Either make kache accept the wrapper names as compilers, or stop setting HOST_CC/HOST_CXX to wrappers when the rustc wrapper is named kache (cc-rs then runs `kache clang`). Acceptance: a cold `cargo build` of a crate whose build script compiles C++ with cc 1.5.1 succeeds under the stock config with kache installed, and dotfiles/cargo-wrappers-test.sh covers the cc-rs invocation shape `kache <HOST_CXX> ARGS`.
+- **Fix with:** none
+- **Effort:** S
+
+### USR-136 · P2 · setup-kache verifies under a stale default nightly, not the toolchain the target repo pins
+
+- **Area:** Dotfiles · setup-kache
+- **Where:** dotfiles/base/.local/bin/setup-kache (default nightly argument; rustup install, both doctor checks, and the cargo probe)
+- **Problem:** On a fresh Alpine edge box (2026-11-23), plain `setup-kache` installed kache 2.0.0-rc.2 from release-8d78da5c10cf741966733d5cf494b982e9f41d31 and finished with "verified under nightly-2026-09-15". The only rust-toolchain.toml on the box (in ~/d/kache) pins nightly-2026-11-09, which is also the active default toolchain. The script's own header says the toolchain check "matches rust-toolchain.toml files that pin channel + rust-src component", but it runs `kache doctor --json` and builds the cargo probe under 09-15, so it cannot catch a wrapper/toolchain incompatibility under the pin the project actually builds with. --nightly and KACHE_NIGHTLY overrides exist, so this does not block setup.
+- **Recommendation:** Read the channel from the target project's rust-toolchain.toml when present and verify under it; otherwise update the default from nightly-2026-09-15 to the current pin. Acceptance: `setup-kache` with no flags in a checkout whose rust-toolchain.toml pins nightly-2026-11-09 logs that channel as verified, and both doctor checks and the cargo probe execute under it.
 - **Fix with:** none
 - **Effort:** S
 
