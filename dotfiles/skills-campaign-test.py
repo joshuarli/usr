@@ -145,6 +145,7 @@ class SkillCampaignTests(unittest.TestCase):
             base / ".config" / "muse" / "AGENTS.md",
             base / ".dsh" / "AGENTS.md",
             base / ".commandcode" / "AGENTS.md",
+            base / ".copilot" / "copilot-instructions.md",
             base / ".config" / "opencode" / "AGENTS.md",
             base / ".pi" / "agent" / "AGENTS.md",
         )

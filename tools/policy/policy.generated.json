@@ -212,6 +212,28 @@
       "effort": "medium"
     }
   },
+  "copilotNative": {
+    "scout": {
+      "name": "usr-scout",
+      "model": "mai-code-2-flash",
+      "effort": "low"
+    },
+    "mechanic": {
+      "name": "usr-mechanic",
+      "model": "mai-code-2-flash",
+      "effort": "low"
+    },
+    "worker": {
+      "name": "usr-worker",
+      "model": "mai-code-2",
+      "effort": "medium"
+    },
+    "expert": {
+      "name": "usr-expert",
+      "model": "mai-code-2",
+      "effort": "high"
+    }
+  },
   "nativeFallback": {
     "tiers": [
       "scout",

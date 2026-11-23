@@ -16,6 +16,7 @@ Each path belongs to one sync layer (see [sync](docs/sync.md)). Do not `cat` or 
 | Development checks and conventions | [docs/development.md](docs/development.md) |
 | Agent setup and harness configuration | [docs/agent-setup.md](docs/agent-setup.md) |
 | Command Code and Antigravity native delegation | [docs/command-code-delegation.md](docs/command-code-delegation.md), [docs/antigravity-native.md](docs/antigravity-native.md) |
+| Copilot CLI native pilot and verification handoff | [docs/copilot-native.md](docs/copilot-native.md) |
 | Lean harness defaults and launch shims | [docs/harness-lean.md](docs/harness-lean.md) |
 | Instruction profiles | [docs/model-profiles.md](docs/model-profiles.md) |
 | Model policy ownership and generation | [tools/policy/README.md](tools/policy/README.md) |

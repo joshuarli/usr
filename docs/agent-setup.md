@@ -12,6 +12,8 @@ Do not send repository source, credentials, full transcripts, sensitive internal
 
 ## Instructions and skills
 
+Copilot CLI is an unqualified native-only pilot. See [Copilot setup and qualification](copilot-native.md) before installing or using the MAI lanes.
+
 Proactive cleanup uses [disk-pressure events](agent-disk-pressure.md) and runs only below 16 GiB available system space. Codex/Claude hooks and the Pi run-entry extension stay silent on healthy disks. Other harnesses use the shared one-shot fallback in their working contract; there is no model polling loop.
 
 [`dotfiles/base/.codex/AGENTS.md`](../dotfiles/base/.codex/AGENTS.md) remains the normal shared contract. Other harness adapters point to it; Antigravity has an equivalent regular-file policy projection. Claude's `CLAUDE.md` and Codex's higher-precedence `AGENTS.override.md` instead load a small bootstrap; startup hooks select the normal contract or the lean contract for Opus 5.5 in Claude and Sol 6.2 in Codex. The contracts are alternatives, not layers. See [instruction profiles](model-profiles.md) for activation, fallback, and fresh-session boundaries.
@@ -27,11 +29,12 @@ Proactive cleanup uses [disk-pressure events](agent-disk-pressure.md) and runs o
 | DeepSeek Harness | `${DSH_HOME:-~/.dsh}/AGENTS.md` | `${DSH_AGENTS_HOME:-~/.agents}/skills/` |
 | Pi | `~/.pi/agent/AGENTS.md` | `~/.agents/skills/` |
 | Command Code (`cmd`) | `~/.commandcode/AGENTS.md` | `~/.agents/skills/` |
+| Copilot CLI (pilot) | `~/.copilot/copilot-instructions.md` | `~/.agents/skills/` |
 | Vercel fx (opt-in) | `~/.fx/AGENTS.md` | `~/.agents/skills/` |
 
 **Native-only hosts:** the Pi bridge stays the default. A host or session without bridge providers, such as a cloud agent environment, sets `USR_DELEGATION=native`; the Claude and Codex startup hook then tells the session to use the tier-matched native subagents in `orchestrate`, and the generated policy treats that switch like bridge exhaustion. Any other value, or none, keeps the bridge.
 
-**Routing coverage:** both instruction profiles and all harnesses share [orchestrate](../dotfiles/base/.agents/skills/orchestrate/SKILL.md). OpenCode, Devin, top-level Command Code and Antigravity CLI delegate only through their native subagents; other harnesses use the shared bridge except for the documented lower-tier native quota and host-access exceptions. This is instruction policy, not an interception hook. `decide` is advisory only.
+**Routing coverage:** both instruction profiles and all harnesses share [orchestrate](../dotfiles/base/.agents/skills/orchestrate/SKILL.md). OpenCode, Devin, top-level Command Code, Antigravity CLI and the Copilot CLI pilot delegate only through their native subagents; other harnesses use the shared bridge except for the documented lower-tier native quota and host-access exceptions. This is instruction policy, not an interception hook. `decide` is advisory only.
 
 <!-- policy:begin routing-summary -->
 <!-- Generated from tools/pi-subagent-bridge/src/policy.ts; run make generate. -->

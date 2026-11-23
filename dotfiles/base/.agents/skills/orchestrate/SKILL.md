@@ -1,13 +1,13 @@
 ---
 name: orchestrate
-description: "Route coding subagents through native Command Code/OpenCode/Devin lanes or the Pi bridge; scope and verify; campaigns only when useful. Skip work cheaper to do directly."
+description: "Route coding subagents through native harness lanes or the Pi bridge; scope and verify; campaigns only when useful. Skip work cheaper to do directly."
 ---
 
 # Orchestrate
 
 <!-- policy:begin routing-intro -->
 <!-- Generated from tools/pi-subagent-bridge/src/policy.ts; run make generate. -->
-**All scout/mechanic/worker coding subagents use `pi-subagent-bridge` by default**, except top-level OpenCode, Devin, Command Code and Antigravity native parents described below. Bridge tiers: `scout`, `mechanic`, `worker`. Native-only tier: `expert`, which always runs as a harness-native subagent and never through the bridge. There is no `god` tier. The model families `gemini-3.8` and `gemini-4-argon` and `gemini-4-carbon` and `gpt-6-astra` and `gpt-6.1-astra` and `gpt-6.2-astra` and `claude-fable` and `fable` are prohibited, including every effort variant.
+**All scout/mechanic/worker coding subagents use `pi-subagent-bridge` by default**, except top-level OpenCode, Devin, Command Code, Antigravity and Copilot CLI native parents described below. Bridge tiers: `scout`, `mechanic`, `worker`. Native-only tier: `expert`, which always runs as a harness-native subagent and never through the bridge. There is no `god` tier. The model families `gemini-3.8` and `gemini-4-argon` and `gemini-4-carbon` and `gpt-6-astra` and `gpt-6.1-astra` and `gpt-6.2-astra` and `claude-fable` and `fable` are prohibited, including every effort variant.
 <!-- policy:end routing-intro -->
 
 <!-- policy:begin opencode -->
@@ -58,6 +58,20 @@ Native agents have separate contexts and cannot spawn another agent. They do not
 The CLI's documented agent schema accepts `model: flash/pro` selectors, not exact model IDs or effort pins. Treat these as target allocations, check actual child model and effort on first use, and block any lane resolving to Gemini 3.8, Carbon, Argon or an unexpected model. Carbon may only be selected manually by the owner, outside delegation. See `docs/antigravity-native.md`.
 <!-- policy:end antigravity -->
 
+<!-- policy:begin copilot -->
+<!-- Generated from tools/pi-subagent-bridge/src/policy.ts; run make generate. -->
+**Copilot CLI pilot:** A top-level Copilot session delegates only through the named native `task` agents below; never launch the Pi bridge or use built-in agents as a fallback. Do not use Auto. The following candidate pins require authenticated model and effort attestation before delegation; block any unattested or unavailable lane.
+
+| Tier | Native agent | Candidate model | Effort |
+| --- | --- | --- | --- |
+| scout | `usr-scout` | `mai-code-2-flash` | `low` |
+| mechanic | `usr-mechanic` | `mai-code-2-flash` | `low` |
+| worker | `usr-worker` | `mai-code-2` | `medium` |
+| expert | `usr-expert` | `mai-code-2` | `high` |
+
+The parent supplies the native lane worktree, scope registration, acceptance proof and independent review. Children are leaves. Required model policy and strict tool lists are not worktree containment or proof of effective effort. See `docs/copilot-native.md`.
+<!-- policy:end copilot -->
+
 <!-- policy:begin native-fallback -->
 <!-- Generated from tools/pi-subagent-bridge/src/policy.ts; run make generate. -->
 **Claude Code native subagents:** `expert` assignments always use native subagents pinned to `opus` with `xhigh` effort. If that pinned model is unavailable, the expert lane is blocked; never substitute another model. When no approved bridge backend can run because it is unavailable or exhausted, scout/mechanic/worker use tier-matched native subagents with the same brief, worktree, scope, and independent verification: scout: `haiku`; mechanic: `sonnet`; worker: `sonnet`. A host or session whose environment sets `USR_DELEGATION=native`, such as a cloud environment without bridge providers, uses these native subagents directly and does not start the bridge. Preserve partial work before relaunch. Register native lanes with `scope-check --register` and record their final check with `scope-check --lane`. No hook gates native subagents. Return to the bridge when capacity recovers, unless `USR_DELEGATION=native` is set.
@@ -71,7 +85,7 @@ On the bridge path, call `worker_model_check` for the tier you are about to assi
 
 **Pi OpenCode Go boundary:** scout and mechanic Pi fallbacks use pinned OpenCode Go models; Zen models are unusable from headless SDK workers (the gateway rejects non-opencode-client User-Agents with `429 FreeUsageLimitError` — see `docs/pi.md#why-zen-is-not-a-pin`). Other OpenCode Go models and custom endpoints are forbidden. The native Pi `expert` profile is the Pi-native expert lane; it authorizes new expert dispatches from Pi sessions through the native subagent tool.
 
-Expert assignments use harness-native subagents (Command Code's `usr-expert`, OpenCode's `expert` agent, Devin's `run_subagent`, Codex's native subagents, Pi's native `expert` profile, Claude Code's `opus` at `xhigh` effort); nothing routes to the bridge. Codex expert runs like Devin's: on the model its session config provides, with no per-tier pin. Reserve the lane for exceptional architectural decisions and independent adversarial review. There is no higher tier above expert. If the harness's expert model is unavailable, the lane is blocked; never substitute a weaker model.
+Expert assignments use harness-native subagents (Copilot's attested `usr-expert`, Command Code's `usr-expert`, OpenCode's `expert` agent, Devin's `run_subagent`, Codex's native subagents, Pi's native `expert` profile, Claude Code's `opus` at `xhigh` effort); nothing routes to the bridge. Codex expert runs like Devin's: on the model its session config provides, with no per-tier pin. Reserve the lane for exceptional architectural decisions and independent adversarial review. There is no higher tier above expert. If the harness's expert model is unavailable, the lane is blocked; never substitute a weaker model.
 
 **Native expert lanes get the bridge's guarantees by hand.** Nothing enforces scope on a native subagent, so the parent supplies what admission would:
 
@@ -81,7 +95,7 @@ Expert assignments use harness-native subagents (Command Code's `usr-expert`, Op
 
 **Default to worker** for substantial well-specified tasks; size alone does not justify a native `expert` subagent. A read-only `scout` gets no `bash`, `edit`, or `write`. No tier grants privilege to change requirements or affect unrelated files.
 
-## The bridge, except Command Code, OpenCode and Devin
+## The bridge, except Command Code, OpenCode, Devin, Antigravity and Copilot CLI
 
 Use the MCP tools `worker_model_check`, `worker_start`, `worker_status`, `worker_resume`, `worker_cancel`, or the `pi-subagent-bridge` CLI shim where a harness has no MCP (see `tools/pi-subagent-bridge/README.md`).
 

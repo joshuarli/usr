@@ -19,6 +19,7 @@ does not inherit this PATH, bypass the shims.
 | --- | --- | --- |
 | `codex` | Adds `--no-daemon`, which avoids both starting and reusing the shared daemon. Does not duplicate an existing flag; leaves explicit `--remote` invocations alone. | Use `~/.local/bin/codex` for the native launcher. |
 | `claude` | Sets `CLAUDE_CODE_ENABLE_CFC=0`, so native Chrome starts off and browser work uses `agent-browser`. | `claude --chrome` explicitly opts back in. |
+| `copilot` (pilot) | Disables automatic updates, client telemetry and session export. | Use `~/.local/bin/copilot` for the native launcher. |
 | `cmd` | Disables startup notices, the automatic updater and telemetry with `CMD_DISABLE_NOTICES`, `COMMANDCODE_SKIP_UPDATES` and `DO_NOT_TRACK`. | Use `~/.local/bin/cmd` for the native launcher. |
 
 `codex-or`, `claude-or` and `claude-ds` inherit these defaults when they
@@ -38,6 +39,7 @@ native launcher bypasses only its shim; tracked configuration still applies.
 | Muse | Existing telemetry opt-out remains; the Notion and Sentry MCP servers were removed from the tracked settings. No browser/tool removal was verified. |
 | Antigravity CLI | Native settings remain upstream-owned. Its documented `/browser` is on demand; no supported persistent browser-off switch was verified. |
 | Vercel fx | Existing automatic-update and generated-title opt-outs remain. No additional browser automation integration was found in the reviewed profile. |
+| Copilot CLI (pilot) | Disables IDE auto-connect and remote session/export defaults. Native agents are candidate pins; see [qualification](copilot-native.md). |
 | Command Code | Existing native-tier agents and host-local taste-learning opt-out remain alongside the shim defaults. |
 
 Codex's `daemon_auto_start=false` alone still permits attaching to a running

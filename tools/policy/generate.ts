@@ -76,6 +76,14 @@ function commandCode(policy: Policy): string {
     "Collect detached results with `agent_output` and run `scope-check --lane` on native writer lanes."
 }
 
+function copilot(policy: Policy): string {
+  const rows = Object.entries(policy.copilotNative).map(([tier, pin]) =>
+    `| ${tier} | ${code(pin.name)} | ${code(pin.model)} | ${code(pin.effort)} |`)
+  return "**Copilot CLI pilot:** A top-level Copilot session delegates only through the named native `task` agents below; never launch the Pi bridge or use built-in agents as a fallback. Do not use Auto. The following candidate pins require authenticated model and effort attestation before delegation; block any unattested or unavailable lane.\n\n" +
+    ["| Tier | Native agent | Candidate model | Effort |", "| --- | --- | --- | --- |", ...rows].join("\n") +
+    "\n\nThe parent supplies the native lane worktree, scope registration, acceptance proof and independent review. Children are leaves. Required model policy and strict tool lists are not worktree containment or proof of effective effort. See `docs/copilot-native.md`."
+}
+
 function nativeFallback(policy: Policy): string {
   const tiers = policy.nativeFallback.tiers.join("/")
   const mappings = policy.nativeFallback.tiers.map(tier => `${tier}: ${code(policy.nativeFallback.claudeModels[tier])}`).join("; ")
@@ -89,12 +97,13 @@ function nativeFallback(policy: Policy): string {
 }
 
 function delegation(policy: Policy, lean: boolean): string {
-  const head = lean ? "- Before delegation, read `orchestrate`; use native `usr-*` agents for top-level Command Code and `pi-subagent-bridge` for other scout/mechanic/worker parents except OpenCode, Devin and Antigravity." :
-    "- All scout/mechanic/worker coding subagents, in every harness and skill, MUST launch through `pi-subagent-bridge` MCP tools or its CLI shim except top-level Command Code, OpenCode, Devin and Antigravity parents; follow `orchestrate`. Expert assignments use harness-native subagents (including Command Code `usr-expert`, OpenCode's `expert` agent, Devin's `run_subagent`, Codex's native subagents, Pi's native `expert` profile, Claude Code's " + code(policy.nativeFallback.claudeModels.expert) + " at " + code(policy.nativeFallback.claudeEffort.expert) + " effort); the bridge has no expert tier."
+  const head = lean ? "- Before delegation, read `orchestrate`; use native `usr-*` agents for top-level Command Code and `pi-subagent-bridge` for other scout/mechanic/worker parents except OpenCode, Devin, Antigravity and Copilot CLI." :
+    "- All scout/mechanic/worker coding subagents, in every harness and skill, MUST launch through `pi-subagent-bridge` MCP tools or its CLI shim except top-level Command Code, OpenCode, Devin, Antigravity and Copilot CLI parents; follow `orchestrate`. Expert assignments use harness-native subagents (including Command Code `usr-expert`, OpenCode's `expert` agent, Devin's `run_subagent`, Codex's native subagents, Pi's native `expert` profile, Claude Code's " + code(policy.nativeFallback.claudeModels.expert) + " at " + code(policy.nativeFallback.claudeEffort.expert) + " effort); the bridge has no expert tier."
   return head + " A top-level OpenCode session delegates only through OpenCode native subagents; free top-level models require free tier models. " +
     "A top-level Devin session delegates only through Devin native subagents. " +
     "A top-level Command Code session delegates only through native pinned `usr-*` subagents (HY4-medium worker is opt-in). " +
     "A top-level Antigravity CLI session delegates only through native `usr-*` subagents; never use the Pi bridge. " +
+    "A top-level Copilot CLI session is a native-only pilot: use the named `usr-*` agents after live model/effort attestation; block otherwise, never use Auto or the bridge. " +
     `No ${code("god")} tier exists. ` +
     `Never route to ${policy.bannedModels.map(code).join(" or ")}. ` +
     "On Antigravity, Gemini 3.8 is retired and Carbon is never a fallback; a manual Carbon session requires the owner\'s explicit request. " +
@@ -228,6 +237,12 @@ function validatePolicy(policy: Policy): void {
     validateModel(pin.model)
     if ("effort" in pin && pin.effort) code(pin.effort)
   }
+  for (const [tier, pin] of Object.entries(policy.copilotNative)) {
+    if (pin.name !== `usr-${tier}`) throw new Error(`Invalid Copilot native agent name: ${pin.name}`)
+    validateModel(pin.model)
+    if (pin.model === "auto") throw new Error("Copilot native agents cannot use Auto")
+    code(pin.effort)
+  }
   for (const value of Object.values(policy.nativeFallback.claudeModels)) validateModel(value)
   for (const value of Object.values(policy.nativeFallback.claudeEffort)) code(value)
 }
@@ -303,11 +318,12 @@ export function renderOutputs(root: string, policy: Policy = POLICY): Output[] {
   const table = routingTable(policy)
   const direct = directModels(policy)
   document("dotfiles/base/.agents/skills/orchestrate/SKILL.md", {
-    "routing-intro": "**All scout/mechanic/worker coding subagents use `pi-subagent-bridge` by default**, except top-level OpenCode, Devin, Command Code and Antigravity native parents described below. " + summary(policy),
+    "routing-intro": "**All scout/mechanic/worker coding subagents use `pi-subagent-bridge` by default**, except top-level OpenCode, Devin, Command Code, Antigravity and Copilot CLI native parents described below. " + summary(policy),
     "opencode": openCode(policy),
     "devin": devin(),
     "command-code": commandCode(policy),
     "antigravity": antigravity(policy),
+    "copilot": copilot(policy),
     "native-fallback": nativeFallback(policy),
   })
   document("dotfiles/base/.codex/AGENTS.md", { delegation: delegation(policy, false), "direct-models": "- " + direct })
@@ -323,6 +339,12 @@ export function renderOutputs(root: string, policy: Policy = POLICY): Output[] {
     const path = `dotfiles/base/.gemini/config/agents/${pin.name}.md`
     const previous = read(path)
     const fields = [`model: ${pin.selector}`, "subagent: true", "mainAgent: false"]
+    emit(path, replaceBlocks(previous, { "native-agent": fields.join("\n") }, true), previous)
+  }
+  for (const pin of Object.values(policy.copilotNative)) {
+    const path = `dotfiles/base/.copilot/agents/${pin.name}.agent.md`
+    const previous = read(path)
+    const fields = [`model: ${pin.model}`, `reasoningEffort: ${pin.effort}`, "modelPolicy: required"]
     emit(path, replaceBlocks(previous, { "native-agent": fields.join("\n") }, true), previous)
   }
   for (const pin of Object.values(policy.commandNative)) {
