@@ -7,7 +7,7 @@ case $arch in
 	x86_64 | aarch64) ;;
 	*) echo "home: architecture $arch is not supported" >&2; exit 1 ;;
 esac
-asset=ghostty-custom-$arch-linux-musl.tar.gz
+asset=ghostty-custom-$arch-linux-musl.tar.xz
 target=/usr/local/bin/ghostty-custom
 tagdir=/usr/local/share/home
 tagfile=$tagdir/ghostty-custom.tag
@@ -81,15 +81,15 @@ trap - EXIT HUP INT TERM
 
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"; apk del --quiet .home-ghostty-build 2>/dev/null || :' EXIT HUP INT TERM
-curl -fsSL "$repo/releases/download/$tag/$asset" -o "$tmp/ghostty.tgz" || {
+curl -fsSL "$repo/releases/download/$tag/$asset" -o "$tmp/ghostty.txz" || {
 	echo "home: $asset download failed" >&2
 	exit 1
 }
-printf '%s  %s\n' "$sha" "$tmp/ghostty.tgz" | sha256sum -c -s - || {
+printf '%s  %s\n' "$sha" "$tmp/ghostty.txz" | sha256sum -c -s - || {
 	echo "home: $asset does not match SHA256SUMS" >&2
 	exit 1
 }
-contents=$(tar -tzf "$tmp/ghostty.tgz") || {
+contents=$(tar -tJf "$tmp/ghostty.txz") || {
 	echo "home: $asset could not be listed" >&2
 	exit 1
 }
@@ -98,7 +98,7 @@ if [ "$(printf '%s\n' "$contents" | wc -l)" -ne 1 ] ||
 	echo "home: $asset does not contain a single top-level binary" >&2
 	exit 1
 fi
-tar -xzf "$tmp/ghostty.tgz" -C "$tmp"
+tar -xJf "$tmp/ghostty.txz" -C "$tmp"
 [ -f "$tmp/ghostty" ] && [ ! -L "$tmp/ghostty" ] || {
 	echo "home: $asset is missing the ghostty binary" >&2
 	exit 1
