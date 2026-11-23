@@ -1,0 +1,658 @@
+
+===== META =====
+label=BEFORE
+date=2026-11-23T07:58:05Z
+host=sentry
+macOS=27.2
+wifi_interface=en0
+gateway=10.0.1.1
+
+===== STEP 1: Wi-Fi link & RF congestion =====
+Wi-Fi:
+
+      Software Versions:
+          CoreWLAN: 16.0 (1657)
+          CoreWLANKit: 16.0 (1657)
+          Menu Extra: 1.0 (19177.1)
+          System Information: 15.0 (1502)
+          IO80211 Family: 12.0 (1200.13.1)
+          Diagnostics: 11.0 (1163)
+          AirPort Utility: 6.3.9 (639.29)
+      Interfaces:
+        en0:
+          Card Type: chip id: 0x11 api 1.2 firmware [Rev 92.4.10 PrxB1 dF=0] phy [30.1.151.0], core80211 [344.5.4 N1_b ]
+          Firmware Version: Oct  3 2026 15:12:23 version XBS_BUILD_TAG GIT_DESCRIBE FWID chip id: 0x11 api 1.2 firmware [Rev 92.4.10 PrxB1 dF=0] phy [30.1.151.0], core80211 [344.5.4 N1_b ]
+IO80211_driverkit-1587.10 "IO80211_driverkit-1587.10" Oct  3 2026 14:53:06
+          MAC Address: ca:39:97:4c:9d:12
+          Locale: FCC
+          Country Code: US
+          Supported PHY Modes: 802.11 a/b/g/n/ac/ax/be
+          Supported Channels: 1 (2GHz), 2 (2GHz), 3 (2GHz), 4 (2GHz), 5 (2GHz), 6 (2GHz), 7 (2GHz), 8 (2GHz), 9 (2GHz), 10 (2GHz), 11 (2GHz), 12 (2GHz), 13 (2GHz), 36 (5GHz), 40 (5GHz), 44 (5GHz), 48 (5GHz), 52 (5GHz), 56 (5GHz), 60 (5GHz), 64 (5GHz), 100 (5GHz), 104 (5GHz), 108 (5GHz), 112 (5GHz), 116 (5GHz), 120 (5GHz), 124 (5GHz), 128 (5GHz), 132 (5GHz), 136 (5GHz), 140 (5GHz), 144 (5GHz), 149 (5GHz), 153 (5GHz), 157 (5GHz), 161 (5GHz), 165 (5GHz), 1 (6GHz), 5 (6GHz), 9 (6GHz), 13 (6GHz), 17 (6GHz), 21 (6GHz), 25 (6GHz), 29 (6GHz), 33 (6GHz), 37 (6GHz), 41 (6GHz), 45 (6GHz), 49 (6GHz), 53 (6GHz), 57 (6GHz), 61 (6GHz), 65 (6GHz), 69 (6GHz), 73 (6GHz), 77 (6GHz), 81 (6GHz), 85 (6GHz), 89 (6GHz), 93 (6GHz), 97 (6GHz), 101 (6GHz), 105 (6GHz), 109 (6GHz), 113 (6GHz), 117 (6GHz), 121 (6GHz), 125 (6GHz), 129 (6GHz), 133 (6GHz), 137 (6GHz), 141 (6GHz), 145 (6GHz), 149 (6GHz), 153 (6GHz), 157 (6GHz), 161 (6GHz), 165 (6GHz), 169 (6GHz), 173 (6GHz), 177 (6GHz), 181 (6GHz), 185 (6GHz), 189 (6GHz), 193 (6GHz), 197 (6GHz), 201 (6GHz), 205 (6GHz), 209 (6GHz), 213 (6GHz), 217 (6GHz), 221 (6GHz), 225 (6GHz), 229 (6GHz), 233 (6GHz)
+          Wake On Wireless: Supported
+          AirDrop: Supported
+          Auto Unlock: Supported
+          Status: Connected
+          Current Network Information:
+            <redacted>:
+              PHY Mode: 802.11ac
+              Channel: 149 (5GHz, 80MHz)
+              Country Code: US
+              Network Type: Infrastructure
+              Security: WPA2 Personal
+              Signal / Noise: -30 dBm / -96 dBm
+              Transmit Rate: 866
+              MCS Index: 8
+          Other Local Wi-Fi Networks:
+            <redacted>:
+              PHY Mode: 802.11a/n/ac/ax
+              Channel: 52 (5GHz, 80MHz)
+              Network Type: Infrastructure
+              Security: WPA2 Personal
+            <redacted>:
+              PHY Mode: 802.11g/n
+              Channel: 8 (2GHz, 20MHz)
+              Network Type: Infrastructure
+              Security: WPA2 Personal
+            <redacted>:
+              PHY Mode: 802.11a/n/ac/ax
+              Channel: 44 (5GHz, 160MHz)
+              Network Type: Infrastructure
+              Security: WPA2 Personal
+            <redacted>:
+              PHY Mode: 802.11a/n/ac/ax
+              Channel: 157 (5GHz, 80MHz)
+              Network Type: Infrastructure
+              Security: WPA2 Personal
+            <redacted>:
+              PHY Mode: 802.11a/n/ac/ax
+              Channel: 116 (5GHz, 160MHz)
+              Network Type: Infrastructure
+              Security: WPA2 Personal
+            <redacted>:
+              PHY Mode: 802.11b/g/n
+              Channel: 11 (2GHz, 20MHz)
+              Network Type: Infrastructure
+              Security: WPA2 Personal
+            <redacted>:
+              PHY Mode: 802.11g/n
+              Channel: 1 (2GHz, 20MHz)
+              Network Type: Infrastructure
+              Security: WPA2 Personal
+            <redacted>:
+              PHY Mode: 802.11a/n/ac/ax
+              Channel: 52 (5GHz, 80MHz)
+              Network Type: Infrastructure
+              Security: WPA2/WPA3 Personal
+            <redacted>:
+              PHY Mode: 802.11a/n/ac/ax
+              Channel: 100 (5GHz, 160MHz)
+              Network Type: Infrastructure
+              Security: WPA2 Personal
+            <redacted>:
+              PHY Mode: 802.11a/n/ac/ax
+              Channel: 116 (5GHz, 80MHz)
+              Network Type: Infrastructure
+              Security: WPA2 Personal
+            <redacted>:
+              PHY Mode: 802.11b/g/n/ac/ax
+              Channel: 5 (2GHz, 20MHz)
+              Network Type: Infrastructure
+              Security: WPA2 Personal
+            <redacted>:
+              PHY Mode: 802.11a/n/ac/ax
+              Channel: 112 (5GHz, 160MHz)
+              Network Type: Infrastructure
+              Security: WPA2 Personal
+            <redacted>:
+              PHY Mode: 802.11b/g/n/ac/ax
+              Channel: 6 (2GHz, 20MHz)
+              Network Type: Infrastructure
+              Security: WPA2 Personal
+            <redacted>:
+              PHY Mode: 802.11ax
+              Channel: 37 (6GHz, 160MHz)
+              Network Type: Infrastructure
+              Security: WPA3 Personal
+            <redacted>:
+              PHY Mode: 802.11a/n/ac/ax
+              Channel: 157 (5GHz, 80MHz)
+              Network Type: Infrastructure
+              Security: WPA2 Personal
+            <redacted>:
+              PHY Mode: 802.11a/n/ac/ax
+              Channel: 56 (5GHz, 80MHz)
+              Network Type: Infrastructure
+              Security: WPA2 Personal
+            <redacted>:
+              PHY Mode: 802.11a/n/ac/ax
+              Channel: 44 (5GHz, 80MHz)
+              Network Type: Infrastructure
+              Security: WPA2 Enterprise
+            <redacted>:
+              PHY Mode: 802.11a/n/ac
+              Channel: 149 (5GHz, 80MHz)
+              Network Type: Infrastructure
+              Security: WPA2 Personal
+            <redacted>:
+              PHY Mode: 802.11a/n/ac/ax
+              Channel: 44 (5GHz, 80MHz)
+              Network Type: Infrastructure
+              Security: WPA2 Personal
+            <redacted>:
+              PHY Mode: 802.11a/n/ac/ax
+              Channel: 44 (5GHz, 80MHz)
+              Network Type: Infrastructure
+              Security: WPA2/WPA3 Personal
+            <redacted>:
+              PHY Mode: 802.11a/n/ac
+              Channel: 153 (5GHz, 80MHz)
+              Network Type: Infrastructure
+              Security: WPA2 Personal
+            <redacted>:
+              PHY Mode: 802.11b/g/n/ax
+              Channel: 1 (2GHz, 20MHz)
+              Network Type: Infrastructure
+              Security: WPA2 Personal
+            <redacted>:
+              PHY Mode: 802.11a/n
+              Channel: 36 (5GHz, 20MHz)
+              Network Type: Infrastructure
+              Security: WPA2 Personal
+            <redacted>:
+              PHY Mode: 802.11a/n/ac
+              Channel: 44 (5GHz, 80MHz)
+              Network Type: Infrastructure
+              Security: WPA2 Personal
+            <redacted>:
+              PHY Mode: 802.11a/n/ac
+              Channel: 149 (5GHz, 80MHz)
+              Network Type: Infrastructure
+              Security: WPA/WPA2 Personal
+            <redacted>:
+              PHY Mode: 802.11a/n/ac/ax
+              Channel: 44 (5GHz, 80MHz)
+              Network Type: Infrastructure
+              Security: WPA2 Personal
+            <redacted>:
+              PHY Mode: 802.11b/g/n/ac/ax
+              Channel: 7 (2GHz, 40MHz)
+              Network Type: Infrastructure
+              Security: WPA2 Personal
+            <redacted>:
+              PHY Mode: 802.11a/n/ac/ax
+              Channel: 153 (5GHz, 80MHz)
+              Network Type: Infrastructure
+              Security: WPA2 Personal
+            <redacted>:
+              PHY Mode: 802.11b/g/n/ax
+              Channel: 2 (2GHz, 20MHz)
+              Network Type: Infrastructure
+              Security: WPA2 Personal
+            <redacted>:
+              PHY Mode: 802.11a/n/ac/ax
+              Channel: 44 (5GHz, 80MHz)
+              Network Type: Infrastructure
+              Security: None
+            <redacted>:
+              PHY Mode: 802.11a/n/ac/ax
+              Channel: 48 (5GHz, 80MHz)
+              Network Type: Infrastructure
+              Security: WPA2 Personal
+            <redacted>:
+              PHY Mode: 802.11a/n/ac
+              Channel: 157 (5GHz, 80MHz)
+              Network Type: Infrastructure
+              Security: WPA2 Personal
+            <redacted>:
+              PHY Mode: 802.11a/n/ac/ax
+              Channel: 52 (5GHz, 80MHz)
+              Network Type: Infrastructure
+              Security: WPA2 Personal
+            <redacted>:
+              PHY Mode: 802.11b/g/n/ac/ax
+              Channel: 11 (2GHz, 20MHz)
+              Network Type: Infrastructure
+              Security: WPA2/WPA3 Personal
+            <redacted>:
+              PHY Mode: 802.11a/n/ac/ax
+              Channel: 52 (5GHz, 80MHz)
+              Network Type: Infrastructure
+              Security: WPA2/WPA3 Personal
+            <redacted>:
+              PHY Mode: 802.11a/n/ac
+              Channel: 157 (5GHz, 80MHz)
+              Network Type: Infrastructure
+              Security: WPA2 Personal
+            <redacted>:
+              PHY Mode: 802.11a/n/ac
+              Channel: 149 (5GHz, 80MHz)
+              Network Type: Infrastructure
+              Security: WPA2 Personal
+            <redacted>:
+              PHY Mode: 802.11b/g/n/ac/ax
+              Channel: 6 (2GHz, 20MHz)
+              Network Type: Infrastructure
+              Security: WPA2 Personal
+            <redacted>:
+              PHY Mode: 802.11a/n/ac/ax
+              Channel: 52 (5GHz, 80MHz)
+              Network Type: Infrastructure
+              Security: WPA2 Personal
+            <redacted>:
+              PHY Mode: 802.11a/n/ac
+              Channel: 149 (5GHz, 80MHz)
+              Network Type: Infrastructure
+              Security: WPA2 Personal
+              Signal / Noise: -31 dBm / -96 dBm
+            <redacted>:
+              PHY Mode: 802.11g/n
+              Channel: 7 (2GHz, 20MHz)
+              Network Type: Infrastructure
+              Security: WPA2 Personal
+            <redacted>:
+              PHY Mode: 802.11a/n/ac/ax
+              Channel: 100 (5GHz, 160MHz)
+              Network Type: Infrastructure
+              Security: WPA2/WPA3 Personal
+            <redacted>:
+              PHY Mode: 802.11b/g/n/ax
+              Channel: 2 (2GHz, 20MHz)
+              Network Type: Infrastructure
+              Security: WPA/WPA2 Personal
+            <redacted>:
+              PHY Mode: 802.11g/n
+              Channel: 6 (2GHz, 20MHz)
+              Network Type: Infrastructure
+              Security: WPA2 Personal
+            <redacted>:
+              PHY Mode: 802.11a/n/ac/ax
+              Channel: 132 (5GHz, 80MHz)
+              Network Type: Infrastructure
+              Security: WPA2 Personal
+            <redacted>:
+              PHY Mode: 802.11b/g/n/ac/ax
+              Channel: 5 (2GHz, 20MHz)
+              Network Type: Infrastructure
+              Security: WPA2/WPA3 Personal
+            <redacted>:
+              PHY Mode: 802.11a/n/ac/ax
+              Channel: 44 (5GHz, 160MHz)
+              Network Type: Infrastructure
+              Security: WPA2 Personal
+            <redacted>:
+              PHY Mode: 802.11a/n/ac/ax
+              Channel: 48 (5GHz, 80MHz)
+              Network Type: Infrastructure
+              Security: WPA2 Personal
+        awdl0:
+          MAC Address: 6e:2c:01:8f:20:04
+          Supported Channels: 1 (2GHz), 2 (2GHz), 3 (2GHz), 4 (2GHz), 5 (2GHz), 6 (2GHz), 7 (2GHz), 8 (2GHz), 9 (2GHz), 10 (2GHz), 11 (2GHz), 12 (2GHz), 13 (2GHz), 36 (5GHz), 40 (5GHz), 44 (5GHz), 48 (5GHz), 52 (5GHz), 56 (5GHz), 60 (5GHz), 64 (5GHz), 100 (5GHz), 104 (5GHz), 108 (5GHz), 112 (5GHz), 116 (5GHz), 120 (5GHz), 124 (5GHz), 128 (5GHz), 132 (5GHz), 136 (5GHz), 140 (5GHz), 144 (5GHz), 149 (5GHz), 153 (5GHz), 157 (5GHz), 161 (5GHz), 165 (5GHz), 1 (6GHz), 5 (6GHz), 9 (6GHz), 13 (6GHz), 17 (6GHz), 21 (6GHz), 25 (6GHz), 29 (6GHz), 33 (6GHz), 37 (6GHz), 41 (6GHz), 45 (6GHz), 49 (6GHz), 53 (6GHz), 57 (6GHz), 61 (6GHz), 65 (6GHz), 69 (6GHz), 73 (6GHz), 77 (6GHz), 81 (6GHz), 85 (6GHz), 89 (6GHz), 93 (6GHz), 97 (6GHz), 101 (6GHz), 105 (6GHz), 109 (6GHz), 113 (6GHz), 117 (6GHz), 121 (6GHz), 125 (6GHz), 129 (6GHz), 133 (6GHz), 137 (6GHz), 141 (6GHz), 145 (6GHz), 149 (6GHz), 153 (6GHz), 157 (6GHz), 161 (6GHz), 165 (6GHz), 169 (6GHz), 173 (6GHz), 177 (6GHz), 181 (6GHz), 185 (6GHz), 189 (6GHz), 193 (6GHz), 197 (6GHz), 201 (6GHz), 205 (6GHz), 209 (6GHz), 213 (6GHz), 217 (6GHz), 221 (6GHz), 225 (6GHz), 229 (6GHz), 233 (6GHz)
+          Current Network Information:
+              Network Type: Infrastructure
+
+Name       Mtu   Network       Address            Ipkts Ierrs    Opkts Oerrs  Coll
+en0        1500  <Link#15>   02:00:00:00:00:00 578108998     0 382074415     0     0
+en0        1500  10.0.1/24     10.0.1.28       578108998     - 382074415     -     -
+
+===== STEP 1b: competing AP scan (counts by band/channel) =====
+   3 6
+   2 7
+   2 5
+   2 2
+   2 11
+   2 1
+   1 8
+   8 44
+   5 52
+   4 157
+   4 149
+   2 48
+   2 153
+   2 116
+   2 100
+   1 56
+   1 36
+   1 132
+   1 112
+11 36-48
+10 149-161
+6 52-64
+3 100-112
+2 116-128
+1 132-144
+
+===== STEP 2: hop-by-hop latency (idle) =====
+PING 10.0.1.1 (10.0.1.1): 56 data bytes
+64 bytes from 10.0.1.1: icmp_seq=0 ttl=255 time=2.966 ms
+64 bytes from 10.0.1.1: icmp_seq=1 ttl=255 time=4.979 ms
+64 bytes from 10.0.1.1: icmp_seq=2 ttl=255 time=2.999 ms
+64 bytes from 10.0.1.1: icmp_seq=3 ttl=255 time=2.729 ms
+64 bytes from 10.0.1.1: icmp_seq=4 ttl=255 time=2.546 ms
+64 bytes from 10.0.1.1: icmp_seq=5 ttl=255 time=3.511 ms
+64 bytes from 10.0.1.1: icmp_seq=6 ttl=255 time=2.372 ms
+64 bytes from 10.0.1.1: icmp_seq=7 ttl=255 time=4.813 ms
+64 bytes from 10.0.1.1: icmp_seq=8 ttl=255 time=2.721 ms
+64 bytes from 10.0.1.1: icmp_seq=9 ttl=255 time=3.555 ms
+64 bytes from 10.0.1.1: icmp_seq=10 ttl=255 time=3.462 ms
+64 bytes from 10.0.1.1: icmp_seq=11 ttl=255 time=3.480 ms
+64 bytes from 10.0.1.1: icmp_seq=12 ttl=255 time=4.571 ms
+64 bytes from 10.0.1.1: icmp_seq=13 ttl=255 time=2.920 ms
+64 bytes from 10.0.1.1: icmp_seq=14 ttl=255 time=3.102 ms
+64 bytes from 10.0.1.1: icmp_seq=15 ttl=255 time=2.779 ms
+64 bytes from 10.0.1.1: icmp_seq=16 ttl=255 time=2.739 ms
+64 bytes from 10.0.1.1: icmp_seq=17 ttl=255 time=2.658 ms
+64 bytes from 10.0.1.1: icmp_seq=18 ttl=255 time=2.545 ms
+64 bytes from 10.0.1.1: icmp_seq=19 ttl=255 time=2.894 ms
+64 bytes from 10.0.1.1: icmp_seq=20 ttl=255 time=3.504 ms
+64 bytes from 10.0.1.1: icmp_seq=21 ttl=255 time=4.235 ms
+64 bytes from 10.0.1.1: icmp_seq=22 ttl=255 time=2.485 ms
+64 bytes from 10.0.1.1: icmp_seq=23 ttl=255 time=3.056 ms
+64 bytes from 10.0.1.1: icmp_seq=24 ttl=255 time=4.013 ms
+64 bytes from 10.0.1.1: icmp_seq=25 ttl=255 time=4.829 ms
+64 bytes from 10.0.1.1: icmp_seq=26 ttl=255 time=4.907 ms
+64 bytes from 10.0.1.1: icmp_seq=27 ttl=255 time=2.634 ms
+64 bytes from 10.0.1.1: icmp_seq=28 ttl=255 time=2.889 ms
+64 bytes from 10.0.1.1: icmp_seq=29 ttl=255 time=13.580 ms
+
+--- 10.0.1.1 ping statistics ---
+30 packets transmitted, 30 packets received, 0.0% packet loss
+round-trip min/avg/max/stddev = 2.372/3.682/13.580/2.001 ms
+PING 1.1.1.1 (1.1.1.1): 56 data bytes
+64 bytes from 1.1.1.1: icmp_seq=0 ttl=50 time=9.443 ms
+64 bytes from 1.1.1.1: icmp_seq=1 ttl=50 time=7.779 ms
+64 bytes from 1.1.1.1: icmp_seq=2 ttl=50 time=7.679 ms
+64 bytes from 1.1.1.1: icmp_seq=3 ttl=50 time=7.381 ms
+64 bytes from 1.1.1.1: icmp_seq=4 ttl=50 time=6.794 ms
+64 bytes from 1.1.1.1: icmp_seq=5 ttl=50 time=8.013 ms
+64 bytes from 1.1.1.1: icmp_seq=6 ttl=50 time=10.521 ms
+64 bytes from 1.1.1.1: icmp_seq=7 ttl=50 time=6.956 ms
+64 bytes from 1.1.1.1: icmp_seq=8 ttl=50 time=8.467 ms
+64 bytes from 1.1.1.1: icmp_seq=9 ttl=50 time=9.733 ms
+64 bytes from 1.1.1.1: icmp_seq=10 ttl=50 time=7.708 ms
+64 bytes from 1.1.1.1: icmp_seq=11 ttl=50 time=5.525 ms
+64 bytes from 1.1.1.1: icmp_seq=12 ttl=50 time=7.092 ms
+64 bytes from 1.1.1.1: icmp_seq=13 ttl=50 time=6.832 ms
+64 bytes from 1.1.1.1: icmp_seq=14 ttl=50 time=9.885 ms
+64 bytes from 1.1.1.1: icmp_seq=15 ttl=50 time=6.514 ms
+64 bytes from 1.1.1.1: icmp_seq=16 ttl=50 time=7.654 ms
+64 bytes from 1.1.1.1: icmp_seq=17 ttl=50 time=7.428 ms
+64 bytes from 1.1.1.1: icmp_seq=18 ttl=50 time=7.773 ms
+64 bytes from 1.1.1.1: icmp_seq=19 ttl=50 time=7.905 ms
+64 bytes from 1.1.1.1: icmp_seq=20 ttl=50 time=6.713 ms
+64 bytes from 1.1.1.1: icmp_seq=21 ttl=50 time=6.831 ms
+64 bytes from 1.1.1.1: icmp_seq=22 ttl=50 time=10.243 ms
+64 bytes from 1.1.1.1: icmp_seq=23 ttl=50 time=6.541 ms
+64 bytes from 1.1.1.1: icmp_seq=24 ttl=50 time=7.806 ms
+64 bytes from 1.1.1.1: icmp_seq=25 ttl=50 time=7.179 ms
+64 bytes from 1.1.1.1: icmp_seq=26 ttl=50 time=7.159 ms
+64 bytes from 1.1.1.1: icmp_seq=27 ttl=50 time=7.416 ms
+64 bytes from 1.1.1.1: icmp_seq=28 ttl=50 time=7.244 ms
+64 bytes from 1.1.1.1: icmp_seq=29 ttl=50 time=7.588 ms
+
+--- 1.1.1.1 ping statistics ---
+30 packets transmitted, 30 packets received, 0.0% packet loss
+round-trip min/avg/max/stddev = 5.525/7.727/10.521/1.153 ms
+IPv6 skipped: no global IPv6 address on en0 (tunnel-only IPv6 is not representative).
+traceroute to 1.1.1.1 (1.1.1.1), 5 hops max, 40 byte packets
+ 1  10.0.1.1 (10.0.1.1)  3.764 ms  3.996 ms
+ 2  lo0.bng2.snfcca13.sonic.net (50.0.79.111)  5.286 ms  3.788 ms
+ 3  302.irb.cr1.snfcca13.sonic.net (157.131.208.202)  8.213 ms  8.447 ms
+ 4  ae4.cr3.snrfca01.sonic.net (198.27.244.169)  7.308 ms  7.836 ms
+ 5  ae2.cr4.snrfca01.sonic.net (157.131.242.229)  147.019 ms
+    ae2.cr4.colaca01.sonic.net (157.131.243.57)  108.876 ms
+
+===== STEP 2b: VPN / proxies / hogs / Wi-Fi events =====
+Available network connection services in the current set (*=enabled):
+* (Connected)      341E5629-CF54-471B-9267-7478B879F858 VPN (io.tailscale.ipn.macsys) "Tailscale"                      [VPN:io.tailscale.ipn.macsys]
+Warning: client version "1.104.7-tcbc74fe48" != tailscaled server version "1.104.1-t7f4efe814-g4939ea2e4"
+100.107.2.101    work              joshua.r.li.98@  macOS  -                                                   
+100.117.109.35   box               joshua.r.li.98@  linux  offline, last seen 28d ago                          
+100.108.160.101  iphone-12-mini-1  joshua.r.li.98@  iOS    offline, last seen 1d ago                           
+100.127.140.14   iphone-12-mini    joshua.r.li.98@  iOS    offline, last seen 2d ago                           
+100.68.104.43    lisa              joshua.r.li.98@  linux  active; relay "sfo", tx 27013855448 rx 89568779264  
+100.67.125.73    m1-max            joshua.r.li.98@  macOS  active; relay "sfo", tx 130091792 rx 580385696      
+100.66.40.75     oracle            joshua.r.li.98@  linux  offline, last seen 21d ago                          
+100.98.145.91    threadripper      joshua.r.li.98@  linux  active; relay "sfo", tx 3483828 rx 5954124          
+100.113.100.1    tim               joshua.r.li.98@  macOS  offline, last seen 4h ago                           
+
+# Health check:
+#     - The MagicSock function ReceiveIPv4 is not running. You might experience connectivity issues.
+Name       Mtu   Network       Address            Ipkts Ierrs    Opkts Oerrs  Coll
+utun4      1280  <Link#23>                     137367821     0 103312254     0     0
+utun4      1280  fe80::cf6:8 fe80:17::cf6:855c 137367821     - 103312254     -     -
+utun4      1280  100.107.2.101 work.tailcf741. 137367821     - 103312254     -     -
+utun4      1280  work.tailcf fd7a:115c:a1e0::b 137367821     - 103312254     -     -
+Enabled: No
+Server: 
+Port: 0
+Authenticated Proxy Enabled: 0
+Enabled: No
+Server: 
+Port: 0
+Authenticated Proxy Enabled: 0
+2026-11-22 23:58:17.532 Df system_profiler[31887:74c6080] (SPAirPortReporter) [SPAirPortReporter] updateDictionary:218, network count[  48] index[  38]: redact[1] info['<redacted>'/len(10), '52 (5GHz, 80MHz)', '802.11a/n/ac/ax', 'spairport_network_type_station', 'spairport_security_mode_wpa2_personal', '(null)'] networkDictionary[<redacted>]
+2026-11-22 23:58:17.532 Df system_profiler[31887:74c6080] (SPAirPortReporter) [SPAirPortReporter] updateDictionary:218, network count[  48] index[  39]: redact[1] info['<redacted>'/len(10), '149 (5GHz, 80MHz)', '802.11a/n/ac', 'spairport_network_type_station', 'spairport_security_mode_wpa2_personal', '-31 dBm / -96 dBm'] networkDictionary[<redacted>]
+2026-11-22 23:58:17.532 Df system_profiler[31887:74c6080] (SPAirPortReporter) [SPAirPortReporter] updateDictionary:218, network count[  48] index[  40]: redact[1] info['<redacted>'/len(10), '7 (2GHz, 20MHz)', '802.11g/n', 'spairport_network_type_station', 'spairport_security_mode_wpa2_personal', '(null)'] networkDictionary[<redacted>]
+2026-11-22 23:58:17.532 Df system_profiler[31887:74c6080] (SPAirPortReporter) [SPAirPortReporter] updateDictionary:218, network count[  48] index[  41]: redact[1] info['<redacted>'/len(10), '100 (5GHz, 160MHz)', '802.11a/n/ac/ax', 'spairport_network_type_station', 'pairport_security_mode_wpa3_transition', '(null)'] networkDictionary[<redacted>]
+2026-11-22 23:58:17.532 Df system_profiler[31887:74c6080] (SPAirPortReporter) [SPAirPortReporter] updateDictionary:218, network count[  48] index[  42]: redact[1] info['<redacted>'/len(10), '2 (2GHz, 20MHz)', '802.11b/g/n/ax', 'spairport_network_type_station', 'spairport_security_mode_wpa2_personal_mixed', '(null)'] networkDictionary[<redacted>]
+2026-11-22 23:58:17.532 Df system_profiler[31887:74c6080] (SPAirPortReporter) [SPAirPortReporter] updateDictionary:218, network count[  48] index[  43]: redact[1] info['<redacted>'/len(10), '6 (2GHz, 20MHz)', '802.11g/n', 'spairport_network_type_station', 'spairport_security_mode_wpa2_personal', '(null)'] networkDictionary[<redacted>]
+2026-11-22 23:58:17.532 Df system_profiler[31887:74c6080] (SPAirPortReporter) [SPAirPortReporter] updateDictionary:218, network count[  48] index[  44]: redact[1] info['<redacted>'/len(10), '132 (5GHz, 80MHz)', '802.11a/n/ac/ax', 'spairport_network_type_station', 'spairport_security_mode_wpa2_personal', '(null)'] networkDictionary[<redacted>]
+2026-11-22 23:58:17.532 Df system_profiler[31887:74c6080] (SPAirPortReporter) [SPAirPortReporter] updateDictionary:218, network count[  48] index[  45]: redact[1] info['<redacted>'/len(10), '5 (2GHz, 20MHz)', '802.11b/g/n/ac/ax', 'spairport_network_type_station', 'pairport_security_mode_wpa3_transition', '(null)'] networkDictionary[<redacted>]
+2026-11-22 23:58:17.532 Df system_profiler[31887:74c6080] (SPAirPortReporter) [SPAirPortReporter] updateDictionary:218, network count[  48] index[  46]: redact[1] info['<redacted>'/len(10), '44 (5GHz, 160MHz)', '802.11a/n/ac/ax', 'spairport_network_type_station', 'spairport_security_mode_wpa2_personal', '(null)'] networkDictionary[<redacted>]
+2026-11-22 23:58:17.532 Df system_profiler[31887:74c6080] (SPAirPortReporter) [SPAirPortReporter] updateDictionary:218, network count[  48] index[  47]: redact[1] info['<redacted>'/len(10), '48 (5GHz, 80MHz)', '802.11a/n/ac/ax', 'spairport_network_type_station', 'spairport_security_mode_wpa2_personal', '(null)'] networkDictionary[<redacted>]
+2026-11-22 23:58:17.532 Df system_profiler[31887:74c6080] (SPAirPortReporter) [SPAirPortReporter] updateDictionary:228, serialization: redact[1] dictionary count[9], data length[10250] data[<redacted>]
+2026-11-22 23:58:17.532 Df system_profiler[31887:74c6080] (SPAirPortReporter) [SPAirPortReporter] updateDictionary:231, exit: redact[1] dictionary count[9], dictionary[<redacted>]
+2026-11-22 23:58:39.575 Df intelligencecontextd[8558:74b4717] [com.apple.UIIntelligenceSupport:xpc] client ConnectionID(687, ProcessInfo("com.apple.MenuBarAgent", pid: 1146)) disconnected
+2026-11-22 23:58:41.414 Df intelligencecontextd[8558:74b4717] [com.apple.UIIntelligenceSupport:xpc] client ConnectionID(686, ProcessInfo("net.imput.helium", pid: 70582)) disconnected
+2026-11-22 23:58:41.450 Df linkd[75486:74b83f7] [com.apple.appintents:AppService] Client com.apple.PasswordManagerBrowserExtensionHelper disconnected
+2026-11-22 23:58:41.500 Df linkd[75486:74c7c29] [com.apple.appintents:AppService] Client net.imput.helium.helper disconnected
+2026-11-22 23:58:41.508 Df ContinuityCaptureAgent[1002:74c7aad] [com.apple.CMContinuityCapture:provider] <private> -[CMContinuityCaptureProvider disconnectClient:] Client Disconnected - <private>, <private>
+2026-11-22 23:58:41.538 Df linkd[75486:74b83f7] [com.apple.appintents:AppService] Client net.imput.helium disconnected
+2026-11-22 23:58:41.549 Df intelligencecontextd[8558:74c7ae3] [com.apple.UIIntelligenceSupport:xpc] client ConnectionID(688, ProcessInfo("com.apple.MenuBarAgent", pid: 1146)) disconnected
+2026-11-22 23:58:41.563 Df linkd[75486:74c7c29] [com.apple.appintents:AppService] Client com.apple.SafariPlatformSupport.Helper disconnected
+2026-11-22 23:58:41.563 Df linkd[75486:74c7c29] [com.apple.appintents:AppService] Client com.apple.AuthenticationServices.Helper disconnected
+2026-11-22 23:58:45.870 Df intelligencecontextd[8558:74c7ae3] [com.apple.UIIntelligenceSupport:xpc] client ConnectionID(691, ProcessInfo("com.apple.dock.helper", pid: 33927)) disconnected
+2026-11-22 23:58:45.916 Df intelligencecontextd[8558:74c7ae3] [com.apple.UIIntelligenceSupport:xpc] client ConnectionID(689, ProcessInfo("com.apple.Notes", pid: 96626)) disconnected
+2026-11-22 23:58:45.918 Df linkd[75486:74b83f7] [com.apple.appintents:AppService] Client com.apple.Notes disconnected
+2026-11-22 23:58:45.918 Df linkd[75486:74b83f7] [com.apple.appintents:AppService] Client com.apple.Notes disconnected
+2026-11-22 23:58:45.925 Df CommCenter[29412:74c7c2a] [com.apple.CommCenter:ct.server] Client [<private>] disconnected (cid=5), client list size 4
+2026-11-22 23:58:45.990 Df StatusKitAgent[8054:74c7e92] [com.apple.StatusKit:SKAPresenceClient] Success releasing presence subscriptions associated with disconnected client
+2026-11-22 23:58:46.140 Df StatusKitAgent[8054:74c7e92] [com.apple.StatusKit:SKAPresenceClient] Success releasing presence assertion associated with disconnected client
+2026-11-22 23:58:49.292 Df intelligencecontextd[8558:74b4717] [com.apple.UIIntelligenceSupport:xpc] client ConnectionID(692, ProcessInfo("com.apple.MenuBarAgent", pid: 1146)) disconnected
+2026-11-22 23:58:59.233 E  symptomsd[700:74c55af] [com.apple.symptomsd:netepochs] Failed to post Wi-Fi loaded LQM event
+2026-11-22 23:58:59.358 Df symptomsd[700:74c6d99] [com.apple.symptomsd:netepochs] _primaryKeyChange new (<private>,en0) on 3, noroam,  old (<private>,en0)
+2026-11-22 23:58:59.538 Df ControlCenter[1014:74c7886] [com.apple.network:] -[NWSystemPathMonitor updateFlags] Wi-Fi true->true, Ethernet primary: false->false, VPN active: true->true
+2026-11-22 23:59:04.248 Df apsd[593:161a] [com.apple.apsd:courier] <private> courierConnection <private> asked us to disconnect stream on interface WWAN. Connected on 1 interfaces.
+2026-11-22 23:59:04.248 Df apsd[593:161a] [com.apple.apsd:courier] <private> _disconnectStream for interface: WWAN with reason: 5
+2026-11-22 23:59:04.248 Df apsd[593:161a] [com.apple.apsd:courier] <private> courierConnection <private> asked us to disconnect stream on interface WWAN. Connected on 1 interfaces.
+2026-11-22 23:59:04.248 Df apsd[593:161a] [com.apple.apsd:courier] <private> _disconnectStream for interface: WWAN with reason: 5
+2026-11-22 23:59:14.240 E  symptomsd[700:74c55af] [com.apple.symptomsd:netepochs] Failed to post Wi-Fi loaded LQM event
+2026-11-22 23:59:14.360 Df symptomsd[700:74c55af] [com.apple.symptomsd:netepochs] _primaryKeyChange new (<private>,en0) on 3, noroam,  old (<private>,en0)
+2026-11-22 23:59:14.548 Df ControlCenter[1014:74c881f] [com.apple.network:] -[NWSystemPathMonitor updateFlags] Wi-Fi true->true, Ethernet primary: false->false, VPN active: true->true
+2026-11-22 23:59:16.698 Df log[34427:74c8942] [com.apple.log:] log run noninteractively, parent: 31860 (dash), args: 'log' 'show' '--last' '30m' '--style' 'compact' '--predicate' 'eventMessage CONTAINS "roam" OR eventMessage CONTAINS "disconnect" OR eventMessage CONTAINS "AirPort" OR eventMessage CONTAINS "Wi-Fi"'
+
+===== STEP 3: DNS latency =====
+DNS configuration
+
+resolver #1
+  search domain[0] : tailcf741.ts.net
+  search domain[1] : trot.to
+  nameserver[0] : 100.100.100.100
+  nameserver[1] : fd7a:115c:a1e0::53
+  if_index : 23 (utun4)
+  flags    : Supplemental, Request A records, Request AAAA records
+  reach    : 0x00000003 (Reachable,Transient Connection)
+  order    : 100000
+
+resolver #2
+  nameserver[0] : 10.0.1.1
+  if_index : 15 (en0)
+  flags    : Request A records
+  reach    : 0x00020002 (Reachable,Directly Reachable Address)
+  order    : 200000
+
+resolver #3
+  domain   : tailcf741.ts.net.
+  nameserver[0] : 100.100.100.100
+  nameserver[1] : fd7a:115c:a1e0::53
+  if_index : 23 (utun4)
+  flags    : Supplemental, Request A records, Request AAAA records
+  reach    : 0x00000003 (Reachable,Transient Connection)
+  order    : 100001
+
+resolver #4
+  domain   : trot.to.
+  nameserver[0] : 100.100.100.100
+  nameserver[1] : fd7a:115c:a1e0::53
+  if_index : 23 (utun4)
+  flags    : Supplemental, Request A records, Request AAAA records
+  reach    : 0x00000003 (Reachable,Transient Connection)
+  order    : 100002
+
+resolver #5
+  domain   : local
+  options  : mdns
+  timeout  : 5
+  flags    : Request A records
+  reach    : 0x00000000 (Not Reachable)
+  order    : 300000
+
+resolver #6
+  domain   : 254.169.in-addr.arpa
+  options  : mdns
+  timeout  : 5
+  flags    : Request A records
+  reach    : 0x00000000 (Not Reachable)
+  order    : 300200
+
+resolver #7
+  domain   : 8.e.f.ip6.arpa
+  options  : mdns
+  timeout  : 5
+  flags    : Request A records
+  reach    : 0x00000000 (Not Reachable)
+  order    : 300400
+
+resolver #8
+  domain   : 9.e.f.ip6.arpa
+  options  : mdns
+  timeout  : 5
+  flags    : Request A records
+  reach    : 0x00000000 (Not Reachable)
+  order    : 300600
+
+resolver #9
+  domain   : a.e.f.ip6.arpa
+  options  : mdns
+  timeout  : 5
+  flags    : Request A records
+  reach    : 0x00000000 (Not Reachable)
+  order    : 300800
+
+resolver #10
+  domain   : b.e.f.ip6.arpa
+  options  : mdns
+  timeout  : 5
+  flags    : Request A records
+  reach    : 0x00000000 (Not Reachable)
+  order    : 301000
+
+DNS configuration (for scoped queries)
+
+resolver #1
+  search domain[0] : trot.to
+  nameserver[0] : 10.0.1.1
+  if_index : 15 (en0)
+  flags    : Scoped, Request A records
+  reach    : 0x00020002 (Reachable,Directly Reachable Address)
+
+resolver #2
+  nameserver[0] : 100.100.100.100
+  nameserver[1] : fd7a:115c:a1e0::53
+  if_index : 23 (utun4)
+  flags    : Scoped, Request A records, Request AAAA records
+  reach    : 0x00000003 (Reachable,Transient Connection)
+;; Query time: 21 msec
+;; SERVER: 100.100.100.100#53(100.100.100.100)
+;; WHEN: Sun Nov 22 23:59:20 PST 2026
+;; MSG SIZE  rcvd: 41
+
+;; Query time: 25 msec
+;; SERVER: 100.100.100.100#53(100.100.100.100)
+;; WHEN: Sun Nov 22 23:59:20 PST 2026
+;; MSG SIZE  rcvd: 51
+
+;; Query time: 25 msec
+;; SERVER: 10.0.1.1#53(10.0.1.1)
+;; WHEN: Sun Nov 22 23:59:20 PST 2026
+;; MSG SIZE  rcvd: 48
+
+;; Query time: 13 msec
+;; SERVER: 1.1.1.1#53(1.1.1.1)
+;; WHEN: Sun Nov 22 23:59:20 PST 2026
+;; MSG SIZE  rcvd: 125
+
+;; Query time: 22 msec
+;; SERVER: 8.8.8.8#53(8.8.8.8)
+;; WHEN: Sun Nov 22 23:59:20 PST 2026
+;; MSG SIZE  rcvd: 121
+
+
+===== STEP 4: throughput & bufferbloat (alone, no ping running) =====
+==== Verbose Results ====
+---
+Capacity:
+---
+   Uplink capacity: 434.865 Mbps
+      Accuracy: High
+      Uplink bytes transferred: 839.000 MB
+      Uplink Flow count: 16
+   Downlink capacity: 187.343 Mbps
+      Accuracy: High
+      Downlink bytes transferred: 533.839 MB
+      Downlink Flow count: 11
+---
+Latency:
+---
+   Idle Latency:
+      5367 RPM (11.177 milliseconds)
+         Transport: 5581 RPM (10.750 milliseconds)
+         Security: 4067 RPM (14.750 milliseconds)
+         HTTP: 7470 RPM (8.032 milliseconds)
+      Accuracy: High
+   Responsiveness: Medium
+      279 RPM (214.729 milliseconds)
+         Transport: 467 RPM (128.359 milliseconds)
+         Security: 414 RPM (144.757 milliseconds)
+         HTTP: 438 RPM (136.757 milliseconds)
+         HTTP loaded: 230 RPM (260.747 milliseconds)
+      Accuracy: High
+---
+Protocols Used:
+---
+    HTTP/2: 100%
+---
+Transport-layer info:
+---
+    ECN Disabled: 100%, L4S Disabled: 100%
+---
+Other Info:
+---
+   Test Endpoint: ussjc2-edge-fx-004.aaplimg.com
+   Interface: en0
+   Start: 2026-11-22 23:59:20.803
+   End: 2026-11-22 23:59:40.308
+   Duration: 19.51s
+   Downlink Phase Length: 19.38s
+   Uplink Phase Length: 19.38s
+   OS Version: Version 27.2 (Build 26B123)
+
+==== SUMMARY ====
+Uplink capacity: 434.865 Mbps
+Downlink capacity: 187.343 Mbps
+Responsiveness: Medium (214.729 milliseconds | 279 RPM)
+Idle Latency: 11.177 milliseconds | 5367 RPM
+
+===== DONE =====
+Raw: /Users/josh/d/wifi/results/BEFORE/raw.log
+Metrics: /Users/josh/d/wifi/results/BEFORE/metrics.env

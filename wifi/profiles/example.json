@@ -1,0 +1,7 @@
+{
+  "ssid": "EXAMPLE-SSID",
+  "dns": [],
+  "web_proxy": {"host": "", "port": 0},
+  "secure_web_proxy": {"host": "", "port": 0},
+  "notes": "Copy to <ssid-slug>.json. Empty dns means use DHCP; empty proxy host means proxy off."
+}
