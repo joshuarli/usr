@@ -4,8 +4,8 @@ description: "Bounded substantive implementation and verification in the assigne
 # policy:begin native-agent
 # Generated from tools/pi-subagent-bridge/src/policy.ts; run make generate.
 model: mai-code-2
-reasoningEffort: medium
-modelPolicy: required
+reasoning-effort: medium
+model-policy: required
 # policy:end native-agent
 infer: false
 include-custom-instructions: true

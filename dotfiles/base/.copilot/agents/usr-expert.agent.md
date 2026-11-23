@@ -4,8 +4,8 @@ description: "Exceptional architecture and independent adversarial review; not a
 # policy:begin native-agent
 # Generated from tools/pi-subagent-bridge/src/policy.ts; run make generate.
 model: mai-code-2
-reasoningEffort: high
-modelPolicy: required
+reasoning-effort: high
+model-policy: required
 # policy:end native-agent
 infer: false
 include-custom-instructions: true

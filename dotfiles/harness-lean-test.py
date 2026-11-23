@@ -12,7 +12,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 SHIMS = ROOT / "dotfiles/base/.local/lib/harness-shims"
-NAMES = ("codex", "claude", "cmd")
+NAMES = ("codex", "claude", "cmd", "copilot")
 POLICY_ENV = ("CLAUDE_CODE_ENABLE_CFC", "CMD_DISABLE_NOTICES", "COMMANDCODE_SKIP_UPDATES", "DO_NOT_TRACK")
 FAKE = """import json, os, sys
 from pathlib import Path
@@ -78,13 +78,18 @@ class HarnessLeanTests(unittest.TestCase):
         for name in NAMES:
             with self.subTest(name=name):
                 record = self.invoke(name, args, status=23)
-                expected = ("--no-daemon", *args) if name == "codex" else args
+                if name == "codex":
+                    expected = ("--no-daemon", *args)
+                elif name == "copilot":
+                    expected = ("--no-auto-update", "--disable-client-telemetry", "--sync-session=off", *args)
+                else:
+                    expected = args
                 self.assertEqual(record["argv"], list(expected))
 
     def test_shared_shell_selects_shims_before_managed_binaries(self):
         config = ROOT / "dotfiles/base/.config/sh/config.sh"
         result = subprocess.run(
-            ["/bin/sh", "-c", '. "$1"; . "$1"; for name in codex claude cmd; do command -v "$name"; done', "sh", str(config)],
+            ["/bin/sh", "-c", '. "$1"; . "$1"; for name in codex claude cmd copilot; do command -v "$name"; done', "sh", str(config)],
             env={**self.env, "PATH": str(self.bin) + ":/usr/bin:/bin"},
             capture_output=True, text=True, check=True, timeout=5,
         )

@@ -111,8 +111,10 @@ class OrchestrateTests(unittest.TestCase):
         for tier, pin in pins.items():
             profile = (directory / "agents" / (pin["name"] + ".agent.md")).read_text()
             self.assertIn("model: " + pin["model"], profile)
-            self.assertIn("reasoningEffort: " + pin["effort"], profile)
-            self.assertIn("modelPolicy: required", profile)
+            self.assertIn("reasoning-effort: " + pin["effort"], profile)
+            self.assertIn("model-policy: required", profile)
+            self.assertNotIn("reasoningEffort:", profile)
+            self.assertNotIn("modelPolicy:", profile)
             self.assertIn("strict-tools-list: true", profile)
             self.assertIn("infer: false", profile)
             if tier == "scout":

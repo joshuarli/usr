@@ -4,8 +4,8 @@ description: "Read-only evidence gathering and scoped codebase search."
 # policy:begin native-agent
 # Generated from tools/pi-subagent-bridge/src/policy.ts; run make generate.
 model: mai-code-2-flash
-reasoningEffort: low
-modelPolicy: required
+reasoning-effort: low
+model-policy: required
 # policy:end native-agent
 infer: false
 include-custom-instructions: true
