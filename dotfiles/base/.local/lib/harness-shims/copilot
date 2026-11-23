@@ -1,0 +1,3 @@
+#!/bin/sh
+set -eu
+exec "$HOME/.local/bin/copilot" --no-auto-update --disable-client-telemetry --sync-session=off "$@"

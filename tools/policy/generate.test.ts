@@ -211,6 +211,7 @@ type MutablePolicy = {
   }
   opencode: { model: string; efforts: Record<string, string> }
   commandNative: Record<string, { name: string; model: string; effort?: string }>
+  copilotNative: Record<string, { name: string; model: string; effort: string }>
   nativeFallback: { tiers: string[]; claudeModels: Record<string, string>; claudeEffort: Record<string, string> }
   antigravityDirect: { models: string[]; main: { model: string; effort: string }; god: { model: string; effort: string }; tiers: Record<string, { name: string; model: string; effort: string; selector: string }>; manualCarbon: string; retired: string[] }
   bannedModels: string[]
@@ -244,6 +245,12 @@ const dimensions: Dimension[] = [
   { name: "codex worker model", mutate: p => { p.rootRoutes.worker.at(-1)!.model = FIXTURE_MODEL } },
   { name: "codex worker effort", mutate: p => { p.rootRoutes.worker.at(-1)!.effort = "max" } },
 
+  ...(["scout", "mechanic", "worker", "expert"] as const).flatMap(tier => [
+    { name: "Copilot " + tier + " model", mutate: (p: MutablePolicy) => { p.copilotNative[tier].model = FIXTURE_MODEL } },
+    { name: "Copilot " + tier + " effort", mutate: (p: MutablePolicy) => { p.copilotNative[tier].effort = otherEffort(p.copilotNative[tier].effort) } },
+  ]),
+  { name: "Copilot banned model", mutate: p => { p.copilotNative.worker.model = "claude-fable-5-2" }, rejects: /Prohibited model in active policy/ },
+  { name: "Copilot Auto model", mutate: p => { p.copilotNative.scout.model = "auto" }, rejects: /cannot use Auto/ },
   { name: "command native scout model", mutate: p => { p.commandNative.scout.model = FIXTURE_MODEL } },
   { name: "command native mechanic model", mutate: p => { p.commandNative.mechanic.model = FIXTURE_MODEL } },
   { name: "command native mechanic effort", mutate: p => { p.commandNative.mechanic.effort = "low" } },

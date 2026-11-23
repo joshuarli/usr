@@ -1,0 +1,24 @@
+{
+  "model": "mai-code-2",
+  "effortLevel": "medium",
+  "autoUpdate": false,
+  "ide": {
+    "autoConnect": false
+  },
+  "remoteSessions": false,
+  "remoteExport": false,
+  "storeTokenPlaintext": false,
+  "subagents": {
+    "maxDepth": 1,
+    "maxConcurrency": 4,
+    "disabledSubagents": [
+      "code-review",
+      "explore",
+      "general-purpose",
+      "research",
+      "rubber-duck",
+      "security-review",
+      "task"
+    ]
+  }
+}

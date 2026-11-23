@@ -54,6 +54,13 @@ export const COMMAND_NATIVE = {
   pilot: { name: "usr-worker-hy4", model: "tencent/hy4", effort: "medium" },
 } as const
 
+export const COPILOT_NATIVE = {
+  scout: { name: "usr-scout", model: "mai-code-2-flash", effort: "low" },
+  mechanic: { name: "usr-mechanic", model: "mai-code-2-flash", effort: "low" },
+  worker: { name: "usr-worker", model: "mai-code-2", effort: "medium" },
+  expert: { name: "usr-expert", model: "mai-code-2", effort: "high" },
+} as const satisfies Record<Tier, CliPin & { name: string }>
+
 export const COMMAND_MODEL = "deepseek/deepseek-v4.1-flash"
 export const COMMAND_EMBER_MODEL = "meta/muse-ember"
 export const COMMAND_TIER_MODELS = {
@@ -126,6 +133,7 @@ export const POLICY = {
   },
   opencode: OPENCODE_NATIVE,
   commandNative: COMMAND_NATIVE,
+  copilotNative: COPILOT_NATIVE,
   nativeFallback: NATIVE_FALLBACK,
   antigravityDirect: ANTIGRAVITY_DIRECT,
   bannedModels: BANNED_MODELS,

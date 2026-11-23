@@ -98,6 +98,26 @@ class OrchestrateTests(unittest.TestCase):
             content = (ROOT / path).read_text()
             self.assertIn("OpenCode", content)
 
+    def test_copilot_native_pilot_has_required_pins_and_leaf_tools(self):
+        directory = ROOT / "dotfiles/base/.copilot"
+        pins = POLICY["copilotNative"]
+        self.assertEqual(set(pins), {"scout", "mechanic", "worker", "expert"})
+        self.assertIn("Copilot CLI pilot:", self.text)
+        self.assertNotIn("copilot", {route["executor"] for routes in POLICY["rootRoutes"].values() for route in routes})
+        settings = json.loads((directory / "settings.json").read_text())
+        self.assertNotEqual(settings["model"], "auto")
+        self.assertFalse(settings["remoteExport"])
+        self.assertEqual(settings["subagents"]["maxDepth"], 1)
+        for tier, pin in pins.items():
+            profile = (directory / "agents" / (pin["name"] + ".agent.md")).read_text()
+            self.assertIn("model: " + pin["model"], profile)
+            self.assertIn("reasoningEffort: " + pin["effort"], profile)
+            self.assertIn("modelPolicy: required", profile)
+            self.assertIn("strict-tools-list: true", profile)
+            self.assertIn("infer: false", profile)
+            if tier == "scout":
+                self.assertIn('tools: ["read","grep","glob"]', profile)
+
     def test_command_code_native_agents_are_pinned(self):
         self.assertIn("Command Code exception:", self.text)
         self.assertIn("never invoke `pi-subagent-bridge` from that parent", self.text)
