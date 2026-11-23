@@ -25,14 +25,14 @@ export type RootPlan = {
 
 /** Antigravity CLI native target allocation. The custom-agent schema only admits flash/pro tier hints. */
 export const ANTIGRAVITY_DIRECT = {
-  models: ["gemini-4-neon-high", "gemini-4-neon-xhigh", "gemini-4-hydrogen-high", "gemini-4-hydrogen-low"],
+  models: ["gemini-4-neon-high", "gemini-4-neon-medium", "gemini-4-neon-low", "gemini-4-hydrogen-low"],
   main: { model: "gemini-4-neon-high", effort: "high" },
-  god: { model: "gemini-4-neon-xhigh", effort: "xhigh" },
+  god: { model: "gemini-4-neon-high", effort: "high" },
   tiers: {
     scout: { name: "usr-scout", model: "gemini-4-hydrogen-low", effort: "low", selector: "flash" },
     mechanic: { name: "usr-mechanic", model: "gemini-4-hydrogen-low", effort: "low", selector: "flash" },
-    worker: { name: "usr-worker", model: "gemini-4-hydrogen-high", effort: "high", selector: "flash" },
-    expert: { name: "usr-expert", model: "gemini-4-neon-high", effort: "high", selector: "pro" },
+    worker: { name: "usr-worker", model: "gemini-4-neon-low", effort: "low", selector: "pro" },
+    expert: { name: "usr-expert", model: "gemini-4-neon-medium", effort: "medium", selector: "pro" },
   },
   manualCarbon: "gemini-4-carbon-high",
   retired: ["gemini-3.8-flash", "gemini-4-argon"],

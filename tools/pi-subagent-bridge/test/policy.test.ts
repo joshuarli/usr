@@ -81,14 +81,18 @@ test("only the Contributor Spark model is admitted from the Muse family", () => 
 
 test("Antigravity uses native-only Neon and Hydrogen tiers", () => {
   assert.deepEqual(ANTIGRAVITY_DIRECT.main, { model: "gemini-4-neon-high", effort: "high" })
-  assert.deepEqual(ANTIGRAVITY_DIRECT.god, { model: "gemini-4-neon-xhigh", effort: "xhigh" })
-  assert.deepEqual(Object.keys(ANTIGRAVITY_DIRECT.tiers), ["scout", "mechanic", "worker", "expert"])
-  for (const tier of ["scout", "mechanic", "worker"] as const) {
-    assert.match(ANTIGRAVITY_DIRECT.tiers[tier].model, /^gemini-4-hydrogen-/)
-    assert.equal(ANTIGRAVITY_DIRECT.tiers[tier].selector, "flash")
-  }
-  assert.equal(ANTIGRAVITY_DIRECT.tiers.expert.model, "gemini-4-neon-high")
-  assert.equal(ANTIGRAVITY_DIRECT.tiers.expert.selector, "pro")
+  assert.deepEqual(ANTIGRAVITY_DIRECT.god, { model: "gemini-4-neon-high", effort: "high" })
+  assert.deepEqual(ANTIGRAVITY_DIRECT.tiers, {
+    scout: { name: "usr-scout", model: "gemini-4-hydrogen-low", effort: "low", selector: "flash" },
+    mechanic: { name: "usr-mechanic", model: "gemini-4-hydrogen-low", effort: "low", selector: "flash" },
+    worker: { name: "usr-worker", model: "gemini-4-neon-low", effort: "low", selector: "pro" },
+    expert: { name: "usr-expert", model: "gemini-4-neon-medium", effort: "medium", selector: "pro" },
+  })
+  assert.deepEqual(new Set(ANTIGRAVITY_DIRECT.models), new Set([
+    ANTIGRAVITY_DIRECT.main.model, ANTIGRAVITY_DIRECT.god.model,
+    ...Object.values(ANTIGRAVITY_DIRECT.tiers).map(pin => pin.model),
+  ]))
+  assert.ok(Object.values(POLICY.rootRoutes).flat().every(route => !route.model.startsWith("gemini-4-neon-") && !route.model.startsWith("gemini-4-hydrogen-")))
   assert.equal(isBannedModel(ANTIGRAVITY_DIRECT.manualCarbon), true)
   assert.ok(!(ANTIGRAVITY_DIRECT.models as readonly string[]).includes(ANTIGRAVITY_DIRECT.manualCarbon))
   assert.deepEqual(ANTIGRAVITY_DIRECT.retired, ["gemini-3.8-flash", "gemini-4-argon"])

@@ -3,7 +3,7 @@ name: usr-worker
 description: Implement a scoped code change and verify its acceptance criteria.
 # policy:begin native-agent
 # Generated from tools/pi-subagent-bridge/src/policy.ts; run make generate.
-model: flash
+model: pro
 subagent: true
 mainAgent: false
 # policy:end native-agent

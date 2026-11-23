@@ -52,8 +52,8 @@ Native agents have separate contexts and cannot spawn another agent. They do not
 | --- | --- | --- | --- | --- |
 | scout | `usr-scout` | `gemini-4-hydrogen-low` | `low` | `flash` |
 | mechanic | `usr-mechanic` | `gemini-4-hydrogen-low` | `low` | `flash` |
-| worker | `usr-worker` | `gemini-4-hydrogen-high` | `high` | `flash` |
-| expert | `usr-expert` | `gemini-4-neon-high` | `high` | `pro` |
+| worker | `usr-worker` | `gemini-4-neon-low` | `low` | `pro` |
+| expert | `usr-expert` | `gemini-4-neon-medium` | `medium` | `pro` |
 
 The CLI's documented agent schema accepts `model: flash/pro` selectors, not exact model IDs or effort pins. Treat these as target allocations, check actual child model and effort on first use, and block any lane resolving to Gemini 3.8, Carbon, Argon or an unexpected model. Carbon may only be selected manually by the owner, outside delegation. See `docs/antigravity-native.md`.
 <!-- policy:end antigravity -->

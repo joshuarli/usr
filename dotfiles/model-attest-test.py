@@ -15,9 +15,9 @@ exec(compile(SCRIPT.read_text(), str(SCRIPT), "exec"), module.__dict__)
 
 class AttestationTests(unittest.TestCase):
     def setUp(self):
-        self.sample = {"harness": "antigravity", "requested_model": "gemini-4-hydrogen-high",
-                       "observed_model": "gemini-4-hydrogen-high", "requested_effort": "high",
-                       "observed_effort": "high", "probe_ok": True,
+        self.sample = {"harness": "antigravity", "requested_model": "gemini-4-neon-low",
+                       "observed_model": "gemini-4-neon-low", "requested_effort": "low",
+                       "observed_effort": "low", "probe_ok": True,
                        "evidence": "verified host CLI receipt path (not fabricated)"}
 
     def test_exact_match(self):
@@ -26,6 +26,12 @@ class AttestationTests(unittest.TestCase):
     def test_unobservable_and_alias_are_blocked(self):
         for change in [{"observed_model": "flash"}, {"observed_effort": "unknown"},
                        {"probe_ok": False}, {"evidence": ""}, {"observed_model": ""}]:
+            with self.subTest(change=change):
+                self.assertTrue(module.evaluate({**self.sample, **change}))
+
+    def test_worker_blocks_wrong_model_and_effort(self):
+        for change in [{"observed_model": "gemini-4-hydrogen-high"},
+                       {"observed_model": "gemini-4-neon-medium"}, {"observed_effort": "medium"}]:
             with self.subTest(change=change):
                 self.assertTrue(module.evaluate({**self.sample, **change}))
 

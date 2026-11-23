@@ -5,17 +5,17 @@ Google AI Ultra, November 18, 2026. A top-level `agy` session delegates **exclus
 | Assignment | Intended model | Effort | Native agent | Custom-agent tier hint |
 | --- | --- | --- | --- | --- |
 | Main | `gemini-4-neon-high` | `high` | primary session | n/a |
-| God | `gemini-4-neon-xhigh` | `xhigh` | primary session | n/a |
+| God | `gemini-4-neon-high` | `high` | primary session | n/a |
 | scout | `gemini-4-hydrogen-low` | `low` | `usr-scout` | `flash` |
 | mechanic | `gemini-4-hydrogen-low` | `low` | `usr-mechanic` | `flash` |
-| worker | `gemini-4-hydrogen-high` | `high` | `usr-worker` | `flash` |
-| expert | `gemini-4-neon-high` | `high` | `usr-expert` | `pro` |
+| worker | `gemini-4-neon-low` | `low` | `usr-worker` | `pro` |
+| expert | `gemini-4-neon-medium` | `medium` | `usr-expert` | `pro` |
 
-The `god` label is a direct parent-session mode; it does not create a new bridge tier or a god subagent. Start `agy --model gemini-4-neon-high` for normal sessions, or explicitly `agy --model gemini-4-neon-xhigh` for the highest-effort parent. Run `agy models` to verify model availability with the authenticated Google AI Ultra account; inspect `/agents` for the custom agent roster.
+The `god` label is a direct parent-session mode; it does not create a new bridge tier or a god subagent. Start `agy --model gemini-4-neon-high` for normal or god-mode sessions; both use the same high-effort Neon parent. Run `agy models` to verify model availability with the authenticated Google AI Ultra account; inspect `/agents` for the custom agent roster.
 
 ## Per-agent model selection limitation
 
-The [documented native agent schema](https://antigravity.google/docs/subagents?tab=cli) supports only `model: inherit`, `flash`, or `pro`; there are no documented per-agent `gemini-4-*` ID pins or effort fields. Thus `flash` and `pro` are **abstract hints, not hard model or effort pins**. The table expresses the desired routing, not verified child behavior. At the first invocation of each native agent, inspect the resolved child model and effort in the installed CLI. If a Hydrogen child resolves to Gemini 3.8 Flash (or another unapproved model), **block that lane** rather than silently accepting the fallback. Do not claim verified runtime tier compliance based only on the YAML file. When exact native pinning is documented, migrate after testing on a live host.
+The [documented native agent schema](https://antigravity.google/docs/subagents?tab=cli) supports only `model: inherit`, `flash`, or `pro`; there are no documented per-agent `gemini-4-*` ID pins or effort fields. Thus `flash` and `pro` are **abstract hints, not hard model or effort pins**. The table expresses the desired routing, not verified child behavior. At the first invocation of each native agent, inspect the resolved child model and effort in the installed CLI. If a child resolves to the wrong model or effort, or either cannot be observed, **block that lane** rather than silently accepting the fallback. Hydrogen is reserved for scout and mechanic; Neon is required for worker and expert. Do not claim verified runtime tier compliance based only on the YAML file. When exact native pinning is documented, migrate after testing on a live host.
 
 Gemini 3.8 (including Flash) and Gemini 4 Argon are retired for agy. Carbon is excluded from automated delegation and remains banned in the shared automatic model policy; `gemini-4-carbon-high` is an operator-only selection for unusual long-horizon challenges, requiring explicit owner direction. Google's [Neon model card](https://deepmind.google/models/model-cards/gemini-4-neon/) says Neon was adapted from Carbon, while [Antigravity's release announcement](https://antigravity.google/blog/gemini-4-neon-in-google-antigravity/) still identifies Carbon as particularly strong for deep long-running work. There is no evidence Carbon is strictly inferior in every task.
 
