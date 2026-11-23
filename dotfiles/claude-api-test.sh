@@ -128,15 +128,7 @@ for banned in fable fable-5-2 claude-fable-5-1 claude-fable-5-2 anthropic/claude
   fi
   grep -q 'prohibited Fable model' "$error" || fail "Fable rejection was not explicit"
 done
-[ "$(grep -c '^called
-	fail "accepted the removed --prompt option"
-else
-	[ "$?" -eq 2 ] || fail "removed --prompt option returned the wrong status"
-fi
-[ "$(grep -c '^called$' "$calls")" -eq 2 ] || fail "invalid prompt started Claude"
-
-printf '%s\n' 'claude-api tests passed'
- "$calls")" -eq 2 ] || fail "Fable rejection launched Claude"
+[ "$(grep -c '^called$' "$calls")" -eq 2 ] || fail "Fable rejection launched Claude"
 if run --prompt example; then
 	fail "accepted the removed --prompt option"
 else
