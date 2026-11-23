@@ -59,3 +59,33 @@ test("check mode detects a stale HTML output without repairing it", () => {
     assert.equal(main(["--check"], f.root), 0)
   } finally { f.close() }
 })
+
+test("native lane map labels Copilot candidates and preserves unspecified effort", () => {
+  const f = fixture()
+  try {
+    assert.equal(main([], f.root), 0)
+    const html = readFileSync(f.path, "utf8")
+    const graph = html.match(/<svg[\s\S]*?<\/svg>/)![0]
+    assert.match(graph, /Top-level native parent\?[\s\S]*?Copilot/)
+    const headers = [...html.matchAll(/<thead><tr>(.*?)<\/tr><\/thead>/g)][0]![1]
+    const names = [...headers.matchAll(/<th>(.*?)<\/th>/g)].map(match => match[1])
+    const copilot = names.indexOf("Copilot (unqualified pilot)") - 1
+    const command = names.indexOf("Command Code") - 1
+    assert.ok(copilot >= 0)
+    for (const [tier, pin] of Object.entries(POLICY.copilotNative)) {
+      const row = html.match(new RegExp(`<tr><th>${tier}</th>(.*?)</tr>`))![1]
+      const cells = [...row.matchAll(/<td>(.*?)<\/td>/g)].map(match => match[1]!)
+      for (const value of [pin.name, pin.model, pin.effort, "candidate; attest first"]) {
+        assert.ok(cells[copilot]!.includes(value), `${tier} missing ${value}`)
+      }
+      if (tier === "scout") {
+        assert.match(cells[command]!, /model default/)
+        assert.doesNotMatch(cells[command]!, /class="effort"/)
+      }
+    }
+    const quota = html.match(/<tr><th>quota exhaustion<\/th>(.*?)<\/tr>/)![1]
+    const cells = [...quota.matchAll(/<td>(.*?)<\/td>/g)].map(match => match[1]!)
+    assert.match(cells[copilot]!, /blocked/)
+    assert.match(cells[copilot]!, /no bridge fallback/)
+  } finally { f.close() }
+})

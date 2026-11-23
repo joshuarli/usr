@@ -1193,6 +1193,7 @@ class DecideTests(unittest.TestCase):
         aliases = (
             "dotfiles/base/.commandcode/AGENTS.md",
             "dotfiles/base/.copilot/copilot-instructions.md",
+            "dotfiles/base/.config/devin/AGENTS.md",
             "dotfiles/base/.config/muse/AGENTS.md",
             "dotfiles/base/.config/opencode/AGENTS.md",
             "dotfiles/base/.dsh/AGENTS.md",

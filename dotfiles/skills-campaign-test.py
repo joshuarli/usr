@@ -142,6 +142,7 @@ class SkillCampaignTests(unittest.TestCase):
         base = ROOT / "dotfiles" / "base"
         canonical = base / ".codex" / "AGENTS.md"
         adapters = (
+            base / ".config" / "devin" / "AGENTS.md",
             base / ".config" / "muse" / "AGENTS.md",
             base / ".dsh" / "AGENTS.md",
             base / ".commandcode" / "AGENTS.md",

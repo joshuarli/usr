@@ -64,6 +64,7 @@ INTERCOM_TAILNET = Area("Tailnet Intercom coordinator launcher")
 BRIDGE = Area("`tools/pi-subagent-bridge`", "run `./dev-install.sh` once first")
 PI_PROFILE = Area("Pi profile and extensions")
 DAG = Area("`sync` DAG/bootstrap")
+CHECK_PLANNING = Area("`sync check` planner and check registry")
 INSTALLER = Area("Private tool installer")
 UNINSTALL = Area("`sync uninstall`")
 OWNED_HELP = Area("owned shell tool help")
@@ -96,14 +97,19 @@ BENCH = Area("`make bench` workloads (`tools/bench`)", "run `make bench` for a t
 MARKDOWN = Area("Markdown", "see below for `mdtool refs`, `router`, and `check`")
 
 SKILL_PATHS = ("dotfiles/base/.agents/skills/", ".agents/skills/", "tools/skills/", "SKILLS.md")
-CONTRACTS = ("dotfiles/base/.agents/instructions/", "dotfiles/base/.codex/AGENTS.md", "dotfiles/base/.codex/AGENTS.override.md", "dotfiles/base/.claude/CLAUDE.md")
+CONTRACTS = ("dotfiles/base/.agents/instructions/", "dotfiles/base/.codex/AGENTS.md", "dotfiles/base/.codex/AGENTS.override.md", "dotfiles/base/.claude/CLAUDE.md",
+             "dotfiles/base/.commandcode/AGENTS.md", "dotfiles/base/.copilot/copilot-instructions.md", "dotfiles/base/.config/devin/AGENTS.md",
+             "dotfiles/base/.config/muse/AGENTS.md", "dotfiles/base/.config/opencode/AGENTS.md", "dotfiles/base/.dsh/AGENTS.md",
+             "dotfiles/base/.fx/AGENTS.md", "dotfiles/base/.gemini/config/AGENTS.md", "dotfiles/base/.pi/agent/AGENTS.md")
 GENERATED_POLICY = ("dotfiles/base/.agents/instructions/lean.md", "dotfiles/base/.codex/AGENTS.md", "dotfiles/base/.agents/skills/orchestrate/SKILL.md",
+                    "dotfiles/base/.copilot/agents/", "dotfiles/base/.commandcode/agents/", "dotfiles/base/.gemini/config/agents/",
                     "dotfiles/base/.pi/agent/", "dotfiles/base/.config/opencode/opencode.json", "tools/pi-subagent-bridge/README.md", "docs/pi.md", "docs/agent-setup.md")
 LINK_CODE = ("tools/sync/links.py", "tools/sync/link_plan.py", "tools/sync/link_apply.py", "tools/sync/link_recovery.py", "tools/sync/ownership.py")
 SYNC_CORE = ("sync", "tools/sync/main.py", "tools/sync/dag.py", "tools/sync/bootstrap.sh", "tools/sync/pi_auth.py")
 WORKER_REG = ("tools/sync/claude-worker.py", "tools/sync/pi-worker.py", "tools/sync/opencode-worker.py", "tools/pi/sync_bridge.py")
 
 REGISTRY: tuple[Check, ...] = (
+    Check("sync-checks", (CHECK_PLANNING,), py("tools/sync/test_checks.py"), ("tools/sync/checks.py", "tools/sync/test_checks.py"), tmpdir=True),
     Check("sbx", (SBX,), py("dotfiles/sbx-test.py"), ("dotfiles/base/.local/bin/sbx", "dotfiles/sbx-test.py", "docs/sbx-spec.md"), tmpdir=True),
     Check("sbx-live", (SBX,), py("dotfiles/sbx-test.py", "--live"), ("dotfiles/base/.local/bin/sbx", "dotfiles/sbx-test.py", "docs/sbx-spec.md"), tmpdir=True, platform="darwin"),
     Check("sync-links", (LINKS,), py("tools/sync/test_links.py"), (*LINK_CODE, "tools/sync/test_links.py")),
@@ -208,10 +214,17 @@ REGISTRY: tuple[Check, ...] = (
     Check("project-skills", (SKILLS,), ("node", "tools/skills/skills.ts", "check", "--root", ".agents/skills"), SKILL_PATHS, needs=("node",)),
     Check("skills-tool", (SKILLS,), ("node", "--test", "tools/skills/skills.test.ts"), ("tools/skills/",), needs=("node",)),
     Check("skills-usage", (SKILLS,), py("tools/skills/test_usage.py"), ("tools/skills/", "dotfiles/base/.agents/skills/")),
-    Check("skills-campaign", (SKILLS,), py("dotfiles/skills-campaign-test.py"), (*SKILL_PATHS, "dotfiles/skills-campaign-test.py", "dotfiles/skill-evals/", "dotfiles/base/.agents/instructions/bootstrap.md")),
+    Check("skills-campaign", (SKILLS,), py("dotfiles/skills-campaign-test.py"), (*SKILL_PATHS, *CONTRACTS, "dotfiles/skills-campaign-test.py", "dotfiles/skill-evals/")),
     Check("policy-generated", (POLICY,), ("node", "tools/policy/generate.ts", "--check"), ("tools/policy/", "tools/pi-subagent-bridge/src/policy.ts", "tools/pi-subagent-bridge/src/tier-policy.ts", *GENERATED_POLICY), needs=("node",)),
     Check("policy-generator", (POLICY,), ("node", "--test", "tools/policy/generate.test.ts"), ("tools/policy/",), needs=("node",)),
-    Check("orchestrate", (ORCHESTRATE,), py("dotfiles/orchestrate-test.py"), ("dotfiles/base/.agents/skills/orchestrate/", "dotfiles/orchestrate-test.py", *CONTRACTS)),
+    Check("policy-visualization", (POLICY,), ("node", "tools/policy/subagent-visualization.ts", "--check"),
+          ("tools/policy/subagent-visualization.ts", "tools/pi-subagent-bridge/src/policy.ts", "tools/pi-subagent-bridge/src/tier-policy.ts", "docs/subagents.html"), needs=("node",)),
+    Check("policy-visualization-test", (POLICY,), ("node", "--test", "tools/policy/subagent-visualization.test.ts"),
+          ("tools/policy/subagent-visualization.ts", "tools/policy/subagent-visualization.test.ts", "tools/pi-subagent-bridge/src/policy.ts", "tools/pi-subagent-bridge/src/tier-policy.ts"), needs=("node",)),
+    Check("orchestrate", (ORCHESTRATE,), py("dotfiles/orchestrate-test.py"),
+          ("dotfiles/base/.agents/skills/orchestrate/", "dotfiles/orchestrate-test.py", *CONTRACTS, "tools/policy/policy.generated.json",
+           "dotfiles/base/.copilot/", "dotfiles/base/.commandcode/agents/", "dotfiles/base/.codex/config.toml",
+           "dotfiles/base/.claude/settings.json", "dotfiles/base/.config/opencode/opencode.json")),
     Check("instructions", (INSTRUCTIONS,), py("dotfiles/instructions-test.py"), (*CONTRACTS, "dotfiles/base/.local/bin/agent-instructions.py", "dotfiles/instructions-test.py"), tmpdir=True),
     Check("reset-agents", (HOOKS,), ("sh", "dotfiles/reset-agents-test.sh"), ("dotfiles/base/.local/bin/reset-agents", "dotfiles/base/.local/bin/reset-agent-home", "dotfiles/reset-agents-test.sh")),
     Check("pre-push", (HOOKS,), ("sh", "pre-push-test.sh"), ("dotfiles/base/.config/git/hooks/", "dotfiles/pre-push-test.sh"), cwd="dotfiles"),

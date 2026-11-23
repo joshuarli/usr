@@ -9,7 +9,6 @@ _usr_path_prepend() {
     done
     unset _usr_dir
 }
-# Harness shims call the sync-managed binaries in .local/bin directly.
 _usr_path_prepend /opt/homebrew/bin /Applications/OrbStack.app/Contents/MacOS/xbin "$HOME/.cache/.bun/bin" "$HOME/go/bin" "$HOME/.cargo/bin" /opt/homebrew/opt/rustup/bin "$HOME/.local/bin" "$HOME/.local/lib/harness-shims" "$HOME/.local/share/sentry-devenv/bin" /opt/homebrew/share/google-cloud-sdk/bin
 unset -f _usr_path_prepend
 export PATH

@@ -173,9 +173,9 @@ function graphNodes(): GraphNode[] {
     { id: "tier", x: 400, y: 76, w: 200, h: 42, item: { kind: "primary", title: "Which tier?" } },
     { id: "expert", x: 90, y: 148, w: 220, h: 60, item: { kind: "native", tier: "expert", title: "Native expert", detail: "native in every harness" } },
     { id: "lower", x: 690, y: 148, w: 220, h: 54, item: { kind: "primary", title: "scout / mechanic / worker" } },
-    { id: "harness", x: 40, y: 240, w: 280, h: 90, item: { kind: "native", title: "Harness-native expert lanes", detail: "OpenCode · Antigravity · Command Code · Devin · Codex · Pi · Claude Code · other" } },
-    { id: "cwd", x: 690, y: 240, w: 220, h: 78, item: { kind: "primary", title: "Top-level native parent?", detail: "OpenCode · Devin · Command Code · Antigravity" } },
-    { id: "native", x: 470, y: 365, w: 240, h: 78, item: { kind: "native", title: "Native tier lanes", detail: "native usr-* / run_subagent agents; never the bridge" } },
+    { id: "harness", x: 40, y: 240, w: 280, h: 110, item: { kind: "native", title: "Harness-native expert lanes", detail: "OpenCode · Antigravity · Command Code · Devin · Codex · Pi · Claude Code · Copilot pilot (attest first) · other" } },
+    { id: "cwd", x: 690, y: 240, w: 220, h: 96, item: { kind: "primary", title: "Top-level native parent?", detail: "OpenCode · Devin · Command Code · Antigravity · Copilot pilot" } },
+    { id: "native", x: 470, y: 365, w: 240, h: 96, item: { kind: "native", title: "Native tier lanes", detail: "native usr-* / run_subagent; Copilot: attest or block; never the bridge" } },
     { id: "bridge", x: 760, y: 365, w: 200, h: 84, item: { kind: "primary", title: "pi-subagent-bridge", detail: "worker_model_check → worker_start" } },
     { id: "plan", x: 700, y: 465, w: 300, h: 130, item: { kind: "primary", title: "Admitted ordered plan", models: POLICY.rootRoutes.worker.map(modelOf) } },
     { id: "available", x: 770, y: 625, w: 180, h: 42, item: { kind: "primary", title: "First route available?" } },
@@ -242,17 +242,18 @@ function modelOf(route: Route): string {
   return route.executor === "pi" ? `${route.providerID}/${route.model}` : route.model
 }
 
-function commandEffort(tier: "scout" | "mechanic" | "worker"): string {
+function commandEffort(tier: "scout" | "mechanic" | "worker"): string | undefined {
   const pin = POLICY.commandNative[tier]
-  return "effort" in pin ? pin.effort : "medium"
+  return "effort" in pin ? pin.effort : undefined
 }
 
 function laneMap(): string {
   const opencode = POLICY.opencode
   const agy = POLICY.antigravityDirect
   const command = POLICY.commandNative
+  const copilot = POLICY.copilotNative
   const claude = POLICY.nativeFallback.claudeModels
-  const head = ["Assignment", "OpenCode", "Devin", "Command Code", "Codex", "Pi", "Claude Code", "Antigravity"]
+  const head = ["Assignment", "OpenCode", "Devin", "Command Code", "Codex", "Pi", "Claude Code", "Antigravity", "Copilot (unqualified pilot)"]
   const rows: string[] = []
 
   function cell(item: Item): string {
@@ -268,6 +269,7 @@ function laneMap(): string {
     cell({ kind: "native", title: "native expert profile", model: `${POLICY.nativePi.goModels.expert.providerID}/${POLICY.nativePi.goModels.expert.id}`, effort: POLICY.nativePi.goModels.expert.variant }),
     cell({ kind: "native", title: "native subagent", model: claude.expert, effort: POLICY.nativeFallback.claudeEffort.expert }),
     cell({ kind: "native", title: agy.tiers.expert.name, model: agy.tiers.expert.model, effort: agy.tiers.expert.effort }),
+    cell({ kind: "pilot", title: copilot.expert.name, model: copilot.expert.model, effort: copilot.expert.effort, detail: "candidate; attest first" }),
   ].join("") + "</tr>")
 
   for (const tier of ["scout", "mechanic", "worker"] as const) {
@@ -276,11 +278,12 @@ function laneMap(): string {
     rows.push(`<tr><th>${tier}</th>` + [
       cell({ kind: "native", title: "native tier agent", model: opencode.model, effort: opencode.efforts[tier] }),
       cell({ kind: "native", title: tier === "scout" ? "subagent_explore" : "subagent_general", detail: tier === "scout" ? "read-only" : "writes" }),
-      cell({ kind: "native", title: command[tier].name, model: command[tier].model, effort: commandEffort(tier) }),
+      cell({ kind: "native", title: command[tier].name, model: command[tier].model, effort: commandEffort(tier), detail: commandEffort(tier) ? undefined : "model default" }),
       cell({ kind: "primary", title: "bridge", model: modelOf(bridge), effort: bridge.effort, detail: `${tier} ladder` }),
       cell({ kind: "primary", title: "bridge", model: modelOf(bridge), effort: bridge.effort, detail: `${tier} ladder` }),
       cell({ kind: "primary", title: "bridge", model: modelOf(bridge), effort: bridge.effort, detail: `${tier} ladder` }),
       cell({ kind: "native", title: agyTier.name, model: agyTier.model, effort: agyTier.effort, detail: `selector ${agyTier.selector}; verify` }),
+      cell({ kind: "pilot", title: copilot[tier].name, model: copilot[tier].model, effort: copilot[tier].effort, detail: "candidate; attest first" }),
     ].join("") + "</tr>")
   }
 
@@ -292,6 +295,7 @@ function laneMap(): string {
     cell({ kind: "undefined", title: "not defined", detail: "report instead" }),
     cell({ kind: "native", title: "native subagents", models: POLICY.nativeFallback.tiers.map(tier => claude[tier as "scout"]), detail: "same scope" }),
     cell({ kind: "undefined", title: "no bridge", detail: "block mismatch" }),
+    cell({ kind: "undefined", title: "blocked", detail: "no bridge fallback" }),
   ].join("") + "</tr>")
 
   return '<section><h2>Lane map</h2><div class="table-scroll"><table><thead><tr>' +
@@ -320,6 +324,7 @@ function hardRules(): string {
     "Expert is harness-native everywhere; nothing routes to the bridge. Expert is terminal by lane: use it for exceptional architectural decisions and adversarial review, never as a size-based upgrade.",
     "Top-level OpenCode, Devin and Command Code sessions never use the bridge, at any tier or as a fallback. Command Code uses native `usr-*` agents; HY4-medium worker is an explicit pilot, not a default. When the OpenCode top-level model is free, every tier runs a free model (its configured tier agents use `" + opencode.model + "`).",
     "Top-level Antigravity CLI sessions use native usr-* subagents only. Its flash/pro model selectors do not enforce exact model IDs or efforts: verify or block the lane. God is a direct main-session mode.",
+    "Copilot CLI is an unqualified native-only pilot. Its named usr-* lanes require observed model and effort attestation before dispatch. Block unavailable or unattested lanes; never use Auto, built-in agents or the bridge as a fallback. Children are leaves.",
     "Claude Code, Codex and Pi sessions use the bridge for `scout`/`mechanic`/`worker`; the bridge owns provider fallback (Command Code → ordered Pi → Codex), only before edits, only along admitted routes.",
     "Command Code native children cannot spawn another subagent. Native frontmatter pins and parent scoping are instructions, not bridge-enforced admission; model overrides and unsupported effort can bypass intended settings.",
     "An admitted session keeps its recorded model and route. A task failure, rejected acceptance check or scope change is not a provider failure and never authorizes a replacement worker.",
