@@ -40,7 +40,14 @@ printf '%s\n' called >>"$CLAUDE_API_CALLS"
 printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"result":"completed","num_turns":1,"duration_ms":0,"total_cost_usd":0}'
 EOF
 
-chmod +x "$bin/vault" "$bin/claude"
+cat >"$bin/editor" <<'EOF'
+#!/bin/sh
+for last in "$@"; do :; done
+printf '%s\n' "$last" >"$EDITOR_FILE"
+printf '%s\n' "$EDITOR_PROMPT" >"$last"
+EOF
+
+chmod +x "$bin/vault" "$bin/claude" "$bin/editor"
 
 run() {
 	(
@@ -63,6 +70,8 @@ fi
 [ ! -s "$error" ] || fail "help wrote to stderr"
 grep -q 'only the first /skill-name' "$output" || fail "help omitted the print-mode caveat"
 grep -q 'later /skill-name tokens' "$output" || fail "help omitted how later skill tokens are handled"
+# shellcheck disable=SC2016 # $EDITOR is literal help text
+grep -Fq 'opens $EDITOR' "$output" || fail "help omitted editor composition"
 
 : >"$calls"
 mkdir -p "$repo/.work/logs"
@@ -105,12 +114,51 @@ EOF
 cmp -s "$expected" "$args" || fail "default budget or prompt was wrong"
 [ "$(grep -c '^called$' "$calls")" -eq 2 ] || fail "skill preflight called Claude separately"
 
+EDITOR="$bin/editor --wait"
+editor_file="$work/editor-file"
+EDITOR_FILE="$editor_file"
+EDITOR_PROMPT='Review the cache from the editor
+and check /skill1'
+export EDITOR EDITOR_FILE EDITOR_PROMPT
+: >"$calls"
+run
+[ "$(grep -c '^called$' "$calls")" -eq 1 ] || fail "editor prompt did not reach Claude"
+prompt_file=$(cat "$editor_file")
+[ ! -e "$prompt_file" ] || fail "editor temp file was left behind"
+cat >"$expected" <<'EOF'
+-p
+Review the cache from the editor
+and check /skill1
+--max-budget-usd
+100
+--dangerously-skip-permissions
+--model
+claude-sonnet-5-5
+--effort
+high
+--output-format
+stream-json
+--verbose
+EOF
+cmp -s "$expected" "$args" || fail "editor prompt and options were not forwarded"
+
+EDITOR_PROMPT=''
 if run; then
-	fail "accepted an empty prompt"
+	fail "accepted an empty editor buffer"
 else
-	[ "$?" -eq 2 ] || fail "empty prompt returned the wrong status"
+	[ "$?" -eq 2 ] || fail "empty editor buffer returned the wrong status"
 fi
-grep -q '^usage: claude-api ' "$error" || fail "empty prompt did not print usage"
+grep -q 'no prompt entered' "$error" || fail "empty editor buffer was not reported"
+[ "$(grep -c '^called$' "$calls")" -eq 1 ] || fail "empty editor buffer started Claude"
+
+EDITOR=''
+if run; then
+	fail "accepted a missing EDITOR"
+else
+	[ "$?" -eq 2 ] || fail "missing EDITOR returned the wrong status"
+fi
+grep -q 'EDITOR is not set' "$error" || fail "missing EDITOR was not reported"
+[ "$(grep -c '^called$' "$calls")" -eq 1 ] || fail "missing EDITOR started Claude"
 
 if run ""; then
 	fail "accepted an empty string as a prompt"
@@ -128,12 +176,12 @@ for banned in fable fable-5-2 claude-fable-5-1 claude-fable-5-2 anthropic/claude
   fi
   grep -q 'prohibited Fable model' "$error" || fail "Fable rejection was not explicit"
 done
-[ "$(grep -c '^called$' "$calls")" -eq 2 ] || fail "Fable rejection launched Claude"
+[ "$(grep -c '^called$' "$calls")" -eq 1 ] || fail "Fable rejection launched Claude"
 if run --prompt example; then
 	fail "accepted the removed --prompt option"
 else
 	[ "$?" -eq 2 ] || fail "removed --prompt option returned the wrong status"
 fi
-[ "$(grep -c '^called$' "$calls")" -eq 2 ] || fail "invalid prompt started Claude"
+[ "$(grep -c '^called$' "$calls")" -eq 1 ] || fail "invalid prompt started Claude"
 
 printf '%s\n' 'claude-api tests passed'

@@ -17,6 +17,7 @@ jsonq() {
 help() {
 	echo "usage: claude-api [--budget usd] [--model name] [--] <prompt...>"
 	echo "       claude-api --help"
+	echo "With no prompt, opens \$EDITOR to compose one."
 	echo "Print mode (claude -p) invokes only the first /skill-name at the start of the prompt."
 	echo "Remaining text, including later /skill-name tokens, is passed as arguments to the first skill, not invoked separately."
 }
@@ -38,9 +39,28 @@ while [ $# -gt 0 ]; do
 	*) break ;;
 	esac
 done
-[ $# -gt 0 ] || usage
-prompt=$*
-[ -n "$prompt" ] || usage
+if [ $# -eq 0 ]; then
+	[ -n "${EDITOR-}" ] || {
+		echo "claude-api: EDITOR is not set; set EDITOR to compose a prompt" >&2
+		exit 2
+	}
+	prompt_file=$(mktemp "${TMPDIR:-/tmp}/claude-api-prompt.XXXXXX")
+	trap 'rm -f "$prompt_file"' 0
+	# shellcheck disable=SC2086 # EDITOR may carry flags, e.g. "code --wait"
+	$EDITOR "$prompt_file" || {
+		echo "claude-api: editor failed; no prompt was sent" >&2
+		exit 2
+	}
+	prompt=$(cat "$prompt_file")
+	rm -f "$prompt_file"
+	trap - 0
+else
+	prompt=$*
+fi
+[ -n "$prompt" ] || {
+	echo "claude-api: no prompt entered" >&2
+	exit 2
+}
 
 # Fable is explicitly prohibited, even when passed as a qualified provider ID.
 # Reject before contacting vault, creating logs, or invoking a provider.
