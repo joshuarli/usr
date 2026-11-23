@@ -118,6 +118,20 @@ class CleanupSessionsTests(unittest.TestCase):
             self.assertEqual(2, conn.execute("SELECT count(*) FROM session_v2").fetchone()[0])
         conn.close()
 
+    def test_unqualified_copilot_state_is_preserved_and_reported(self):
+        paths = [
+            touch(self.home / ".copilot/session-state/old/session.jsonl", OLD),
+            touch(self.home / ".copilot/session-store.db", OLD),
+            touch(self.home / ".copilot/settings.json", OLD),
+        ]
+        result = self.run_script("--json")
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertIn("copilot", json.loads(result.stdout)["not_covered"])
+        for path in paths:
+            self.assertEqual("x", path.read_text())
+        self.assertIn("copilot", self.run_script("--dry-run").stdout)
+        self.assertIn("Copilot", self.run_script("--help").stdout)
+
     def test_age_argument_moves_the_cutoff(self):
         path = touch(self.home / ".pi/agent/sessions/--repo--/a.jsonl", NEW)
 

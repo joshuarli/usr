@@ -19,6 +19,7 @@ UNITS = {"m": 60, "h": 3600, "d": 86400, "w": 604800}
 DEFAULT_AGE = "7d"
 NOT_COVERED = {
     "devin": "sessions.db has no documented schema",
+    "copilot": "pilot session cleanup is not qualified",
 }
 
 
@@ -167,7 +168,7 @@ def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(
         prog="cleanup-sessions",
         description="Remove session transcripts and per-session state from Claude, Codex, Pi, Muse, Command Code, Antigravity, FX and OpenCode when last modified before AGE ago.",
-        epilog="Devin is not covered. Exit status: 0 success, 1 a removal failed, 2 usage error.",
+        epilog="Devin and the Copilot pilot are not covered. Exit status: 0 success, 1 a removal failed, 2 usage error.",
     )
     parser.add_argument("age", nargs="?", default=DEFAULT_AGE, type=parse_age, metavar="AGE", help=f"minimum age such as 30m, 12h, 7d or 2w (default {DEFAULT_AGE})")
     parser.add_argument("-n", "--dry-run", action="store_true", help="report what would be removed without removing it")

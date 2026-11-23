@@ -10,7 +10,7 @@ token, RSS and latency improvements need separate measurement.
 
 The tracked shims live in `~/.local/lib/harness-shims`. The sh, ish and xshi
 configs put that directory before `~/.local/bin`. Each shim directly execs
-the sync-managed binary in `~/.local/bin`, so installers and vendor updates
+the native launcher in `~/.local/bin`, so installers and vendor updates
 retain ownership of their launchers. No PATH search or binary renaming is
 needed. Programs launched with an absolute binary path, or from a GUI that
 does not inherit this PATH, bypass the shims.
@@ -25,6 +25,8 @@ does not inherit this PATH, bypass the shims.
 `codex-or`, `claude-or` and `claude-ds` inherit these defaults when they
 resolve the underlying command through that PATH. Direct invocation of a
 native launcher bypasses only its shim; tracked configuration still applies.
+The Copilot pilot requires the manual installation and qualification described
+in [Copilot setup](copilot-native.md); sync currently installs only its configuration and shim.
 
 ## Configuration by harness
 

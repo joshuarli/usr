@@ -51,6 +51,35 @@ class PlannerTests(unittest.TestCase):
             selected = set(ids(checks.plan([Change(path)], LINUX, no_shebang)))
             self.assertLessEqual(expected, selected, path)
 
+    def test_native_agent_and_adapter_changes_select_their_validators(self):
+        pins = {
+            "tools/sync/checks.py": {"sync-checks"},
+            "tools/sync/test_checks.py": {"sync-checks"},
+            "dotfiles/base/.copilot/settings.json": {"orchestrate"},
+            "dotfiles/base/.copilot/agents/usr-scout.agent.md": {"policy-generated", "orchestrate"},
+            "dotfiles/base/.commandcode/agents/usr-scout.md": {"policy-generated", "orchestrate"},
+            "dotfiles/base/.gemini/config/agents/usr-scout.md": {"policy-generated"},
+            "tools/policy/policy.generated.json": {"orchestrate"},
+            "docs/subagents.html": {"policy-visualization"},
+            "tools/policy/subagent-visualization.ts": {"policy-visualization", "policy-visualization-test"},
+        }
+        for path in (
+            "dotfiles/base/.commandcode/AGENTS.md",
+            "dotfiles/base/.copilot/copilot-instructions.md",
+            "dotfiles/base/.config/devin/AGENTS.md",
+            "dotfiles/base/.config/muse/AGENTS.md",
+            "dotfiles/base/.config/opencode/AGENTS.md",
+            "dotfiles/base/.dsh/AGENTS.md",
+            "dotfiles/base/.fx/AGENTS.md",
+            "dotfiles/base/.gemini/config/AGENTS.md",
+            "dotfiles/base/.pi/agent/AGENTS.md",
+        ):
+            pins[path] = {"decide", "skills-campaign"}
+        for path, expected in pins.items():
+            with self.subTest(path=path):
+                selected = set(ids(checks.plan([Change(path)], LINUX, no_shebang)))
+                self.assertLessEqual(expected, selected)
+
     def test_rename_contributes_old_and_new_paths(self):
         changes = checks.parse_name_status(b"R100\0dotfiles/pk-test.py\0dotfiles/zz-new.py\0", b"")
         self.assertEqual([Change("dotfiles/pk-test.py", deleted=True), Change("dotfiles/zz-new.py")], changes)

@@ -11,6 +11,7 @@ Run the narrowest check that covers the change. `sh sync check-parallel` runs th
 <!-- checks:begin -->
 | Changed | Run |
 | --- | --- |
+| `sync check` planner and check registry | `TMPDIR="$PWD/.work/tmp" python3 -I tools/sync/test_checks.py` |
 | `dotfiles/base/.local/bin/sbx` or its policy spec | `TMPDIR="$PWD/.work/tmp" python3 -I dotfiles/sbx-test.py` and on macOS `TMPDIR="$PWD/.work/tmp" python3 -I dotfiles/sbx-test.py --live` |
 | Python link discovery, planning or apply | `python3 -I tools/sync/test_links.py`, `python3 -I tools/sync/test_main.py`, and `python3 -I tools/sync/test_integration.py` |
 | `sync` DAG/bootstrap | `python3 -I tools/sync/test_main.py`, `python3 -I tools/sync/test_integration.py`, `sh dotfiles/doctor-test.sh`, `python3 -I tools/sync/test_auth.py`, `python3 -I tools/sync/test_dag.py`, `python3 -I tools/sync/test_fleet.py`, `sh -n sync`, and `python3 -I tools/sync/test_launcher.py` |
@@ -40,7 +41,7 @@ Run the narrowest check that covers the change. `sh sync check-parallel` runs th
 | Lean harness launchers and shell PATH | `python3 -I dotfiles/harness-lean-test.py` and `shellcheck -s sh FILE` for each changed match |
 | `ghostty-fda-check` | `sh dotfiles/ghostty-fda-test.sh` and `shellcheck -s sh dotfiles/base/.local/bin/ghostty-fda-check dotfiles/ghostty-fda-test.sh` |
 | a skill or agent definition | `node tools/skills/skills.ts check`, `node tools/skills/skills.ts check --root .agents/skills`, `node --test tools/skills/skills.test.ts`, `python3 -I tools/skills/test_usage.py`, and `python3 -I dotfiles/skills-campaign-test.py`; `node tools/skills/skills.ts generate` refreshes invocation adapters; use the focused check for other agent configuration |
-| model routes, native Pi policy, or generated policy blocks | `node tools/policy/generate.ts --check` and `node --test tools/policy/generate.test.ts`; use `make generate` to refresh projections |
+| model routes, native Pi policy, or generated policy blocks | `node tools/policy/generate.ts --check`, `node --test tools/policy/generate.test.ts`, `node tools/policy/subagent-visualization.ts --check`, and `node --test tools/policy/subagent-visualization.test.ts`; use `make generate` to refresh projections |
 | `orchestrate` skill | `python3 -I dotfiles/orchestrate-test.py` |
 | instruction profiles and their harness adapters | `TMPDIR="$PWD/.work/tmp" python3 -I dotfiles/instructions-test.py` |
 | git hooks and worktree helpers | `sh dotfiles/reset-agents-test.sh`, `(cd dotfiles && sh pre-push-test.sh)`, `(cd dotfiles && sh worktree-remove-test.sh)`, `python3 -I dotfiles/worktree-retire-test.py`, `python3 -I dotfiles/disk-pressure-test.py`, `node dotfiles/pi-disk-pressure-test.mjs`, and `TMPDIR="$PWD/.work/tmp" python3 -I dotfiles/codex-campaign-closeout-test.py` |
