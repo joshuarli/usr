@@ -1,5 +1,5 @@
 Prefix: USR
-Next: 137
+Next: 138
 
 ### USR-83 · P2 · running sessions on two hosts cannot reach each other over intercom
 
@@ -98,6 +98,15 @@ Next: 137
 - **Problem:** On a fresh Alpine edge box (2026-11-23), plain `setup-kache` installed kache 2.0.0-rc.2 from release-8d78da5c10cf741966733d5cf494b982e9f41d31 and finished with "verified under nightly-2026-09-15". The only rust-toolchain.toml on the box (in ~/d/kache) pins nightly-2026-11-09, which is also the active default toolchain. The script's own header says the toolchain check "matches rust-toolchain.toml files that pin channel + rust-src component", but it runs `kache doctor --json` and builds the cargo probe under 09-15, so it cannot catch a wrapper/toolchain incompatibility under the pin the project actually builds with. --nightly and KACHE_NIGHTLY overrides exist, so this does not block setup.
 - **Recommendation:** Read the channel from the target project's rust-toolchain.toml when present and verify under it; otherwise update the default from nightly-2026-09-15 to the current pin. Acceptance: `setup-kache` with no flags in a checkout whose rust-toolchain.toml pins nightly-2026-11-09 logs that channel as verified, and both doctor checks and the cargo probe execute under it.
 - **Fix with:** none
+- **Effort:** S
+
+### USR-137 · P2 · Command Code's .commandcode/taste file blocks automatic provider fallback
+
+- **Area:** pi-subagent-bridge · fallback
+- **Where:** tools/pi-subagent-bridge fallback admission (worktree-untouched check)
+- **Problem:** When the Command Code primary fails with "Insufficient credits", the run has already written `.commandcode/taste/taste.md` in the lane worktree. worker_status then reports state `blocked_partial_work` with changed_paths [".commandcode/taste/taste.md"] (out of scope) and refuses the automatic switch to Pi/Codex, although no task edit exists. Reproduced 2026-11-23 on xsh lane `.work/wt/f4-profile` (session usrw_9bca3154…); removing `.commandcode/` by hand let the next worker_status fall back normally. Earlier sessions the same day produced the same directory without blocking, so the trigger may depend on timing.
+- **Recommendation:** Treat the Command Code runner's own state directory as harness bookkeeping, not lane edits: exclude `.commandcode/` from the untouched-worktree check and the scope check (or have the runner write it outside the worktree), and remove it on fallback. Acceptance: a Command Code credit failure that leaves only `.commandcode/` falls back to the next route without parent action, and a real tracked edit still blocks.
+- **Fix with:** lifecycle-concurrency
 - **Effort:** S
 
 ### USR-75 · P3 · clang plus mold host links intermittently segfault and leave truncated artifacts
