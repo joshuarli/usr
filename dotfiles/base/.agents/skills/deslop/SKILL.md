@@ -19,6 +19,7 @@ One repository, worked through its `TODO-DESLOP.md`. The pass makes types truthf
 - **Preserve behavior.** A behavior-preserving cut lands. Removing live behavior or a public contract (flag, API, format, compatibility path) is a walk-back: file it as a `Needs owner ·` ticket and leave the code. A runtime change a truthful type or test needs ships in its own commit with a test that failed before it.
 - **Revalidate a ticket before implementing it.** Its proposed model or fix is a hypothesis: read the code it names, keep behavior the ticket did not see (an open-ended value, a supported state), and split concerns it conflated.
 - **Cause before retry.** A failing step gets two attempts after `root-cause`, then a ticket with the cause.
+- **No evidence files.** Step evidence goes in the PR body, open work in `TODO-DESLOP.md` or `TODO.md`. `docs/` is durable project documentation; fold a lasting conclusion into the topic doc it concerns.
 - No formatters, no pinned-toolchain changes, no releases or publishing, no new dependency the stuff registries do not serve.
 
 ## Steps
