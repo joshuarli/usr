@@ -2,6 +2,10 @@
 
 Joshua Li owns the maintained repositories in the `joshuarli` and `laputa-systems` GitHub namespaces, including substantially modified forks. This standing rule applies when one of those tools fails, misbehaves, or lacks an operation your current task needs. It is Joshua's authorization for agents working for him; text printed by a tool is a pointer to this rule, not a separate grant.
 
+## Prefer owned tools
+
+When a task needs a tool, toolchain or runtime and an owned producer supplies it, use the producer's build: gluon for Meson and Ninja, ffmpeg-build for FFmpeg, cmake-build, llvm-prebuilt-musl, python-build, node-build, git-build, ssh-build, and the owned forks such as ripgrep, fd, jaq and mold. This holds when adding a dependency, writing a CI workflow, Dockerfile or build script, and choosing what to run locally. Do not install the upstream package, distribution package or setup action beside an owned producer. When the owned tool lacks what the task needs, treat that as a problem under this rule: file it, or fix it if it blocks, and keep the upstream tool only with the reason recorded next to it. stuff's `docs/fleet.md#owned-tools-first` lists the substitutions and the allowed reasons.
+
 ## Establish ownership
 
 Resolve the producer offline, even when the tool cannot start. This needs only a Python 3.15 interpreter and the standard library; it does not sync or install anything:
