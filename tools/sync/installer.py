@@ -2369,15 +2369,43 @@ class Installer:
         if not releases.is_dir() or releases.is_symlink():
             return
         keep = Path(os.readlink(current)).name if current.is_symlink() else ""
+        running = self.running_command_lines()
         for entry in sorted(releases.iterdir()):
             if entry.is_symlink() or not entry.is_dir():
                 continue
             if entry.name == keep:
                 self.own_dir(entry)
+            elif entry.name.startswith("release-") and self.runs_from(entry, running):
+                self.own_dir(entry)
+                self.current(f"keeping {entry.name}: a running bctl process uses it")
             elif entry.name.startswith(".bctl.") or entry.name.startswith("release-"):
                 shutil.rmtree(entry, ignore_errors=True)
                 self.removed.add(entry)
                 self.changed = True
+
+    @staticmethod
+    def running_command_lines() -> list[list[str]]:
+        proc = Path("/proc")
+        if proc.is_dir():
+            lines = []
+            for entry in proc.iterdir():
+                if entry.name.isdigit():
+                    try:
+                        lines.append([os.fsdecode(part) for part in (entry / "cmdline").read_bytes().split(b"\0") if part])
+                    except OSError:
+                        continue
+            return lines
+        try:
+            output = subprocess.run(["ps", "-axo", "command="], capture_output=True, text=True, check=True).stdout
+        except (OSError, subprocess.CalledProcessError):
+            return []
+        return [line.split() for line in output.splitlines()]
+
+    @staticmethod
+    def runs_from(release: Path, command_lines: list[list[str]]) -> bool:
+        """A daemon keeps launching from its release's runtime, so its directory must outlive the switch."""
+        prefixes = {str(release) + os.sep, str(release.resolve()) + os.sep}
+        return any(arg.startswith(tuple(prefixes)) for argv in command_lines for arg in argv)
 
     def bctl_latest_tag(self) -> str:
         listed = self.run(["gh", "release", "list", "-R", BCTL_REPO, "--exclude-drafts", "--exclude-pre-releases",

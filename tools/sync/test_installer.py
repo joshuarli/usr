@@ -1,5 +1,7 @@
 """Installer tests with fake HTTP and fake executables; no network or home effects."""
 import io
+import shutil
+import time
 import json
 import os
 from pathlib import Path
@@ -1265,6 +1267,23 @@ esac
             self.make(extra_bin=self._bctl_release("release-bbb", b"#!/bin/sh\n[ \"$1\" = image ] && exit 1\nexit 0\n")).install_bctl()
         self.assertEqual(os.readlink(current), before)
         self.assertEqual([p.name for p in (self.home / ".local/share/bctl/releases").iterdir() if not p.name.startswith(".")], ["release-aaa-x86_64-unknown-linux-musl"])
+
+    def test_bctl_prune_keeps_a_release_whose_daemon_still_runs(self):
+        self.make(extra_bin=self._bctl_release("release-aaa", b"#!/bin/sh\n[ \"$1\" = daemon ] && sleep 60\nexit 0\n")).install_bctl()
+        releases = self.home / ".local/share/bctl/releases"
+        old = releases / "release-aaa-x86_64-unknown-linux-musl"
+        daemon = subprocess.Popen([str(old / "bin/bctl"), "daemon"])
+        try:
+            time.sleep(0.2)
+            shutil.rmtree(self.root / "gh-releases")
+            self.make(extra_bin=self._bctl_release("release-bbb", b"#!/bin/sh\nexit 0\n")).install_bctl()
+            self.assertEqual(Path(os.readlink(self.home / ".local/share/bctl/current")).name, "release-bbb-x86_64-unknown-linux-musl")
+            self.assertTrue((old / "bin/bctl").is_file())
+        finally:
+            daemon.kill()
+            daemon.wait()
+        self.make(extra_bin=self.root / "gh-bin").prune_bctl_releases()
+        self.assertFalse(old.exists())
 
     def test_opencode2_archive_shim_and_current(self):
         import hashlib
