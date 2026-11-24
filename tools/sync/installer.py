@@ -41,6 +41,9 @@ HTTP_TIMEOUT = 30
 NODE_MINIMUM = "26.12.0"
 PYTHON_SMOKE = 'import sqlite3, ssl, subprocess; subprocess.run(["/bin/sh", "-c", ":"], check=True)'
 PYTHON_VERSION = "3.15"
+# Matches stuff's fleet/policy/rust-tools.toml.
+CARGO_MUTANTS_VERSION = "27.1.0"
+CARGO_LLVM_COV_VERSION = "0.9.2"
 _UV_INSTALL_LOCK = threading.Lock()
 NODEJS_VERSION = "26.13.1"
 MIRROR_BASE = "https://mirror.17166969.xyz/current"
@@ -932,6 +935,21 @@ class Installer:
         else:
             target = f"{self.arch}-apple-darwin"
         self.install_direct("jaq", f"https://github.com/01mf02/jaq/releases/latest/download/jaq-{target}")
+
+    def install_cargo_tool(self, name: str, version: str) -> None:
+        if self.is_current(name, version):
+            self.current(f"{name} is current ({version})")
+            return
+        cargo = self.which("cargo")
+        fallback = self.home / ".cargo/bin/cargo"
+        if not cargo and os.access(fallback, os.X_OK):
+            cargo = str(fallback)
+        if not cargo:
+            self.skip(name, "cargo is required; install Rust with rustup")
+        with tempfile.TemporaryDirectory(prefix=f".{name}.", dir=self.dest) as directory:
+            root = Path(directory)
+            self.run([cargo, "install", "--locked", "--root", str(root), f"{name}@{version}"], check=True)
+            self.install_binary(name, root / "bin" / name, version)
 
     def install_uv(self) -> None:
         with _UV_INSTALL_LOCK:
@@ -3283,6 +3301,8 @@ class Installer:
             "play": self.install_player, "player": self.install_player,
             "jaq": self.install_jaq, "mold": self.install_mold, "nodejs": self.install_nodejs,
             "python3": self.install_python3, "uv": self.install_uv, "node-build": self.install_nodebuild,
+            "cargo-mutants": lambda: self.install_cargo_tool("cargo-mutants", CARGO_MUTANTS_VERSION),
+            "cargo-llvm-cov": lambda: self.install_cargo_tool("cargo-llvm-cov", CARGO_LLVM_COV_VERSION),
             "git": self.install_git, "ffmpeg": self.install_ffmpeg, "ssh": self.install_ssh,
             "oxish": self.install_oxish, "zzz": self.install_zzz, "gluon": self.install_gluon, "bctl": self.install_bctl,
             "img": lambda: self.install_sha_prerelease("img", "joshuarli/img", "img"),
@@ -3332,7 +3352,7 @@ class Installer:
     def record_managed_installs(self) -> None:
         for prog in ("fd", "rg", "jaq", "fastermod", "tm", "ish", "img", "stuff", "e", "fz",
                      "srv", "mactop", "view", "vault", "gh", "bylaws", "mold", "cf", "player", "soulseek-rs",
-                     "zzz", "uv", "uvx", "rage", "shellcheck", "less", "devin"):
+                     "zzz", "uv", "uvx", "rage", "shellcheck", "less", "devin", "cargo-mutants", "cargo-llvm-cov"):
             self.record_managed_binary(prog)
         if self.installed("rage") and (self.dest / "rage-keygen").is_symlink():
             self.own_file(self.dest / "rage-keygen")
@@ -3483,7 +3503,7 @@ def musl_loader_present(os_name: str, arch: str, root: Path = Path("/")) -> bool
 
 
 def default_tools(os_name: str, arch: str, profile: str, server_tools: Path | None = None,
-                  *, musl_loader: bool | None = None) -> list[str]:
+                  *, musl_loader: bool | None = None, rustup: bool = False) -> list[str]:
     tools = ["fd", "rg"]
     if not (os_name == "linux" and arch == "aarch64"):
         tools.append("jaq")
@@ -3494,6 +3514,8 @@ def default_tools(os_name: str, arch: str, profile: str, server_tools: Path | No
         tools.append("zzz")
     if os_name == "darwin":
         tools += ["mactop", "view", "ghostty-custom"]
+    if os_name == "darwin" or rustup:
+        tools += ["cargo-mutants", "cargo-llvm-cov"]
     tools.append("gh")
     if (os_name, arch) == ("linux", "x86_64"):
         tools += ["mold", "player"]
@@ -3525,7 +3547,8 @@ def main(argv: list[str]) -> int:
     if argv == ["--list"]:
         repo_root = Path(__file__).resolve().parents[2]
         for tool in default_tools(installer.os_name, installer.arch, _profile(installer.env),
-                                  repo_root / "host/alpine/tools-server.txt"):
+                                  repo_root / "host/alpine/tools-server.txt",
+                                  rustup=os.access(home / ".cargo/bin/rustup", os.X_OK)):
             print(tool)
         return 0
     if installer.env.get("DL_RECORD_OWNED") == "true":
@@ -3551,7 +3574,8 @@ def main(argv: list[str]) -> int:
         return 0
     if not argv:
         argv = default_tools(installer.os_name, installer.arch, _profile(installer.env),
-                             Path(__file__).resolve().parents[2] / "host/alpine/tools-server.txt")
+                             Path(__file__).resolve().parents[2] / "host/alpine/tools-server.txt",
+                             rustup=os.access(home / ".cargo/bin/rustup", os.X_OK))
     if len(argv) > 1:
         failed = False
         for tool in argv:

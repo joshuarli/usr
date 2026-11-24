@@ -89,7 +89,8 @@ def tool_list(ctx: Context) -> list[str]:
     if arch == "arm64":
         arch = "aarch64"
     return default_tools(ctx.platform, arch, ctx.profile,
-                         ctx.root / "host/alpine/tools-server.txt")
+                         ctx.root / "host/alpine/tools-server.txt",
+                         rustup=os.access(ctx.home / ".cargo/bin/rustup", os.X_OK))
 
 
 def _link_plan(ctx: Context):

@@ -180,6 +180,67 @@ sys.exit(1)
     def state(self, name):
         return (self.home / ".local/state/dl" / name).read_text().strip()
 
+    def test_cargo_test_tools_build_and_preserve_previous_on_failure(self):
+        for tool, version in (("cargo-mutants", "27.1.0"), ("cargo-llvm-cov", "0.9.2")):
+            with self.subTest(tool=tool):
+                inst = self.make()
+                calls = []
+
+                def run(argv, **kwargs):
+                    calls.append(argv)
+                    self.assertTrue(kwargs.get("check"))
+                    root = Path(argv[argv.index("--root") + 1])
+                    self.assertEqual(root.parent, inst.dest)
+                    self.assertEqual(argv[1:4], ["install", "--locked", "--root"])
+                    self.assertEqual(argv[-1], f"{tool}@{version}")
+                    (root / "bin").mkdir()
+                    (root / "bin" / tool).write_text("new binary")
+                    return subprocess.CompletedProcess(argv, 0)
+
+                with patch.object(inst, "which", return_value="/fake/cargo"), patch.object(inst, "run", side_effect=run):
+                    inst.install(tool)
+                    self.assertEqual(self.dest_path(tool).read_text(), "new binary")
+                    self.assertEqual(self.state(tool), version)
+                    inst.install(tool)
+                    self.assertEqual(len(calls), 1)
+                (inst.state / tool).write_text("old\n")
+                with patch.object(inst, "which", return_value="/fake/cargo"), patch.object(inst, "run", side_effect=installer.InstallError("build failed")):
+                    with self.assertRaises(installer.InstallError):
+                        inst.install(tool)
+                self.assertEqual(self.dest_path(tool).read_text(), "new binary")
+                self.assertEqual(self.state(tool), "old")
+
+    def test_cargo_test_tools_skip_without_cargo(self):
+        for tool in ("cargo-mutants", "cargo-llvm-cov"):
+            with self.subTest(tool=tool):
+                inst = self.make()
+                with patch.object(inst, "which", return_value=None):
+                    with self.assertRaises(SkipInstall) as error:
+                        inst.install(tool)
+                self.assertIn("cargo", error.exception.reason)
+
+    def test_cargo_tool_uses_home_cargo_when_not_on_path(self):
+        cargo = self.home / ".cargo/bin/cargo"
+        cargo.parent.mkdir(parents=True)
+        cargo.write_text("#!/bin/sh\n")
+        cargo.chmod(0o755)
+        inst = self.make()
+        with patch.object(inst, "which", return_value=None), patch.object(inst, "run", side_effect=installer.InstallError("stopped")) as run:
+            with self.assertRaises(installer.InstallError):
+                inst.install("cargo-mutants")
+        self.assertEqual(run.call_args.args[0][0], str(cargo))
+
+    def test_cargo_test_tools_default_gating(self):
+        tools = {"cargo-mutants", "cargo-llvm-cov"}
+        self.assertTrue(tools <= set(default_tools("darwin", "aarch64", "")))
+        self.assertFalse(tools & set(default_tools("linux", "x86_64", "")))
+        self.assertTrue(tools <= set(default_tools("linux", "x86_64", "", rustup=True)))
+        server_file = self.root / "server.txt"
+        server_file.write_text("fd\n")
+        self.assertFalse(tools & set(default_tools("linux", "x86_64", "server", server_file, rustup=True)))
+        server_file.write_text("fd\ncargo-mutants\ncargo-llvm-cov\n")
+        self.assertTrue(tools <= set(default_tools("linux", "x86_64", "server", server_file, rustup=True)))
+
     def test_tar_xz_single_binary_consumers(self):
         import hashlib
         for tool in ("gh", "img", "lz", "zzz"):

@@ -160,6 +160,21 @@ class MainTests(unittest.TestCase):
         with patch.object(main, "tool_list", return_value=["python3"]):
             self.assertIn("pi-auth", main.default_goals(self.ctx))
 
+    def test_cargo_test_tools_follow_rustup_and_server_profile(self):
+        tools = {"cargo-mutants", "cargo-llvm-cov"}
+        linux = main.Context(self.ctx.root, self.ctx.home, "linux", "desktop", self.ctx.env)
+        self.assertFalse(tools & set(main.tool_list(linux)))
+        rustup = self.ctx.home / ".cargo/bin/rustup"
+        rustup.parent.mkdir(parents=True)
+        rustup.write_text("#!/bin/sh\n")
+        rustup.chmod(0o755)
+        self.assertTrue(tools <= set(main.tool_list(linux)))
+        server_file = self.ctx.root / "host/alpine/tools-server.txt"
+        server_file.parent.mkdir(parents=True)
+        server_file.write_text("fd\n")
+        server = main.Context(self.ctx.root, self.ctx.home, "linux", "server", self.ctx.env)
+        self.assertFalse(tools & set(main.tool_list(server)))
+
     def test_server_profile_omits_mcp_bridges_from_default_sync(self):
         server = main.Context(self.ctx.root, self.ctx.home, "linux", "server", self.ctx.env)
         with patch.object(main, "tool_list", return_value=["python3"]):
