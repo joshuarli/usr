@@ -14,7 +14,7 @@ Surface what the owner should do next when they are out of ideas. The output is 
 ## Rules
 
 - **Survey before ideating.** Never propose from the outside in. Every idea in the shortlist must trace to something in the repository.
-- **Cite evidence.** Each idea names its source: a file, commit, open ticket, RFC, campaign document, unchecked checklist item, benchmark, or doc limitation. No source, no idea.
+- **Cite evidence.** Each idea names its source: a file, commit, open ticket, RFC, roadmap entry, unchecked checklist item, benchmark, or doc limitation. No source, no idea.
 - **Separate decided from undecided.** Work that is designed and approved but not started (an accepted RFC, a specced campaign, a parked milestone) is a legitimate top answer; present it as such, not as a novel thought. An attractive idea that contradicts a recorded decision is wrong, not bold.
 - **Rank, don't enumerate.** Pick a single top recommendation and order the rest. Do not hand back eight peers and let the owner re-decide.
 - **Honest zero.** If the survey turns up nothing worth doing, say so and show what was checked. Filler ideas disguised as ambition are a failure mode, not a service.
@@ -25,7 +25,7 @@ Surface what the owner should do next when they are out of ideas. The output is 
 Read the repository instructions first, then walk the cheap signals in order; stop when the picture is clear enough to rank, not when everything is read.
 
 1. **Purpose and constraints.** Instructions, README, and architecture docs: what the project is for, what it refuses to be, and the invariants a good idea must respect.
-2. **The backlog.** Open tickets, RFCs (draft, accepted-but-unimplemented, rejected), and campaign documents. Note decided-but-unstarted work separately.
+2. **The backlog.** Open tickets, RFCs (draft, accepted-but-unimplemented, rejected), and `docs/roadmap.md` (campaigns and **Later**). Note decided-but-unstarted work separately.
 3. **Recent history.** `git log` for the last weeks: finished workstreams suggest natural continuations; stalled ones suggest their blockers; reverted or red work suggests what not to retry.
 4. **Known limits.** "Known gap", "Needs owner", unchecked checklists, documented limitations, stale cross-references, and TODO comments pointing at tickets that no longer exist.
 5. **Health signals the repo already tracks.** Benchmark and budget docs, security tickets, coverage and policy notes, dashboards, and whatever `make` targets measure. A regression or overrun worth fixing tops most features.

@@ -14,7 +14,12 @@ A slice is one capability with one acceptance command that runs locally in minut
 
 - **Owner requirements versus tactics.** Record deliverables, contracts, required proof, and allowed effects. Ordering, width, and batching are the agent's to revise.
 - **Measure the loop once.** Time the acceptance commands for the first slice. Build missing proof only for that slice, and expand only after a real slice has passed.
-- **One short artifact.** The campaign doc follows [preflight's shape](../../campaign-preflight/references/procedure.md#shape-of-the-final-doc) and its size limits. Git history is the log. Never append checkpoints, handoffs, or rulings as new sections: rewrite **Status** in place.
+- **One roadmap.** A repository has exactly one active plan, `docs/roadmap.md`, holding all current and future work. Each campaign is a section in it, and its items are sequenced and interleaved with other campaigns' items in the roadmap's one **Sequence**. Never create a separate campaign doc, status file, or handoff file. The roadmap follows [preflight's shape](../../campaign-preflight/references/procedure.md#shape-of-the-final-doc). Git history is the log. Never append checkpoints, handoffs, or rulings as new sections: rewrite **Status** in place.
+- **Migrate legacy plans.** When you touch a repository that still has `docs/CAMPAIGN-*.md` or another standalone plan or handoff file, move its live content into the roadmap, repoint its links, and delete it in the same change. A completed campaign is rolled up as [Close or pause](#close-or-pause) describes, not migrated.
+
+## Resume
+
+"Resume the roadmap" and "resume the campaign" mean the same thing: continue from the roadmap's **Status**. Read **Status**, reconcile it with `git worktree list`, `git branch --no-merged`, and the integration branch's checks, run the [steering checkpoint](#parent-steering-checkpoint), then start the next slice **Status** names. A named campaign narrows which **Sequence** items you pick; it does not have a separate handoff.
 
 ## Parent steering checkpoint
 
@@ -61,10 +66,10 @@ Choose checks from the diff and the affected consumers. Import, registration, sc
 
 ## Close or pause
 
-Close when every local deliverable's acceptance passes. **Needs environment** items stay listed for the owner and do not hold the campaign open.
+Close a campaign when every local deliverable's acceptance passes. **Needs environment** items stay listed for the owner and do not hold the campaign open. Move what a future reader needs (rationale, invariants, decisions still in force) into the topic docs in domain terms, then delete the campaign's section and its **Sequence** items from the roadmap and update **Status**. The roadmap itself stays; with no work left, **Status** says `idle`.
 
 To close, stop lanes and run `codex-campaign-closeout.py begin --path <owned-lane>` from the integration worktree, repeating `--path` for each recorded campaign lane. An empty path list tracks nothing; it never infers ownership from all repository worktrees. Resolve named lanes with the [general lifecycle](../SKILL.md#worktree-lifecycle). Allow only retained trees, with `codex-campaign-closeout.py allow --path <path> --reason <reason>`. Retained lanes stay clean at their recorded HEAD and branch. If work resumes or the scope changes, run `codex-campaign-closeout.py cancel` before beginning again.
 
 The Stop hook may request one continuation to account for unresolved named lanes. If `stop_hook_active` is already true, it reports a nonblocking warning and preserves the marker for later resumption. A legacy marker without explicit ownership asks for review and restart with named paths; it never authorizes sweeping other worktrees. This closeout accounting is separate from opportunistic disk-pressure cleanup.
 
-To pause, use `campaign-winddown`.
+To pause, use `campaign-winddown`. It pauses the whole roadmap.

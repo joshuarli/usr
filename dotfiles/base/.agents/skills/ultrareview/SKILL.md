@@ -26,7 +26,7 @@ One repository in, two deliverables out: docs that match the code, and tickets i
 3. **Prove the top.** Before a P1 or P2 stands, prove the fact it depends on with the `blast-radius` ladder. Check any measured claim with `benchmark-checklist`. A finding you cannot prove is marked `unproven` or downgraded.
 4. **Refresh the docs** (below), after the review, so dead code you found is not documented.
 5. **File the findings** (below).
-6. **Check.** `git diff --stat` shows only docs, comments, `TODO.md`, `docs/rfc/`, and deleted completed campaign docs, and nothing durable in them was lost. Every claim you kept in a doc traces to code that exists. Every finding has a priority, a recommendation, and a `Fix with`.
+6. **Check.** `git diff --stat` shows only docs, comments, `TODO.md`, `docs/rfc/`, `docs/roadmap.md`, and deleted legacy campaign docs, and nothing durable in them was lost. Every claim you kept in a doc traces to code that exists. Every finding has a priority, a recommendation, and a `Fix with`.
 
 ## Lenses
 
@@ -61,7 +61,7 @@ Run `docs-refresh` over the whole repo, with one writer. Where it finds the code
 
 The docs lane runs one `mdtool check` when installed; it combines all checks with grouped output and anchor suggestions. Use `--untracked` for new docs and `--since HEAD` for new findings after edits. Request `--verbose` or `--json` only for complete occurrence details; `mdtool anchors FILE...` is only for a heading inventory. Without it, follow the fallback searches in `docs-refresh` and inspect targets manually.
 
-Then roll up campaigns. For each `docs/CAMPAIGN-*.md` whose header status says it is complete, and whose deliverables you confirm in the code, move what a future reader needs (the design rationale, invariants, constraints, and decisions still in force) into the durable docs (README, AGENTS.md, or `docs/` topic files), stated in domain terms with no campaign names or IDs. Then delete the campaign doc and any `DECISIONS.md` entries it owned. Do not keep logs of what was completed or per-item histories; git history is the record. Leave campaigns that are active, paused, or winding down untouched, and file a finding for a "complete" one whose deliverables are not in the code.
+Then roll up campaigns. For each campaign section of `docs/roadmap.md` whose state says it is complete, and whose deliverables you confirm in the code, move what a future reader needs (the design rationale, invariants, constraints, and decisions still in force) into the durable docs (README, AGENTS.md, or `docs/` topic files), stated in domain terms with no campaign names or IDs. Then delete the campaign's section and **Sequence** items, update **Status**, and delete any `DECISIONS.md` entries it owned. A legacy `docs/CAMPAIGN-*.md` is rolled up the same way when complete, and otherwise moved into the roadmap and deleted. Do not keep logs of what was completed or per-item histories; git history is the record. Leave campaigns that are active, paused, or winding down untouched, and file a finding for a "complete" one whose deliverables are not in the code.
 
 Delete a completed RFC the same way. `todo` says when an RFC is done. An accepted RFC whose design is already in the code does not stay.
 

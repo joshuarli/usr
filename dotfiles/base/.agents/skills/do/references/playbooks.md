@@ -102,11 +102,11 @@ Read the selected ticket, linked decisions, and current code. Route one ticket t
 
 ## Campaign or custom work
 
-**Entry:** the user names a campaign or the task has real dependency and integration risk.
+**Entry:** the user names a campaign, says "resume the roadmap" or "resume the campaign", or the task has real dependency and integration risk.
 
 For a new campaign-sized implementation, use [campaign-plan](../../campaign-plan/SKILL.md), which runs [campaign-preflight](../../campaign-preflight/SKILL.md). Continue from a ready plan only under the owner's actual implementation and commit authority.
 
-For an existing campaign, inspect its changes, prerequisites, and acceptance before resuming. Use `campaign-preflight` only when the plan is stale or incomplete, then resume the existing work.
+For an existing campaign, resume from the **Status** of `docs/roadmap.md` as [orchestrate's resume](../../orchestrate/references/campaigns.md#resume) describes, inspecting changes, prerequisites, and acceptance first. Use `campaign-preflight` only when the plan is stale or incomplete, then resume the existing work.
 
 Use [orchestrate](../../orchestrate/SKILL.md) and its [campaign mechanics](../../orchestrate/references/campaigns.md) when delegation fits the grant. If commits are forbidden, use serial work or patch handoffs; do not use commit-dependent closeout as written.
 

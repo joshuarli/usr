@@ -31,21 +31,24 @@
 
 ## Shape of the final doc
 
-Length follows the work: keep the executable core and its proof, never cut a decision, scenario, or acceptance check to reach a line count, and never pad with repetition, history, or rationale the code or a linked reference already states. Rewrite sections in place; never append dated checkpoints, handoffs, or logs. Git history keeps the past.
+The roadmap is one file, `docs/roadmap.md`, for all current and future work. Campaigns are sections inside it; their items interleave in one **Sequence**. Length follows the work: keep the executable core and its proof, never cut a decision, scenario, or acceptance check to reach a line count, and never pad with repetition, history, or rationale the code or a linked reference already states. Rewrite sections in place; never append dated checkpoints, handoffs, or logs. Git history keeps the past.
 
-1. **Status** (a short at-a-glance block): the goal; the last accepted revision; slices accepted, red, or parked (with branch and cause); the next slice; and, when paused, the resume prompt and first command.
-2. **Charter:** the rules the executor runs by.
+1. **Status** (a short at-a-glance block, the roadmap's only handoff): the state (`active`, `winding down`, `paused <date>`, or `idle`); the campaign and slice in progress; the last accepted revision and whether the integration branch is green; slices red or parked (with branch, cause, and retry condition); the next slice; and, when paused, the first command. The resume prompt is always "resume the roadmap".
+2. **Charter:** the rules every campaign's executor runs by. A campaign section states only its departures.
    - Decide and keep going. Record a decision only when a later slice depends on it.
    - Within the owner's execution grant, proceed without waiting for approval. A plan does not provide missing permission. Park an item that needs authority outside the grant.
-   - Hard stops are few, and each one parks the item: an irreversible or outside-the-repo action, a boundary the doc forbids, or a loop that cannot check anything. Pushing is always forbidden.
+   - Hard stops are few, and each one parks the item: an irreversible or outside-the-repo action, a boundary the roadmap forbids, or a loop that cannot check anything. Pushing is always forbidden.
    - Fix egregious problems met on the way, in their own commit, to thresholds stated in numbers. Record anything else and leave it.
    - Parity before optimization.
    - Parallel lanes for the disjoint sets named in **Sequence**, serial otherwise, each in a worktree at `.work/wt/<lane>`, never `/tmp`, following [`orchestrate`'s worktree lifecycle](../../orchestrate/SKILL.md#worktree-lifecycle).
-   - Every commit is a Conventional Commit with the workstream as its scope. The item ID belongs in the body. Code comments never cite this doc.
-3. **Decisions:** only binding ones, each with its reason, marked owner, prescribed, or delegated with a bound.
-4. **Baseline:** known red and loop timings.
-5. **Sequence:** the items in order, each with ID, owned files, prerequisites, and acceptance command.
-6. **Acceptance:** each deliverable and its command, keeping the distinct success and failure conditions.
-7. **Needs environment:** proof that cannot run here, with the command the owner would run.
-8. **Execution boundary and non-goals:** authorized effects, forbidden effects, and what the campaign does not do. List each contract change for the owner.
-9. **Reference** (optional, short): a verified code map. Link longer design material in `docs/` instead of inlining it.
+   - Every commit is a Conventional Commit with the workstream as its scope. The item ID belongs in the body. Code comments never cite the roadmap.
+3. **Sequence:** every ready item across campaigns, in execution order, each with ID, campaign, owned files, prerequisites, and acceptance command. State which ownership sets are disjoint.
+4. **One section per campaign**, in the order its items first appear in **Sequence**:
+   1. *Goal*, and the campaign's state (`ready`, `active`, `parked` with cause, `shelved` with the owner decision).
+   2. *Decisions:* only binding ones, each with its reason, marked owner, prescribed, or delegated with a bound.
+   3. *Baseline:* known red and loop timings.
+   4. *Acceptance:* each deliverable and its command, keeping the distinct success and failure conditions.
+   5. *Needs environment:* proof that cannot run here, with the command the owner would run.
+   6. *Execution boundary and non-goals:* authorized effects, forbidden effects, and what the campaign does not do. List each contract change for the owner.
+   7. *Reference* (optional, short): a verified code map. Link longer design material in `docs/` instead of inlining it.
+5. **Later:** future work not yet planned, one line each with its goal and ticket IDs. An entry becomes a campaign section, and its items enter **Sequence**, only through `campaign-plan` and preflight.

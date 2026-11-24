@@ -1,6 +1,106 @@
-# Runtime-independent worker bridge and FX migration
+# Roadmap
+
+All current and future work in this repository. Campaigns are sections below; their ready items interleave in **Sequence**. "Resume the roadmap" or "resume the campaign" means: continue from **Status**, as `orchestrate`'s campaign reference describes. Rewrite **Status** in place; git history is the log.
 
 ## Status
+
+- **State:** idle. No campaign is active and no slice is in progress.
+- **Pi build:** released and cut over; remaining proof is parked (see its State). Headless follow-ups live in `pi-build` as PIB-1..5.
+- **Runtime-independent bridge and FX:** shelved by owner decision 2026-11-19 (Pi stays). Remaining work is USR-87..93.
+- **Next slice:** none ready. New work enters **Sequence** only through `campaign-plan` and `campaign-preflight`, starting from a **Later** entry or a new goal.
+
+## Charter
+
+Each campaign follows the charter in `campaign-preflight`'s final shape. A campaign's own authority section states its departures and wins where it is narrower.
+
+## Sequence
+
+None ready.
+
+## Campaign: Pi build
+
+### State
+
+- **Goal:** move Pi producer inputs and archives to `pi-build`, preserve full runtime behavior through pinned releases, then deliver explicit `headless-usr` selection.
+- **Accepted:** `usr` `cc4963d` (USR-39), `2639eef` (USR-41), `8101cc4` (USR-45), `366fca1` (USR-42/46), `ed3efa0` (supported developer test loader), `f8f99c3` (USR-40/44), `f90d6be` (proven pre-admission model-loss race), `292eaa4` (staged consumer), `f1fd64c` (extracted SDK/broker protocol probes), `1e8b38f` (probe intercom shutdown), `a70a142` (full-profile cutover: sync consumes the pin; vendored tree and old workflows retired), `a227122`/`91bf143`/`50891ba` (cold-cache, macOS path and pinned-Node CI fixes). `pi-build` `9dd4c4c` (preserved sources and old archives), `46885cc` (locked darwin builder), `32694f0`..`db041e6` (pinned toolchain, native Linux locks, CI build/musl/release workflow, provenance merge).
+- **Re-released:** the pin now names `pi-build` `release-a17c28f2ebaaac32e8cd1dfb66baa4c1d725a800` (shared build-repository format, `.tar.xz` archives, version 1.5.0). The text below records the earlier `full-1.5.0-1` release.
+- **Released:** `pi-build` `full-1.5.0-1` (immutable) at builder `db041e61c504dce53483db1aca69cda53a313312`; provenance `a05f7c03…`. All three archives were repeat-built byte-identically on native runners, Linux archives loaded under Alpine musl Node, the local darwin rebuild matched CI bytes, and independently downloaded assets matched the candidate.
+- **Next:** headless work is filed as `pi-build` TODO PIB-1..5 (profile plumbing first). An upgrade simulation from `c05fb47` migrated launcher, bridge and intercom loader, kept the old runtime working when the download was blocked, and passed the bridge suite (76) on the migrated closure. The campaign worktrees are retired.
+- **CI:** `Verify Pi offline setup and bridge` passes every Pi suite on both Linux runners; the job still fails in `sh sync check` on the pre-existing `tools/decide` orchestrate-contract test. On macOS, the whole-sync test segfaults (-11) in sync bootstrap after re-signing `jaq`, as it did before the cutover; the same test passes on a local macOS ARM64 host.
+- **Parked proof:** live-account entitlement, Linux runs of the `usr` SDK/intercom protocol probes (only the builder loader check ran under glibc and musl), headless acceptance. Headless now reaches the provider and fails correctly: a scoped scout SDK child launches and receives the upstream `429 FreeUsageLimitError`. Free Zen is gated to genuine opencode clients by User-Agent, so the pins moved to `opencode-go/muse-spark-1.3-contributor` (scout/mechanic); a full acceptance proof remains unverified. Performance timing gate deferred while host swap exceeds the gate. No target or release is counted as passed from a skip.
+
+### Authority and execution
+
+The owner's execution grant authorizes implementation, dependency acquisition for explicit maintainer builds, related CI, direct default-branch commits/pushes and verified versioned Pi releases. It supersedes this document's former review-only boundary. The existing empty `/Users/josh/d/pi-build` checkout had no origin. Authenticated access confirmed `joshuarli/pi-build`; its configured SSH origin now hosts `main`.
+
+Use disposable homes and checkouts under each repository's ignored `.work/`. Preserve real credentials, active runtimes, unrelated work and Git history. The owner requires native lanes at expert tier or below because bridge provider quota is exhausted. No bridge delegation or god lane is authorized for this campaign. The coordinator integrates, commits, pushes and owns worktree disposal. Allowance writes remain serial. USR-32/38/43/47/48 are not prerequisites and remain open.
+
+### Decisions
+
+- `pi-build` owns upstream identities, snapshots, local patches, production/build locks, tool pins, packaging, licenses, provenance and archives. `usr` retains first-party bridge code, harness configuration, consumer pins, installation and registration.
+- `headless-usr` is the committed default as of 2026-11-13 (owner-granted). `full` remains available by pin selection and preserves bare interactive `pi`. One closure is installed either way.
+- Keep tracked `confirmSend: true` and `inboundTrigger: "never"`. Headless sends requiring UI confirmation must fail clearly. Explicit `confirmSend: false` may authorize fixture-proved sends. Scoped SDK children remain without intercom.
+- Preserve current versions and provider behavior during the ownership move. Optimize only after accepted full parity, one measured dependency group per slice.
+- Maintainer dependency installation is permitted. Routine Pi setup/runtime may fetch pinned release assets only, with a digest-addressed cache and no fetch for an unchanged valid installation. No npm/npx, registry resolution, `pi install/update` or automatic catalog/package updates. Provider requests and configured local intercom traffic remain permitted.
+- Node is a separate prerequisite: supported pin 26.13.1, effective minimum 26.12.0. Muse still requires a separately installed executable and login. Use isolated Node for campaign checks.
+- Preserve exact tier/model/effort pins, typed descendant ceilings, depth 2, Command Code leaves, owned worktrees, durable leases, result identity and same-scope continuation. Legacy admitted sessions retain their pins.
+
+### Artifact contract
+
+The agreed consumer pin has `schema: 1`, `release_url`, `builder_revision`, `profile`, `version`, `provenance_sha256` and `targets`. Each target binds `archive`, `sha256` and `bytes`. Archives are `pi-<profile>-<version>-<rust triple>.tar.xz` (earlier `full-1.5.0-1` used `<target>-<profile>.tar.gz`) with a single `node_modules/` closure. Targets are keyed `darwin-arm64`, `linux-x64` and `linux-arm64` and map to `aarch64-apple-darwin`, `x86_64-unknown-linux-musl` and `aarch64-unknown-linux-musl`, including advertised Linux musl behavior.
+
+Release assets include `SHA256SUMS` and `provenance.json`. The latter repeats schema, builder revision and target records containing target/profile/archive/hash/size. Its exact bytes must match the committed provenance digest. Downloaded checksums must agree with the pin. Tags locate assets; they never replace committed digest authority. Never resolve latest.
+
+The staged consumer is `tools/sync/pi_release.py`; its acceptance command is `TMPDIR="$PWD/.work/tmp" python3 -I tools/pi/test_release_install.py`. Routine sync uses it with `tools/pi/runtime.pin.json`. It retains verified generations and switches one selection symlink that the launcher and bridge both follow. The previous vendored prefix at `share/pi` is preserved for explicit removal, not adopted. Rollback is a revert of the pin commit; the earlier generation or its immutable release remains available.
+
+### Current baseline
+
+Rechecked source inventories: subagents `52e68e9ef0e563d5c97b28519f9999f1b5fbbbea`, intercom Pi `62ba6985fe77d0f966563d5efd74c47d1c475b83`, intercom core `8316cbab548f422ad11c78ed887fabeef94817c1`, Muse adapter `b83e605e5675429e9d4aaccf13bd73e76575c22c`. Pi is 1.5.0. No opportunistic upgrade is included.
+
+Remeasured current archives by compressed file length and the sum of tar regular-member sizes:
+
+| Target | Compressed bytes | Logical regular-file bytes |
+| --- | ---: | ---: |
+| darwin-arm64 | 36,958,539 | 155,659,928 |
+| linux-x64 | 37,255,814 | 155,887,824 |
+| linux-arm64 | 36,887,599 | 155,228,388 |
+
+Total compressed baseline: 111,101,952 bytes. Symlink targets are not counted twice. No accepted headless delta exists.
+
+### Remaining sequence and acceptance
+
+1. **A3 prerequisite acceptance:** USR-40 must preserve previous-version node/npm/npx through failed upgrade and retry. USR-44 must recover a deleted stage with retained journal using exact inode/text ownership, and reject foreign replacements. Use installer, numbered links, main and scratch-home integration suites. Fresh source-preservation review is required for link recovery.
+2. **P0-1 builder:** implement `make build`, `verify`, `repro` and `sizes` for all targets/profiles. Lock production and build inputs, preserve source/patch provenance and notices, distinguish source compilation from verified precompiled packages, normalize tar order/ownership/timestamps/compression. Two clean builds of identical inputs must hash identically. Repackaging an imported archive is a separate, narrower result.
+3. **P0-2 consumer:** prove pinned acquisition, cache reuse, no-fetch unchanged install, missing/truncated/interrupted assets, wrong hash/size, unsafe paths/chained links, foreign and legacy prefix preservation, concurrent installers, switch failure/retry, upgrade and rollback with local HTTP fixtures. Bind both launcher and bridge to one closure. Preserve credentials and unrelated registrations.
+4. **P1-1 exact candidate:** run the behavior matrix below against extracted candidate bytes, then repeat applicable proof against independently downloaded release bytes. Missing platforms or credentials remain unverified.
+5. **P1-2 publication/cutover:** publish only the accepted full target set as an immutable versioned release. Commit `tools/pi/runtime.pin.json` and installer wiring together after independent download checks. Preserve a known previous pin and retrievable verified artifact for rollback. Only then remove old snapshots/archives and their live callers.
+6. **P2 lifecycle:** repeat release-install, offline Pi, disposable-checkout bridge sync, Pi extensions and affected Claude/Pi/OpenCode registration suites. Prove install, unchanged resync, upgrade, failure, retry and rollback.
+7. **P3 headless:** measure retained/reachable groups before editing; declare minimum byte saving and retained behaviors before each removal. Repeat loader/worker/Muse/intercom/platform/repeat-build proof per candidate. If no safe candidate meets its threshold, retain full and report optimization blocked.
+8. **P4 closeout:** review changed scope, repair campaign-caused P1/P2 defects, reconcile tickets/docs, dispose only reviewed campaign-owned worktrees and report accepted commits, pins, releases, measured sizes and parked proof.
+
+### Behavior matrix
+
+| Boundary | Required proof |
+| --- | --- |
+| CLI/loader | Real CLI startup, install/update refusal, SDK module evaluation, resource reload and extension binding, including Muse |
+| SDK/detached worker | Deterministic local provider/protocol fixtures covering approved routes/pre-admission fallback, exact ownership, spawn, cancellation with termination, resume, steer, restart recovery, duplicate-admission prevention and nesting ceilings |
+| Muse | Registration and real host protocol against fixture; explicit missing executable/auth failures; account entitlement remains separate live proof |
+| Intercom | Real local broker and authorized fixture peer send/receive; no automatic model wakeup; absent from scoped SDK children; headless consent behavior |
+| Network | Poison npm/npx and block package registries while permitting required local fixture/provider traffic |
+| Platforms | Actual execution for all three targets and required libc variants; Ubuntu alone does not establish musl |
+| Reproducibility | Two clean builds per target/profile/input set, identical SHA-256; state whether source build or repack |
+
+### Cutover callers
+
+Update or retire `tools/pi` tests, `tools/sync/checks.py`, old `vendor.py`/`build-runtime.sh`, Pi build/verify/Alpine workflows, sync/worker registration, the actual `/pi-update` SKILL.md and its SKILLS.md description, and current operator docs in the same cutover. `/pi-update` must build/verify/publish in the builder and bump the consumer only after compatibility proof. Routine sync consumes the existing pin.
+
+Retain meaningful offline/runtime fixtures. Run `test_sync_bridge_offline.py` only in a disposable checkout. Audit all tracked references to retired paths; historical ticket/plan evidence is not a live caller. `git ls-files vendor/pi` must become empty only after durable provenance preservation and accepted replacement delivery. Never rewrite history to remove old blobs.
+
+Extracted-runtime local proof commands use `node --import RUNTIME/node_modules/tsx/dist/loader.mjs` with `tools/pi/test_sdk_protocol.mjs RUNTIME`, `tools/pi/test_intercom_protocol.mjs RUNTIME`, and `tools/pi/verify-extensions.mjs RUNTIME`. The separate `test_runtime_protocol.mjs RUNTIME [MUSE_EXECUTABLE]` probes the installed Muse host before any model turn. It does not establish account entitlement or close USR-50.
+
+## Campaign: Runtime-independent worker bridge and FX
+
+### State
 
 **Owner decision, November 19, 2026: Pi stays.** FX is kept off the active path: production `ROOT_PLANS` route only to Codex, Command Code and Pi, which `test/policy.test.ts` pins, and `server.ts` builds the bridge without an FX adapter. The FX adapter, ACP supervisor, children controller and experiments stay in the tree, so the work can resume as FX develops. Remaining work is tracked in `TODO.md` as USR-87 through USR-93. The owner does not use FX's paid inference or FX as a top-level harness.
 
@@ -61,7 +161,7 @@
 
 This is the authoritative remaining execution plan. The dated audit holds the comparison, pinned references and diagnostic evidence; earlier verification documents hold historical results.
 
-## Charter and working rules
+### Charter and working rules
 
 The owner requested an audit and replacement plan, then explicitly authorized integrating and committing that documentation directly to `usr`. This revision records that plan; runtime implementation and production promotion remain future work under their respective launch scope. The earlier CLI-only spike boundary is superseded for planning by the ACP sequence below.
 
@@ -69,7 +169,7 @@ Use the existing [campaign mechanics](../dotfiles/base/.agents/skills/orchestrat
 
 After each accepted slice, record the product improvement, evidence, remaining blocker and smallest useful next slice. At most two materially different repair attempts precede parking an unchanged failure with its cause and retry condition. An environment blocker parks only its dependent proof; an observed foundational defect blocks dependent implementation. Reuse evidence while its inputs remain valid. Keep Git as the change log and update Status instead of appending checkpoint narratives.
 
-## Binding decisions
+### Binding decisions
 
 1. **Keep the shared bridge.** Retain admission, immutable route snapshots, leases, attempts, scope checks, acceptance-claim parsing, observation, owner journals and failover. The parent independently executes or verifies acceptance proof. Adapters own native execution, decoding, session identity and control; the bridge must not become a model loop.
 2. **Preserve current policy.** Resolve `ROOT_PLANS` at admission and retain exact routes/pins in saved state. Only scout, mechanic and worker enter the bridge. Experts are native; top-level Antigravity, Command Code, OpenCode and Devin use native children. Claude Code, Codex and Pi parents use the bridge for lower tiers. Earlier campaign instructions about exclusive bridge experts and an Antigravity bridge adapter are obsolete. The [generated architecture](subagents.html) and typed policy are authoritative.
@@ -84,7 +184,7 @@ After each accepted slice, record the product improvement, evidence, remaining b
 
 A demonstrated ACP limitation permits one bounded investigation of pinned libfx with an executable reproduction. The SDK supplies durable engines and controls, but its native backend requires host-provided coding tools; host callbacks do not automatically equip descendants, and published Linux native addons require glibc. Native-musl CLI proof is not SDK/WASM proof. Do not add Vercel infrastructure, a general coding-tool rewrite, a persistent daemon or two production transports without an accepted concrete need.
 
-## Baseline and ownership
+### Baseline and ownership
 
 The audit inspected `usr` at `5657b60dc57c2d0e8acd1a50ff99fe8c1d55faaf`. Documentation integration refreshed to `41c91c0fff525226407c7f809015f6a29fc0154f`; intervening commits changed only skill/test guidance, leaving the audited bridge inputs unchanged. Refresh relevant inputs at the next launch.
 
@@ -109,13 +209,13 @@ No release-pin update follows merely from a newer pi-build commit. The [audit ba
 
 Fresh audit tests: 24 FX fixtures passed and both recovery gaps reproduced, using Node 24.22.3 below the declared Node 26 minimum. These are diagnostics, not supported-toolchain acceptance. The no-Pi fixture stopped at owner-socket `listen EPERM`. A checksum-verified Linux x86-64 FX binary initialized ACP and rejected unsupported effort, then returned `-32603 Failed to create session`; the cause is unresolved. Neither result establishes ACP lifecycle or native-Alpine qualification.
 
-## Remaining sequence
+### Remaining sequence
 
 Phase 0 precedes Phase 1. Phases 2–4 need the accepted ACP lifecycle, but unavailable live access in Phase 2 need not block deterministic research/child work. Independent platform/provider investigation may proceed without concurrent writers on shared files. A route cannot be promoted before its required gates pass.
 
 The scripts `test:core`, `test:no-pi`, `test:runtime-contract`, `test:fx`, `spike:fx` and `bench:runtime` already exist. Extend them rather than reimplementing completed scaffolding. Run package commands from `tools/pi-subagent-bridge`. ACP/child files and modes below are proposed; document their runnable commands with their implementation.
 
-### Phase 0 — Repair recovery and budgets
+#### Phase 0 — Repair recovery and budgets
 
 **Prerequisite:** supported Node/development tooling; owner-RPC cases additionally require Unix sockets. Unavailable sockets park that proof, not the direct lifecycle/supervisor repairs. **Owns:** FX/lifecycle/session fixtures and associated fixes.
 
@@ -125,7 +225,7 @@ Persist/report effective wall and step limits at admission and observation. Dist
 
 **Exit evidence:** regressions fail before the fix and pass afterward on supported Node; `npm run test:fx` and targeted session cases pass; production policy output is unchanged. Run affected owner cases where sockets are available and record unavailable proof separately. Land fixes and regressions together. Reverify affected independence contracts rather than restarting completed work.
 
-### Phase 1 — One ACP worker through recovery
+#### Phase 1 — One ACP worker through recovery
 
 **Prerequisite:** Phase 0; resolve or reproduce the released-binary session-creation failure on a supported host. **Owns:** proposed ACP adapter, runtime-control boundary, process supervisor and experiment fixtures.
 
@@ -139,7 +239,7 @@ Preserve pending/delivered/dropped steering states; protocol acceptance is not m
 
 **Exit evidence:** a real pinned binary with a deterministic local provider completes edits, exact-session correction, cancel/resume, timeout/resume, failed-tool recovery and steering during a tool. Hostile read-only calls, changed pins, ambiguous termination and replay have discriminating outcomes. Extend `test:fx`, the FX runtime-contract selection and local spike runner. An unresolved session-creation error prevents accepting this slice.
 
-### Phase 2 — First live Pi-dependent replacement
+#### Phase 2 — First live Pi-dependent replacement
 
 **Prerequisite:** Phase 1 and authorized OpenCode Go access. **Owns:** live profile and paired evidence.
 
@@ -149,7 +249,7 @@ Earlier Go runs proved auth, the session header and quota handling, not inferenc
 
 **Exit evidence:** actual FX inference and same-session correction produce useful work with independent parent checks. Exact model/provider/effort is supported by transport fixtures and available runtime evidence. Separate requested and completing backends; Codex fallback proves orchestration continuity only. Partial edits or uncertain termination never authorize another-model replay.
 
-### Phase 3 — Independent research tools
+#### Phase 3 — Independent research tools
 
 **Prerequisite:** Phase 1 for worker integration; packaging inspection can begin earlier. **Owns:** optional pinned MCP closure, explicit tool policy and evidence persistence.
 
@@ -159,7 +259,7 @@ Use worker-private configuration/cache and separate search credentials. Standalo
 
 **Exit evidence:** offline tests prove dependency isolation, grants, bounded output, cancellation and restart behavior. An authorized live search/fetch/citation task with usable resumed evidence establishes provider usefulness. Missing access is explicit and cannot silently select another billable model or expose Intercom.
 
-### Phase 4 — Controlled child workers
+#### Phase 4 — Controlled child workers
 
 **Prerequisite:** Phase 1 and root recovery/owner controls. **Owns:** minimal child controller, per-parent MCP, durable group accounting and lease changes.
 
@@ -171,7 +271,7 @@ Keep children under the root lease with deliberate write coordination. Current r
 
 **Exit evidence:** a useful parent/child task passes independent combined-diff checks. Authority overrides fail before launch. Root completion/crash/cancel cannot release a writing group; restart/replay have one effect; no descendant escapes scope/accounting. These are authority and lifecycle controls, not an OS sandbox.
 
-### Phase 5 — Remaining routes, platforms and long sessions
+#### Phase 5 — Remaining routes, platforms and long sessions
 
 **Prerequisite:** accepted lifecycle plus each route's required capabilities. **Owns:** transport tests, platform pins/install and context-pressure qualification.
 
@@ -181,7 +281,7 @@ Qualify macOS ARM64, Linux x86-64 musl and Linux ARM64 musl with verified artifa
 
 **Exit evidence:** every retained Pi-dependent route has a useful equivalent at its exact effort; each claimed platform passes lifecycle/install gates. A clean installation runs the required matrix with Pi imports/spawns/credentials trapped. Skipped core cases are not no-Pi proof. External consumers require their own available authorized environments.
 
-### Phase 6 — Measure, decide and retire dependencies
+#### Phase 6 — Measure, decide and retire dependencies
 
 **Prerequisite:** required route/capability/platform cells for the intended rollout. **Owns:** matched measurement, promotion proposal, rollback and eventual packaging changes.
 
@@ -191,7 +291,7 @@ Recommend one-route-at-a-time promotion with rollback to the retained adapter. R
 
 **Exit evidence:** the intended no-Pi setup is useful, recoverable and compatible with real consumers; measured benefit justifies maintenance. Promotion/removal follow an accepted decision, not a handshake or executable rename.
 
-## Acceptance matrix
+### Acceptance matrix
 
 Extend existing behavior tests. Separate source support, fake-process proof, real-binary deterministic proof and live intended-provider proof.
 
@@ -211,7 +311,7 @@ Extend existing behavior tests. Separate source support, fake-process proof, rea
 | Interruption | Stop before response, during a write and after a write before persistence. Preserve identity and partial effects without duplicate work. |
 | Consumers/platforms | Preserve CLI/MCP/owner v1 receipts, foreign registrations and companions. Agentctl/Intercom and each native platform have distinct evidence. |
 
-## Blocked proof and retry conditions
+### Blocked proof and retry conditions
 
 | Gate | Current evidence / retry condition |
 | --- | --- |
@@ -224,10 +324,14 @@ Extend existing behavior tests. Separate source support, fake-process proof, rea
 
 Update a gate with exact revision, command, result and remaining limit. Do not repeat unchanged failures or broaden unrelated suites. Follow [development checks](development.md) and the affected contract tests.
 
-## Verdict and stop conditions
+### Verdict and stop conditions
 
 **Current verdict: limited-go for the next bounded experiment; no Pi replacement claim.** Runtime independence and historical CLI qualification retain value. ACP is the recommended next transport, with a real session-creation blocker still to resolve.
 
 A **go** recommendation requires lifecycle, isolation, exact-route task quality and platform evidence for its scope. A **limited-go** names excluded routes/capabilities/platforms. A **no-go** records the concrete defect or unacceptable implementation cost and preserves the neutral core and reproduction. Stop expanding the project merely to make FX win.
 
 Provider economics, native harness policy, Intercom enrollment and real-home configuration remain outside this documentation change. Whole-distribution removal, broad renaming and deployment are distinct migrations. Use the [dated audit](verification/fx-subagent-parity-audit-2026-11-19.md), [bridge contract](../tools/pi-subagent-bridge/README.md) and pinned source when upstream behavior is uncertain.
+
+## Later
+
+- **Transfer the web-UI design method** (USR-73): on separate requests, apply `refactor-web-ui` to stats (with `refactor-dashboard-ui` owning metrics and trends; keep useful analytical charts), stuff (dependency visualization, catalog and forge workflows; keep canvas rendering and its performance invariants), and discover (search and research results, evidence and provenance hierarchy, mobile reading; invent no data relationships to fill a screen). After a second product, decide per rule whether it belongs in the shared skill, the Laputa component library, or a product test, and delete agentctl-specific rules. The agentctl redesign evidence is in agentctl `docs/ui/redesign.md`.

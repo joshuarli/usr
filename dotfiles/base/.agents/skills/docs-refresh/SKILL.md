@@ -21,7 +21,7 @@ Size the layout to the repo. A small repo, with under about 200 lines of docs or
 
 ## Scope
 
-Default to every doc surface in the repo: README, AGENTS.md and CLAUDE.md, `docs/`, the `TODO.md` backlog with its RFCs and campaign docs, contributing notes, `--help` text, config examples, and public API doc comments. When asked to refresh only a change, cover just the docs that change made stale or should have updated, and the public API doc comments it touched. Apply `comment-cleanup` to other source comments in that scope.
+Default to every doc surface in the repo: README, AGENTS.md and CLAUDE.md, `docs/`, the `TODO.md` backlog with its RFCs, `docs/roadmap.md`, contributing notes, `--help` text, config examples, and public API doc comments. When asked to refresh only a change, cover just the docs that change made stale or should have updated, and the public API doc comments it touched. Apply `comment-cleanup` to other source comments in that scope.
 
 ## Rules
 
@@ -31,7 +31,7 @@ Default to every doc surface in the repo: README, AGENTS.md and CLAUDE.md, `docs
 - **Point at code, do not copy it.** A list that mirrors one file, such as the env vars one function reads or a route table, becomes a pointer to that file. Setup steps the product already shows, on a home page or in `--help`, become a link.
 - **A doc code reads is load-bearing.** Before you move, split, rename, or cut a doc, search source and build files for its path: embeds such as `include_str!`, tests that read or compile it, hashes, and checks of its layout. Report what you find to every writer, and leave such a doc's structure to the code that reads it.
 - **Comments** follow `comment-cleanup` with comment edits allowed and behavior edits forbidden. Only public API contract doc comments are doc surface. Irreducible rationale from a safely deleted comment lands once in the `docs/` topic that owns it, never back in source.
-- **Clear done work.** Check each open ticket in scope against the code, its commit history, and any recorded release. Close one that is done or obsolete with `todo close`, citing the commit or record that shows it. Narrow a partly done ticket to what remains. A completed RFC or campaign doc is not a dated record: per `todo`, land each fact a reader still needs in the topic doc that owns it, drop links to it, and delete it in the same change. Run `todo check` afterwards.
+- **Clear done work.** Check each open ticket in scope against the code, its commit history, and any recorded release. Close one that is done or obsolete with `todo close`, citing the commit or record that shows it. Narrow a partly done ticket to what remains. A completed RFC or roadmap campaign is not a dated record: per `todo`, land each fact a reader still needs in the topic doc that owns it, drop links to it, and delete the RFC or the campaign's roadmap section in the same change. Move a live legacy `docs/CAMPAIGN-*.md` into `docs/roadmap.md` and delete it. Run `todo check` afterwards.
 - **Leave dated records alone** (changelog, ADRs, release notes), marking a superseded one rather than rewriting it. For generated docs, edit the source and the generator input, not the output.
 - **One writer** per file, so edits do not overlap. Create a doc file only for a topic that has no home and would make its nearest existing doc too long to scan.
 - **Verify narrowly:** every `path:line` and link you kept resolves, and any doc check the repo has (a link checker, a doctest) runs on the files you touched.

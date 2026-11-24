@@ -56,7 +56,7 @@ Deliver working changes and focused verification in improvement mode. A report o
 - Isolate fixtures and reference/candidate artifacts; preserve relevant profiles and cache semantics. Coordinate competing agents/worktrees before timing. On a busy host, compare the runner's reported suite durations in one session, or use paired ratios ([busy-host evidence](../../instructions/performance.md#busy-host-evidence)). Absolute timings stay deferred and never grant a pass.
 - Update existing project guidance with exact commands, selection reasons, cost ceilings, manual workloads and evidence validity.
 
-For **campaign planning**, use [campaign-plan](../campaign-plan/SKILL.md) and [campaign-preflight](../campaign-preflight/SKILL.md) to write one executable campaign document with actual contracts/costs/unknowns, prerequisites, a real pilot, ownership, resource validity, manual boundaries and acceptance proofs. Do not execute it. Ordinary audits need findings; small improvements need working changes, not campaigns.
+For **campaign planning**, use [campaign-plan](../campaign-plan/SKILL.md) and [campaign-preflight](../campaign-preflight/SKILL.md) to write one executable campaign in `docs/roadmap.md` with actual contracts/costs/unknowns, prerequisites, a real pilot, ownership, resource validity, manual boundaries and acceptance proofs. Do not execute it. Ordinary audits need findings; small improvements need working changes, not campaigns.
 
 ## 4. Prove the changed mechanism, narrowly
 

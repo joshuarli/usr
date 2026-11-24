@@ -588,7 +588,7 @@ class SkillCampaignTests(unittest.TestCase):
             self.assertEqual(0, prepared.returncode, step + "\n" + prepared.stdout + prepared.stderr)
             repo = Path(prepared.stdout.strip())
             try:
-                authority = (repo / "AGENTS.md").read_text(encoding="utf-8") + (repo / "docs" / "CAMPAIGN-SAMPLE.md").read_text(encoding="utf-8")
+                authority = (repo / "AGENTS.md").read_text(encoding="utf-8") + (repo / "docs" / "roadmap.md").read_text(encoding="utf-8")
                 self.assertEqual(allowed, "One local commit is authorized" in authority, step)
                 tests = (repo / "tests" / "test_value.py").read_text(encoding="utf-8")
                 for value in ("is_positive(1)", "is_positive(0)", "is_positive(-1)"):

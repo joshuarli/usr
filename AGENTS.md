@@ -25,11 +25,10 @@ Each path belongs to one sync layer (see [sync](docs/sync.md)). Do not `cat` or 
 | Subagent architecture | [docs/subagents.html](docs/subagents.html) |
 | Disk pressure, cleanup and worktree CoW | [docs/agent-disk-pressure.md](docs/agent-disk-pressure.md), [docs/worktree-cow.md](docs/worktree-cow.md) |
 | Host CPU budget for heavy jobs | [docs/cpu-slot.md](docs/cpu-slot.md) |
-| Runtime independence and FX migration plan | [docs/CAMPAIGN-RUNTIME-INDEPENDENCE-FX.md](docs/CAMPAIGN-RUNTIME-INDEPENDENCE-FX.md) |
+| Current and future work, campaigns, and the resume handoff | [docs/roadmap.md](docs/roadmap.md) |
 | Runtime independence and FX evidence | [core verification](docs/verification/runtime-independence.md), [CLI spike](docs/verification/runtime-independence-fx.md), [parity audit](docs/verification/fx-subagent-parity-audit-2026-11-19.md) |
 | Pi profile | [docs/pi.md](docs/pi.md) |
 | Tailnet Intercom coordinators | [docs/intercom-tailnet.md](docs/intercom-tailnet.md) |
-| Pi build migration plan | [docs/CAMPAIGN-PI-BUILD.md](docs/CAMPAIGN-PI-BUILD.md) |
 | macOS preference management | [docs/macos-preferences.md](docs/macos-preferences.md) |
 | Linux CPU power policy | [docs/power-policy.md](docs/power-policy.md) |
 | Tailnet hardening runbook | [tailscale/TAILSCALE.md](tailscale/TAILSCALE.md) |

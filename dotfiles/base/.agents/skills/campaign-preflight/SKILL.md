@@ -1,6 +1,6 @@
 ---
 name: campaign-preflight
-description: "Use for /campaign-preflight on a campaign design doc draft: turn it into a final, sequenced plan an agent can execute unattended, with every major decision answered, feature and test parity before optimization, and a fast verification loop: ultrareview for a campaign doc."
+description: "Use for /campaign-preflight on a draft campaign in docs/roadmap.md: turn it into a final, sequenced plan an agent can execute unattended, with every major decision answered, feature and test parity before optimization, and a fast verification loop: ultrareview for a roadmap campaign."
 disable-model-invocation: true
 metadata:
   opencode/autoinvoke: "false"
@@ -8,7 +8,7 @@ metadata:
 
 # Campaign Preflight
 
-A campaign doc is the only thing the executing agent has once the owner walks away. Preflight edits the draft in place until that agent can run to the end without asking anything, then reports whether it is ready. It does not start the campaign. The method for each design area lives in the skill named for it. For campaign mechanics (workstreams, waves, lane contract) the doc conforms to the campaign reference linked by `orchestrate` instead of restating it.
+The roadmap, `docs/roadmap.md`, is the only thing the executing agent has once the owner walks away. Preflight edits the draft campaign's section, and its **Sequence** items and **Status**, in place until that agent can run to the end without asking anything, then reports whether it is ready. It does not start the campaign. The method for each design area lives in the skill named for it. For campaign mechanics (workstreams, waves, lane contract, the single roadmap) the roadmap conforms to the campaign reference linked by `orchestrate` instead of restating it.
 
 ## The bar
 
@@ -21,7 +21,7 @@ A campaign doc is the only thing the executing agent has once the owner walks aw
 
 ## Rules
 
-- **Edit the draft in place,** and nothing else. No second plan file and no preflight commentary in the doc.
+- **Edit the draft in place,** and nothing else. No second plan file and no preflight commentary in the roadmap. A draft that arrives as a separate file is merged into `docs/roadmap.md` and deleted.
 - **The code is the truth.** Read it at the current commit. Verify every claim the draft makes about what exists and fix the ones that disagree.
 - **The owner owns intent.** Preflight prescribes anything the code, the evidence, or sound practice settles. It asks the owner only for choices that change the product, the contract, or carry real risk, in one batch with a recommendation each, and records the answers as owner decisions with the date.
 - **Pre-answer every place the global instructions say ask:** contract changes and anything destructive. For dependencies, name the performance gates they must stay within. The executor cannot ask, so the doc permits it, forbids it, or says exactly how to proceed.
@@ -44,6 +44,6 @@ For each area the campaign touches, load the skill and ask what decisions it wou
 | Cleanup | `dead-code-archaeology` | What is deleted at the end and how liveness is proven |
 | Repeat failures | [`audit-skills` failures](../audit-skills/references/failures.md) | Guards for mistakes the campaign is likely to repeat |
 
-**The test:** an agent with only this doc and the repo can land the first slice without asking anything, and can tell from **Status** alone what is accepted, what is red, and what is next.
+**The test:** an agent with only the roadmap and the repo can land the first slice without asking anything, and can tell from **Status** alone what is accepted, what is red, and what is next.
 
-**Report:** the verdict; the owner's answers and the decisions you prescribed, so the owner can overrule them; the loop timings; what you cut or moved to optimization; any material source requirement you superseded and why; what you could not verify; and the one-line prompt to launch the executor on the doc.
+**Report:** the verdict; the owner's answers and the decisions you prescribed, so the owner can overrule them; the loop timings; what you cut or moved to optimization; any material source requirement you superseded and why; what you could not verify; and the launch prompt, which is always "resume the roadmap".

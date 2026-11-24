@@ -49,7 +49,7 @@ The ACP supervisor publishes the native session ID as soon as `session/new` or `
 
 With `delegation` set, an ACP root also receives a per-root MCP controller with `spawn`, `status`, `wait`, `cancel`, `steer` and `resume`. Children are one generation deep, and their pins come from the bridge's policy snapshot at root admission. They are bounded in count and concurrency, with one writer at a time, and capped at the root's deadline. The root's lease is held until every child is verified terminal.
 
-The [FX migration campaign](../../docs/CAMPAIGN-RUNTIME-INDEPENDENCE-FX.md) owns the remaining sequence and acceptance gates. Pi remains available until required routes and lifecycle contracts have qualified replacements.
+The [FX migration campaign](../../docs/roadmap.md#campaign-runtime-independent-worker-bridge-and-fx) owns the remaining sequence and acceptance gates. Pi remains available until required routes and lifecycle contracts have qualified replacements.
 
 - `npm run spike:fx -- --setup` installs the exact checked-in release into a scratch home under usr's `.work/`, using the existing verified installer.
 - `npm run spike:fx -- --local-protocol` runs the real CLI against a loopback provider, including tools, continuation, hostile read-only calls and interruption.

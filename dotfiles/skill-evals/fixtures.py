@@ -127,7 +127,7 @@ def prepare(case: str, version: str) -> Path:
             else "Do not commit or push. Complete the work in the working tree.\n"
         )
         write(workspace, "AGENTS.md", source_contract(version).rstrip() + "\n\n" + fixture_rules + "\n" + authority)
-        write(workspace, "docs/CAMPAIGN-SAMPLE.md", f"# Sample campaign\n\nStatus: ready\n\n## Acceptance\n\n- Implement `is_positive(value: int) -> bool`, returning true exactly when `value > 0`.\n- `python3 -B -I -m unittest discover -s tests` passes tests for 1, 0, and -1.\n\n## Authority\n\n{authority}")
+        write(workspace, "docs/roadmap.md", f"# Roadmap\n\n## Status\n\nready: start the sample campaign\n\n## Sample campaign\n\n### Acceptance\n\n- Implement `is_positive(value: int) -> bool`, returning true exactly when `value > 0`.\n- `python3 -B -I -m unittest discover -s tests` passes tests for 1, 0, and -1.\n\n### Authority\n\n{authority}")
         write(workspace, "src/value.py", "def is_positive(value: int) -> bool:\n    raise NotImplementedError\n")
         write(workspace, "tests/test_value.py", "import sys\nimport unittest\nfrom pathlib import Path\n\nsys.path.insert(0, str(Path(__file__).resolve().parents[1]))\nfrom src.value import is_positive\n\n\nclass ValueTests(unittest.TestCase):\n    def test_positive_values(self):\n        self.assertTrue(is_positive(1))\n\n    def test_zero_is_not_positive(self):\n        self.assertFalse(is_positive(0))\n\n    def test_negative_values_are_not_positive(self):\n        self.assertFalse(is_positive(-1))\n\n\nif __name__ == '__main__':\n    unittest.main()\n")
     elif case == "campaign-new":

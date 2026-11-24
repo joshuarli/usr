@@ -139,7 +139,7 @@ Next: 139
 ### USR-87 · P3 · FX ACP worker has no live-inference proof on the intended Go DeepSeek route
 
 - **Area:** Delegation
-- **Where:** tools/pi-subagent-bridge/experiment/fx/live-pilot.mjs; docs/CAMPAIGN-RUNTIME-INDEPENDENCE-FX.md (Phase 2 parked)
+- **Where:** tools/pi-subagent-bridge/experiment/fx/live-pilot.mjs; docs/roadmap.md (Campaign: Runtime-independent worker bridge and FX) (Phase 2 parked)
 - **Problem:** Every FX qualification used a scripted loopback provider; the 2026-11-19 recheck hit the OpenCode Go monthly limit (429 GoUsageLimitError), so FX prompts and tools have never produced useful work on a real model, and whether compaction helper calls are counted in reported usage is unverified.
 - **Recommendation:** After the Go reset run npm run spike:fx -- --live opencode-go (ACP transport, bounded six jobs plus one correction), independently check results, record usage including compaction, then the Contributor Spark scout/mechanic cells.
 - **Fix with:** none
@@ -148,7 +148,7 @@ Next: 139
 ### USR-88 · P3 · FX 0.0.17 built-in web_fetch cannot be prevented, giving read-only FX tiers public-URL egress
 
 - **Area:** Delegation
-- **Where:** tools/pi-subagent-bridge/src/fx.ts (FX_UNGATED_TOOLS); tools/pi-subagent-bridge/src/fx-acp-supervisor.ts (policy stop); docs/CAMPAIGN-RUNTIME-INDEPENDENCE-FX.md (egress defect)
+- **Where:** tools/pi-subagent-bridge/src/fx.ts (FX_UNGATED_TOOLS); tools/pi-subagent-bridge/src/fx-acp-supervisor.ts (policy stop); docs/roadmap.md (Campaign: Runtime-independent worker bridge and FX) (egress defect)
 - **Problem:** web_fetch runs for public URLs under a deny-all permission set in auto and ask modes, and still runs when hidden by tool_placement or called through a denied toolbox; the bridge only detects and stops the run after the call may have executed, unlike Pi scouts which have no network tool.
 - **Recommendation:** Before routing any read-only tier to FX, requalify a newer FX release that honors a deny rule for web_fetch, or contain FX network egress at the OS level to the provider endpoint; keep the detection stop either way.
 - **Fix with:** security
@@ -319,9 +319,9 @@ Next: 139
 ### USR-73 · P4 · The refactor-web-ui skill has only been applied to agentctl
 
 - **Area:** Skills
-- **Where:** dotfiles/base/.agents/skills/refactor-web-ui/SKILL.md; docs/CAMPAIGN-AGENTCTL-WEB-UI.md: Transfer after agentctl
+- **Where:** dotfiles/base/.agents/skills/refactor-web-ui/SKILL.md; docs/roadmap.md (Later)
 - **Problem:** The skill was exercised and sharpened on one product only. Its rules have not been tested against a dashboard (stats), a developer tool with canvas rendering (stuff), or a reading/research product (discover), so overfit rules cannot yet be told apart from transferable ones.
-- **Recommendation:** On separate requests, apply the skill to stats (with refactor-dashboard-ui owning metrics and trends), stuff (keep canvas rendering and its performance invariants), and discover (evidence and provenance hierarchy, mobile reading). Follow the campaign's Transfer section, and after the second product delete or move rules that turned out to be agentctl-specific.
+- **Recommendation:** On separate requests, apply the skill to stats (with refactor-dashboard-ui owning metrics and trends), stuff (keep canvas rendering and its performance invariants), and discover (evidence and provenance hierarchy, mobile reading). Follow the roadmap's Later entry, and after the second product delete or move rules that turned out to be agentctl-specific.
 - **Fix with:** none
 - **Effort:** L
 
@@ -337,7 +337,7 @@ Next: 139
 ### USR-90 · P4 · Muse and Devin Pi routes have no FX-side replacement design
 
 - **Area:** Delegation
-- **Where:** tools/pi-subagent-bridge/src/tier-policy.ts (MUSE_TIER_MODELS, DEVIN_TIER_MODELS); docs/CAMPAIGN-RUNTIME-INDEPENDENCE-FX.md (Phase 5 routes parked)
+- **Where:** tools/pi-subagent-bridge/src/tier-policy.ts (MUSE_TIER_MODELS, DEVIN_TIER_MODELS); docs/roadmap.md (Campaign: Runtime-independent worker bridge and FX) (Phase 5 routes parked)
 - **Problem:** Muse speaks MSP and serves its own ACP, and Devin needs its own CLI auth, so neither is an FX provider configuration; retiring Pi or pi-build would drop these worker routes and the final fallback rung of every root plan.
 - **Recommendation:** Decide in an RFC whether to add native ACP executors for muse acp and Devin reusing the FX ACP supervisor, or keep Pi for these routes permanently; Pi stays until then.
 - **Fix with:** architect
@@ -355,7 +355,7 @@ Next: 139
 ### USR-92 · P4 · Retiring pi-build would also orphan the agent-intercom companion artifacts
 
 - **Area:** Sync
-- **Where:** tools/pi/runtime.pin.json (companions); docs/CAMPAIGN-PI-BUILD.md
+- **Where:** tools/pi/runtime.pin.json (companions); docs/roadmap.md (Campaign: Pi build)
 - **Problem:** pi-build publishes the agent-intercom-claude, -codex and -opencode companion archives as well as the Pi runtime, so dropping pi-build after an FX migration would break intercom installation.
 - **Recommendation:** Before any pi-build retirement, move companion packaging and pinning to another pinned release source and verify sync installs them unchanged.
 - **Fix with:** none
@@ -364,7 +364,7 @@ Next: 139
 ### USR-93 · P4 · Pi-lane and FX workers lack the planned pinned research tools (pi-web-access MCP)
 
 - **Area:** Delegation
-- **Where:** docs/CAMPAIGN-RUNTIME-INDEPENDENCE-FX.md (Phase 3 parked, grant shape); docs/verification/fx-subagent-parity-audit-2026-11-19.md (tool inventory); tools/pi-subagent-bridge/src/tier-policy.ts (TIER_TOOLS); tools/pi-subagent-bridge/src/fx-acp-supervisor.ts (mcp_servers); dotfiles/base/.pi/agent/settings.json (defaultExtensions)
+- **Where:** docs/roadmap.md (Campaign: Runtime-independent worker bridge and FX) (Phase 3 parked, grant shape); docs/verification/fx-subagent-parity-audit-2026-11-19.md (tool inventory); tools/pi-subagent-bridge/src/tier-policy.ts (TIER_TOOLS); tools/pi-subagent-bridge/src/fx-acp-supervisor.ts (mcp_servers); dotfiles/base/.pi/agent/settings.json (defaultExtensions)
 - **Problem:** Scoped workers have no managed web tools on either lane: TIER_TOOLS grants only local discovery, coding and subagent tools, Pi child defaults carry no web extension, and FX built-ins are ungated by permissions. Phase 3 needs pi-web-access 0.48.0 in a pinned closure plus separate search credentials; the npm tarball gitHead 896d75be differs from the campaign record 438e58be, and nothing packages it yet. It is an addition, not parity.
 - **Recommendation:** If wanted, package pi-web-access through a pinned release, re-verify its source revision, grant it per-tool to approved roles through the typed tool allowlist and Pi child extensions on Pi lanes and through a scoped ACP mcp_servers entry on FX lanes, and prove search, fetch, citation and restart offline before any live check.
 - **Fix with:** none

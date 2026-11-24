@@ -25,7 +25,7 @@ Sync records `usrBrokerProfile` when it manages the broker configuration. This f
 
 **Changes to the Pi installation go through `pi-build`, never local edits.** If the Pi runtime or a bundled extension (pi-subagents, agent-intercom-pi) needs a change, it is made in [`pi-build`](https://github.com/joshuarli/pi-build) as a snapshot update or local patch, released there, and adopted in `usr` through a reviewed release pin. Do not hand-patch the installed closure under `~/.pi/agent` or the install prefix, drop extra extensions into it, or fork its dependencies locally. Tracked first-party configuration (bridge, profiles, settings) lives in `usr` and is changed there; it never requires touching the runtime.
 
-The first-party bridge, harness configuration, the consumer pin, installation and registration remain in `usr`. The [Pi build campaign](CAMPAIGN-PI-BUILD.md) tracks the remaining headless-profile work.
+The first-party bridge, harness configuration, the consumer pin, installation and registration remain in `usr`. The [Pi build campaign](roadmap.md#campaign-pi-build) tracks the remaining headless-profile work.
 
 **Scope:** unrelated `usr` tools may still install or update themselves with npm. This guarantee is about the Pi executable, SDK, bridge dependencies, and Pi extension setup, not every tool in full `sh sync`.
 

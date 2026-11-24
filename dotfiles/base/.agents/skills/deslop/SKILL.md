@@ -8,7 +8,7 @@ metadata:
 
 # Deslop
 
-One repository, worked through its `TODO-DESLOP.md`. The pass makes types truthful and tests catch real defects at caller boundaries, removes dead code and fixes top findings, losing nothing the owner relies on. The campaign plan (`stuff/docs/campaigns/deslop.md`) holds only scope, decisions, sequencing and status.
+One repository, worked through its `TODO-DESLOP.md`. The pass makes types truthful and tests catch real defects at caller boundaries, removes dead code and fixes top findings, losing nothing the owner relies on. The deslop campaign's section in the coordinating repository's `docs/roadmap.md` holds only scope, decisions, sequencing and status.
 
 ## Rules
 

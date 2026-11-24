@@ -6,7 +6,7 @@
 
 **Scope:** Source audit, primary documentation, offline adapter tests, focused failure-recovery reproductions, and a released-binary ACP handshake. The audit performed no runtime/configuration changes, provider logins, live inference, rollout, or PI removal.
 
-This is dated evidence. The [runtime-independence and FX campaign](../CAMPAIGN-RUNTIME-INDEPENDENCE-FX.md) is the authoritative remaining execution plan. Its documentation integration refreshed usr to `41c91c0fff525226407c7f809015f6a29fc0154f`; intervening changes from the audit baseline only affected skill/test guidance, leaving the inspected bridge inputs unchanged.
+This is dated evidence. The [runtime-independence and FX campaign](../roadmap.md#campaign-runtime-independent-worker-bridge-and-fx) is the authoritative remaining execution plan. Its documentation integration refreshed usr to `41c91c0fff525226407c7f809015f6a29fc0154f`; intervening changes from the audit baseline only affected skill/test guidance, leaving the inspected bridge inputs unchanged.
 
 ## 1. Executive assessment
 
@@ -226,7 +226,7 @@ Retiring PI from worker execution and removing the entire PI distribution are se
 
 ## 9. Campaign handoff
 
-The [existing campaign](../CAMPAIGN-RUNTIME-INDEPENDENCE-FX.md) now contains the authoritative sequence, ownership, prerequisites and acceptance gates. It begins with the reproduced recovery/budget defects, then qualifies one ACP worker before live route replacement, standalone research, controlled children, remaining providers/platforms, and measured retirement.
+The [existing campaign](../roadmap.md#campaign-runtime-independent-worker-bridge-and-fx) now contains the authoritative sequence, ownership, prerequisites and acceptance gates. It begins with the reproduced recovery/budget defects, then qualifies one ACP worker before live route replacement, standalone research, controlled children, remaining providers/platforms, and measured retirement.
 
 Do not build a second bridge or redo accepted runtime independence. Preserve source pins, distinguish historical evidence from fresh diagnostics, and attach unavailable account/host proof only to dependent work. The current synchronous runtime controls and root-only lease lifetime need deliberate extensions before ACP and controlled descendants can satisfy parity.
 
