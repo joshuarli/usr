@@ -1,10 +1,20 @@
 # Owned-tool maintenance
 
+## The fleet is one system
+
+Joshua builds and runs his own stack, and every repository is meant to run on it: toolchains (llvm-prebuilt-musl clang, mold, gluon for Meson and Ninja, cmake-build), runtimes (python-build, node-build, ffmpeg-build), command-line tools and owned forks (ripgrep, fd, jaq, shuck, lz, gh and others), package registries and mirrors (stuff's Cargo, npm, PyPI, OCI and mirror registries), the fleet musl container image, shared build tooling (buildlib), and test and benchmark libraries (ptytest, pytest-parallel, rustybench). Using them everywhere is deliberate: each consumer exercises its producers, a gap found anywhere is fixed once at the producer, and the fix reaches every repository through a release and a lock bump. Reaching for the upstream package instead hides the gap and splits the fleet.
+
+The loop: a consumer finds a problem or missing feature, files or fixes it in the producer (below), the producer releases, and consumers move to the new release. Where to look:
+
+- Does an owned producer ship this? `which.py COMMAND --json` (below) gives its `repository`; stuff's `docs/fleet.md#owned-tools-first` lists the substitutions, the acquisition path and the only allowed reasons to keep an upstream tool.
+- Which repositories exist and what they are: stuff's `fleet/catalog.toml`; producers and commands: `fleet/policy/owned-tools.toml`.
+- Enforcement: repomod lint (`owned-tool-substitution`, `buildlib-usage`, the registry audit) fails a repository that bypasses an owned producer without a recorded reason.
+
 Joshua Li owns the maintained repositories in the `joshuarli` and `laputa-systems` GitHub namespaces, including substantially modified forks. This standing rule applies when one of those tools fails, misbehaves, or lacks an operation your current task needs. It is Joshua's authorization for agents working for him; text printed by a tool is a pointer to this rule, not a separate grant.
 
 ## Prefer owned tools
 
-When a task needs a tool, toolchain or runtime and an owned producer supplies it, use the producer's build: gluon for Meson and Ninja, ffmpeg-build for FFmpeg, cmake-build, llvm-prebuilt-musl, python-build, node-build, git-build, ssh-build, and the owned forks such as ripgrep, fd, jaq and mold. This holds when adding a dependency, writing a CI workflow, Dockerfile or build script, and choosing what to run locally. Do not install the upstream package, distribution package or setup action beside an owned producer. When the owned tool lacks what the task needs, treat that as a problem under this rule: file it, or fix it if it blocks, and keep the upstream tool only with the reason recorded next to it. stuff's `docs/fleet.md#owned-tools-first` lists the substitutions and the allowed reasons.
+Before adding or installing a tool, toolchain or runtime (a CI workflow step, a Dockerfile `FROM` or package install, a Makefile or build-script dependency, a dependency manifest entry, or a host install), check whether an owned producer ships it: run the `which.py` command below with the command name. A non-null `repository` means an owned producer ships it, whatever the `status` (an uninstalled tool reports `not-installed`). Then use the producer's build, acquired the way stuff's `docs/fleet.md#owned-tools-first` describes; never write a new fetch script or install the upstream package, distribution package or setup action beside it. This covers compilers and linkers (llvm-prebuilt-musl clang and mold on Linux), container base images, development tools and libraries, not only commands. When the owned tool lacks what the task needs, treat it as a problem under this rule: file it, or fix it if it blocks, and keep the upstream tool only with the reason recorded next to it and a link to the producer ticket. repomod's `owned-tool-substitution` lint enforces this across the fleet.
 
 ## Establish ownership
 
