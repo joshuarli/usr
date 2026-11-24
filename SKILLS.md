@@ -85,7 +85,7 @@ A campaign is a long, multi-lane effort run from a design doc. Use them in this 
 | `deslop` | Explicit | Work one repository's `TODO-DESLOP.md` from the fleet deslop campaign: ground, diagnose, types, tests with coverage and mutation, dead code, findings, report. |
 | `accelerate` | Auto | Push a running campaign to feature completion: count what is done, measure where wall time went, cut work that moves no feature toward done, fix the dominant cause, and land the next slice. |
 | `campaign-winddown` | Explicit | Pause a running campaign cleanly: finish in-flight lanes, start nothing new, leave the handoff in `docs/roadmap.md` **Status**, ready for "resume the roadmap". |
-| `cleanup` | Auto | On system disk pressure below 16 GiB free or an explicit request, reclaim only owned completed lanes and known stale scratch. |
+| `cleanup` | Auto | Always runs a bounded sweep when the user invokes it explicitly, regardless of disk pressure; on automatic disk-pressure notices below 16 GiB free, reclaim only owned completed lanes and known stale scratch. |
 
 ## Land and maintain
 

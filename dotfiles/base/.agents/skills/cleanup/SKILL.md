@@ -5,7 +5,9 @@ description: "Apply to an agent-disk-pressure notice below 16 GiB system free sp
 
 # Cleanup
 
-For a proactive sweep, first run `agent-disk-pressure status`. It prints a fresh system-volume reading: exit 1 means strictly below 16 GiB available; 0 means healthy; 2 means unknown. Do not inventory or remove anything on 0 or 2. Recheck before each removal batch and after it; stop at >=16 GiB, unknown, or no safe candidates. A notice can be stale by the time you read it. Do one bounded pass per notice, not a polling loop. Explicit user-requested cleanup and ordinary retirement of the current task's completed lanes do not need pressure.
+For a proactive sweep, first run `agent-disk-pressure status`. It prints a fresh system-volume reading: exit 1 means strictly below 16 GiB available; 0 means healthy; 2 means unknown. Do not inventory or remove anything on 0 or 2. Recheck before each removal batch and after it; stop at >=16 GiB, unknown, or no safe candidates. A notice can be stale by the time you read it. Do one bounded pass per notice, not a polling loop.
+
+An explicit invocation by the user (`@cleanup` or a direct cleanup request) MUST run a bounded cleanup sweep regardless of the disk-pressure reading. Do not skip inventory or removal because the disk is healthy: the pressure gate applies only to proactive, unprompted sweeps. Within that sweep, still reclaim only owned completed lanes and known stale scratch, and preserve live, parked, and unknown work. Ordinary retirement of the current task's completed lanes also does not need pressure.
 
 The coordinator owns cleanup and all removals. A worker may provide a bounded read-only inventory when that saves time; workers never delete worktrees, branches or scratch. Supply the repository, integration worktree and head, campaign scope, and exact known-owned and active paths. Do not expand a pressure notice into an all-repository or home-directory sweep. Skip candidates on unrelated disks that cannot relieve the pressured system volume.
 
