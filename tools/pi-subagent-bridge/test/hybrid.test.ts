@@ -320,6 +320,31 @@ test("Command quota failure on a clean worktree switches once to OpenCode Go", a
   } finally { f.close() }
 })
 
+test("known-exhausted Command Code and OpenCode Go are skipped at the next admission", async () => {
+  const f = fixture()
+  const second = join(f.root, ".work", "wt", "b")
+  git(f.root, "worktree", "add", "-qb", "lane-b", second)
+  try {
+    const m = fake(f.cwd), bridge = makeHybridBridge(piAdapter(m.api), m.command, recordingCodex(m))
+    const first = await bridge.start(f.cwd, "edit", "worker", f.scope, "Do scoped work")
+    assert.equal(first.backend, "command-code")
+
+    m.failCommand("Insufficient credits")
+    assert.equal((await bridge.status(f.cwd, first.session_id)).backend, "pi")
+
+    m.failPi("opencode API error (429): GoUsageLimitError - monthly, resets in 5d")
+    assert.equal((await bridge.status(f.cwd, first.session_id)).backend, "codex")
+
+    const next = await bridge.start(second, "next", "worker", f.scope, "Do scoped work")
+    assert.equal(next.backend, "codex")
+    assert.match(next.fallback_notice ?? "", /skipped at admission/)
+    assert.match(next.fallback_notice ?? "", /opencode-go/)
+    assert.equal(commandCalls(m.calls).length, 1)
+    assert.equal(piCreates(m.calls).length, 1)
+    assert.equal(codexCalls(m.calls).length, 2)
+  } finally { f.close() }
+})
+
 test("explicit model-not-found error allows a single Go fallback", async () => {
   const f = fixture()
   try {

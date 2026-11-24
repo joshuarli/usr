@@ -15,9 +15,10 @@ import { diagnoseGoModel } from "./optional-pi.ts"
 import { devinPreflight } from "./devin-provider.ts"
 import { changes, currentBranch, git, laneHead, outside, readStateDir, stateDir } from "./git.ts"
 import {
-  fallbackNotice, fallbackSource, inspectSession, observeExecution, runnerStatus, settledState,
+  fallbackNotice, fallbackSource, inspectSession, observeExecution, quota, runnerStatus, settledState,
   type Inspection, type InspectionDeps, type Known,
 } from "./inspect.ts"
+import { ExhaustionStore, routeKey, type ExhaustedRoute, type RouteRef } from "./exhaustion.ts"
 import {
   STEER_LIMIT, TURN_LIMIT_CONTINUATIONS, activatePi, activateProcess, admittingParentFrom, backendOf, decodeSession, encodeSession,
   executorOf, isSessionId, piFallbackPlan, processRun, processTarget, targetOf, transition, type PiFallbackPlan, type ProcessExecution,
@@ -48,6 +49,20 @@ function watchCommand(s: Session): string {
 function pathFor(cwd: string, id: string): string {
   if (!isSessionId(id)) throw new Error("Invalid worker ID")
   return join(stateDir(cwd), id + ".json")
+}
+type ExhaustibleTarget = ProcessTarget | { readonly executor: "pi"; readonly selection: PiSelection }
+function routeRef(target: ExhaustibleTarget): RouteRef | null {
+  if (target.executor === "fx") return null
+  if (target.executor === "pi") return { executor: "pi", providerID: target.selection.providerID, id: target.selection.id }
+  return { executor: target.executor, model: target.selection.model }
+}
+function activeExhaustion(cwd: string, target: ExhaustibleTarget): ExhaustedRoute | null {
+  const ref = routeRef(target)
+  return ref ? new ExhaustionStore(stateDir(cwd)).active(routeKey(ref)) : null
+}
+function exhaustionLabel(target: ExhaustibleTarget, entry: ExhaustedRoute): string {
+  const name = target.executor === "pi" ? target.selection.providerID + "/" + target.selection.id : target.executor
+  return name + " (exhausted until " + new Date(entry.until).toISOString() + ")"
 }
 function save(s: Session): void {
   const path = pathFor(s.cwd, s.id), tmp = path + "." + randomUUID() + ".tmp"
@@ -250,10 +265,14 @@ export function makeHybridBridge(api: PiAdapter, command = {
   function fallbackToCommand(s: Session, pin: CliPin, reason: string, detail?: unknown): Session {
     return fallbackToProcess(s, { executor: "command-code", selection: pin }, reason, detail)
   }
-  async function availablePi(plan: PiFallbackPlan, from: number, cwd: string): Promise<{ selection: PiSelection; next: number } | null> {
+  async function availablePi(plan: PiFallbackPlan, from: number, cwd: string, skipped: string[] = []): Promise<{ selection: PiSelection; next: number } | null> {
+    const store = new ExhaustionStore(stateDir(cwd))
     for (let index = from; index < plan.pi.length; index++) {
       const candidate = plan.pi[index]
       if (contributorModel(candidate.providerID, candidate.id) && !contributorAllowed(cwd)) continue
+      const target = { executor: "pi" as const, selection: candidate }
+      const exhausted = store.active(routeKey(routeRef(target)!))
+      if (exhausted) { skipped.push(exhaustionLabel(target, exhausted)); continue }
       try {
         if ((await api(candidate).modelCheck(cwd)).available) return { selection: candidate, next: index + 1 }
       } catch { }
@@ -263,17 +282,20 @@ export function makeHybridBridge(api: PiAdapter, command = {
   class PiUnavailableError extends Error {}
   /** The final Codex route of a codex-last plan, taken only when every earlier route is unavailable or failed before edits. */
   function fallbackToCodex(s: Session, plan: RootPlan, reason: string, detail?: unknown): Session {
-    return fallbackToProcess(s, { executor: "codex", selection: plan.codex }, reason, detail)
+    const target: ProcessTarget = { executor: "codex", selection: plan.codex }
+    const exhausted = activeExhaustion(s.cwd, target)
+    if (exhausted) throw new Error("Codex is " + exhaustionLabel(target, exhausted) + "; no unexhausted bridge route remains")
+    return fallbackToProcess(s, target, reason, detail)
   }
-  async function fallbackToPiThenCodex(s: Session, plan: PiFallbackPlan, reason: string, detail?: unknown): Promise<Session> {
+  async function fallbackToPiThenCodex(s: Session, plan: PiFallbackPlan, reason: string, detail?: unknown, skipped: string[] = []): Promise<Session> {
     try {
-      return await fallbackToPi(s, plan, reason, detail)
+      return await fallbackToPi(s, plan, reason, detail, skipped)
     } catch (error) {
       if (!(error instanceof PiUnavailableError) || plan.kind !== "codex-last") throw error
       return fallbackToCodex(s, plan, "Command Code and the approved Pi providers are unavailable; continued on Codex before edits.", detail)
     }
   }
-  async function fallbackToPi(s: Session, plan: PiFallbackPlan, reason: string, detail?: unknown): Promise<Session> {
+  async function fallbackToPi(s: Session, plan: PiFallbackPlan, reason: string, detail?: unknown, skipped: string[] = []): Promise<Session> {
     if (!untouched(s)) throw new Error("Fallback forbidden after partial edits; inspect the worktree")
     // An in-flight, interrupted, or ambiguous Command Code process must never be duplicated.
     const previousRun = processRun(s)
@@ -282,7 +304,7 @@ export function makeHybridBridge(api: PiAdapter, command = {
     ensureWorktree(stateDir(s.cwd), s.cwd, s.id)
     let next = 0
     for (;;) {
-      const available = await availablePi(plan, next, s.cwd)
+      const available = await availablePi(plan, next, s.cwd, skipped)
       if (!available) throw new PiUnavailableError("Pinned Pi fallback models are unavailable")
       const { selection } = available
       next = available.next
@@ -328,6 +350,11 @@ export function makeHybridBridge(api: PiAdapter, command = {
         finishSteer(s, completed ? "completed" : "failed")
       }
       const observation = await observeExecution(s, stateDir(s.cwd), inspection)
+      if (quota(observation.error) && s.execution.kind !== "transition") {
+        const target = s.execution.kind === "process" ? processTarget(s.execution) : { executor: "pi" as const, selection: s.execution.selection }
+        const ref = routeRef(target)
+        if (ref) await new ExhaustionStore(stateDir(s.cwd)).record(ref, observation.error)
+      }
       const source = fallbackSource(s, observation)
       const clean = source === null || untouched(s)
       let state = settledState(s, observation, clean).state
@@ -520,13 +547,25 @@ export function makeHybridBridge(api: PiAdapter, command = {
           releaseWorktree(leaseDir, dir, s.id)
           throw error
         }
-        if (targetAvailable(commandTarget)) {
+        const store = new ExhaustionStore(leaseDir)
+        const skipped: string[] = []
+        const commandExhausted = store.active(routeKey(routeRef(commandTarget)!))
+        if (commandExhausted) skipped.push(exhaustionLabel(commandTarget, commandExhausted))
+        if (!commandExhausted && targetAvailable(commandTarget)) {
           activateProcess(s, commandTarget, launch(s, commandTarget, prompt(s)))
           s.attempts = 1
           save(s)
           return admission(s)
         }
-        await fallbackToPiThenCodex(s, plan, "Command Code CLI is unavailable; continued on an approved Pi provider.")
+        const reason = skipped.length
+          ? "Exhausted routes skipped at admission: " + skipped.join("; ") + "."
+          : "Command Code CLI is unavailable; continued on an approved Pi provider."
+        await fallbackToPiThenCodex(s, plan, reason, skipped.length ? skipped.join("; ") : undefined, skipped)
+        if (skipped.length) {
+          const notice = "Exhausted routes skipped at admission: " + skipped.join("; ") + "."
+          s.fallback_reason = notice + " " + (s.fallback_reason ?? "")
+          save(s)
+        }
         return admission(s)
       }
       const codexTarget: ProcessTarget = { executor: "codex", selection: plan.codex }

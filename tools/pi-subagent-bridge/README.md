@@ -180,6 +180,10 @@ Codex runs use the signed-in ChatGPT account and do not use API keys. Codex runs
 
 Exception recovery accepts only the admitted run's matching metadata and paired output. Uncertain create or prompt dispatch retains the transition and lease without provider replay. New lower-tier sessions snapshot their root plan at admission, including every pending Pi destination, and record the exact selection of each active state. The bridge admits no expert tier; removed tiers cannot be admitted.
 
+### Provider exhaustion memory
+
+A recognized provider usage limit (`429`, rate/usage/quota, insufficient credits) observed by `worker_status` is recorded per repository in `.work/worker-bridge/exhaustion.json`, keyed by executor and pinned model (Pi by provider and model). A provider-stated reset (`resets in 5d`, `retry_after_s`) becomes an absolute deadline; without one the skip lasts one hour, capped at 30 days. `worker_start` then skips still-exhausted routes at admission and names each skip in `fallback_notice`, so a known-dead Command Code or OpenCode Go route is not retried before the next route. The same check filters Pi fallback destinations; an already active run keeps its admitted provider. Expired entries are ignored, a malformed store fails loudly, and removing the file resets the memory.
+
 ### Pi run deadline
 
 pi-subagents silently defaults an unset run deadline to 30 minutes; the bridge never lets that apply. One typed constant in `src/tier-policy.ts` (`PI_RUN_DEADLINE_MS`, 4 hours) is the single source for the deadline in Pi dispatches (`spawn`/`resume` carry `timeoutMs`) and in the generated native Pi profiles (`timeoutMs` frontmatter, verified at admission by `assertTierProfiles`). `worker_start` and `worker_status` surface the effective deadline as `run_deadline_ms` (`null` for backends with no wall-clock cap). A Pi run that reaches the deadline reports state `timed_out` with its partial output — distinct from a provider failure, and it releases the worktree lease without any automatic fallback or retry.
