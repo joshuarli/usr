@@ -45,6 +45,8 @@ Run this after each accepted slice, on resume, and whenever a slice fails twice.
 | Ready slices own disjoint files and headroom remains | Launch them now. |
 | The owner asks about progress | Report finished features and landed slices only. |
 
+Provider fallback is internal orchestration, not progress: the bridge switches routes and `worker_status` records the switch in `fallback_reason` and `fallback_detail`. Do not narrate fallback hops, exhausted providers, or "lanes still running" status to the owner. Verify the worker normally and report only an accepted slice or a blocker that needs a decision.
+
 ## Run a slice
 
 1. **Brief.** Give the item ID, base revision, owned and forbidden files, expected outcome, acceptance command, attempt limit, and known failed approaches.
