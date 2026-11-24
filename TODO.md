@@ -1,5 +1,5 @@
 Prefix: USR
-Next: 138
+Next: 139
 
 ### USR-83 · P2 · running sessions on two hosts cannot reach each other over intercom
 
@@ -106,6 +106,15 @@ Next: 138
 - **Where:** tools/pi-subagent-bridge fallback admission (worktree-untouched check)
 - **Problem:** When the Command Code primary fails with "Insufficient credits", the run has already written `.commandcode/taste/taste.md` in the lane worktree. worker_status then reports state `blocked_partial_work` with changed_paths [".commandcode/taste/taste.md"] (out of scope) and refuses the automatic switch to Pi/Codex, although no task edit exists. Reproduced 2026-11-23 on xsh lane `.work/wt/f4-profile` (session usrw_9bca3154…); removing `.commandcode/` by hand let the next worker_status fall back normally. Earlier sessions the same day produced the same directory without blocking, so the trigger may depend on timing.
 - **Recommendation:** Treat the Command Code runner's own state directory as harness bookkeeping, not lane edits: exclude `.commandcode/` from the untouched-worktree check and the scope check (or have the runner write it outside the worktree), and remove it on fallback. Acceptance: a Command Code credit failure that leaves only `.commandcode/` falls back to the next route without parent action, and a real tracked edit still blocks.
+- **Fix with:** lifecycle-concurrency
+- **Effort:** S
+
+### USR-138 · P2 · Bridge retries providers it already knows are exhausted on every launch
+
+- **Area:** pi-subagent-bridge · fallback
+- **Where:** tools/pi-subagent-bridge route admission (worker tier: command-code, pi/opencode-go, pi/devin, codex)
+- **Problem:** With Command Code out of credits and OpenCode Go at its monthly limit (429 GoUsageLimitError, resets in about 6 days), every worker_start on 2026-11-23/24 first launched Command Code, failed with "Insufficient credits", fell back to Pi/OpenCode Go, failed again with the 429, and only then ran on Codex. Each hop ends the parent's watch, so the parent must call worker_status and re-arm the watch twice per lane; across about 40 lanes in the xsh performance campaign this cost several minutes and two extra parent round trips per launch, and Command Code's .commandcode/ file sometimes blocked the first hop entirely (USR-137). The provider errors already carry the reset time.
+- **Recommendation:** Remember a provider exhaustion with its stated reset time (or a bounded backoff when none is given) and skip that route at admission until then, recording the skip in fallback_notice. Acceptance: after one 'Insufficient credits' and one 429 with 'resets in 5d', the next worker_start is admitted directly on Codex with no hops, and the skip expires at the stated reset.
 - **Fix with:** lifecycle-concurrency
 - **Effort:** S
 
