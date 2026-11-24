@@ -31,7 +31,15 @@
 
 ## Shape of the final doc
 
-The roadmap is one file, `docs/roadmap.md`, for all current and future work. Campaigns are sections inside it; their items interleave in one **Sequence**. Length follows the work: keep the executable core and its proof, never cut a decision, scenario, or acceptance check to reach a line count, and never pad with repetition, history, or rationale the code or a linked reference already states. Rewrite sections in place; never append dated checkpoints, handoffs, or logs. Git history keeps the past.
+The roadmap is one file, `docs/roadmap.md`, for all current and future work, linked from the repository's `AGENTS.md`. It opens with this header, verbatim:
+
+```markdown
+# Roadmap
+
+This is the single plan for this repository: all current and future work, and the handoff for resuming it. Campaigns are sections below, and their items interleave in **Sequence**. "Resume the roadmap" means continue from **Status**.
+```
+
+A repository with no current or planned work keeps only the header; the sections below appear once there is work. Campaigns are sections inside it; their items interleave in one **Sequence**. Length follows the work: keep the executable core and its proof, never cut a decision, scenario, or acceptance check to reach a line count, and never pad with repetition, history, or rationale the code or a linked reference already states. Rewrite sections in place; never append dated checkpoints, handoffs, or logs. Git history keeps the past.
 
 1. **Status** (a short at-a-glance block, the roadmap's only handoff): the state (`active`, `winding down`, `paused <date>`, or `idle`); the campaign and slice in progress; the last accepted revision and whether the integration branch is green; slices red or parked (with branch, cause, and retry condition); the next slice; and, when paused, the first command. The resume prompt is always "resume the roadmap".
 2. **Charter:** the rules every campaign's executor runs by. A campaign section states only its departures.

@@ -1,6 +1,6 @@
 # Roadmap
 
-All current and future work in this repository. Campaigns are sections below; their ready items interleave in **Sequence**. "Resume the roadmap" or "resume the campaign" means: continue from **Status**, as `orchestrate`'s campaign reference describes. Rewrite **Status** in place; git history is the log.
+This is the single plan for this repository: all current and future work, and the handoff for resuming it. Campaigns are sections below, and their items interleave in **Sequence**. "Resume the roadmap" means continue from **Status**.
 
 ## Status
 

@@ -31,7 +31,7 @@ Planning only: it turns a goal into a draft campaign in `docs/roadmap.md` worth 
    - *Behavior parity:* `reference-parity`. *Storage, wire formats:* `durable-state`.
 5. **Decompose and phase** per preflight's Sequence rules. Build foundations that every lane needs (shared stylesheet, harness, types) first, by the coordinator or one lane, never in parallel. Name each slice's acceptance command and the milestones that run the full suite.
 6. **Execution authority.** State which effects execution needs the owner to authorize and forbid the rest. Proof that needs unavailable hardware or hosts goes on **Needs environment**.
-7. **Write** the campaign into `docs/roadmap.md` in preflight's shape: create the roadmap if absent, add the campaign's section, interleave its items into **Sequence**, remove its **Later** entry, and commit. Never create a separate campaign file.
+7. **Write** the campaign into `docs/roadmap.md` in preflight's shape: create the roadmap with its header if absent and link it from `AGENTS.md`, add the campaign's section, interleave its items into **Sequence**, remove its **Later** entry, and commit. Never create a separate campaign file.
 8. **Preflight it.** Apply `campaign-preflight` to the draft, including the `blast-radius` proof of the foundation. Do not stop at a draft.
 
 **The test:** the draft names a measured baseline and a runnable proof for every deliverable, and preflight can take it to a verdict without redoing the survey.
