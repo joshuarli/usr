@@ -37,12 +37,12 @@ EOF
 fake_sums=$work/SHA256SUMS
 printf '%s  %s\n' "$digest" "$asset" > "$fake_sums"
 
-wheel=$work/laputa_buildlib-0.3.1-py3-none-any.whl
+wheel=$work/laputa_buildlib-0.3.2-py3-none-any.whl
 printf 'fake buildlib wheel' > "$wheel"
 wheel_digest=$(sha256sum "$wheel")
 wheel_digest=${wheel_digest%% *}
 wheel_size=$(wc -c < "$wheel" | tr -d ' ')
-wheel_url="https://wheel.test/laputa_buildlib-0.3.1-py3-none-any.whl"
+wheel_url="https://wheel.test/laputa_buildlib-0.3.2-py3-none-any.whl"
 export BUILDLIB_WHEEL_URL="$wheel_url" BUILDLIB_WHEEL_SHA256="$wheel_digest" BUILDLIB_WHEEL_SIZE="$wheel_size"
 
 mkdir -p "$stub"
@@ -83,7 +83,7 @@ run_bootstrap() {
 home=$(setup install)
 run_bootstrap "$home" "$payload" >/dev/null
 [ -L "$home/.local/bin/python3" ] || fail "python3 launcher was not installed"
-[ -f "$home/.local/share/buildlib/laputa_buildlib-0.3.1-py3-none-any.whl" ] || fail "buildlib wheel was not installed"
+[ -f "$home/.local/share/buildlib/laputa_buildlib-0.3.2-py3-none-any.whl" ] || fail "buildlib wheel was not installed"
 [ "$(cat "$home/.local/state/dl/python3")" = "$digest" ] || fail "state does not record the asset digest"
 "$home/.local/bin/python3" -c 'import sqlite3, ssl' || fail "installed python3 does not run its smoke import"
 run_bootstrap "$home" "$payload" > "$work/second.log"

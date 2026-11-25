@@ -102,9 +102,9 @@ FX_SETTINGS = Path(__file__).with_name("fx-settings.json")
 FFMPEG_COMMANDS = ["ffmpeg", "ffprobe"]
 OPENCODE_SHIM = '#!/bin/sh\nexec "${HOME}/.opencode/bin/opencode" "$@"'
 GIT_COMMANDS = ["git", "git-shell", "git-upload-archive", "git-upload-pack", "git-receive-pack", "git-submodule", "git-submodule--helper", "git-sh-setup", "git-sh-i18n", "git-sh-i18n--envsubst"]
-BUILDLIB_WHEEL_URL = "https://pypi.17166969.xyz/current/wheels/laputa_buildlib-0.3.1-py3-none-any.whl"
-BUILDLIB_WHEEL_SHA256 = "3d1f275b95b0189dd50bd455586235e488fe30222cb2e4243af668e56676d057"
-BUILDLIB_WHEEL_SIZE = 33331
+BUILDLIB_WHEEL_URL = "https://pypi.17166969.xyz/current/wheels/laputa_buildlib-0.3.2-py3-none-any.whl"
+BUILDLIB_WHEEL_SHA256 = "fb42251cc9ba6c9dd74e1d1050e66bde2571de8307e27be40cb66f026ef92024"
+BUILDLIB_WHEEL_SIZE = 33576
 BUILDLIB_LOCK = Path(__file__).with_name("tools.lock.json")
 
 
@@ -185,7 +185,7 @@ class Installer:
         self.python_build_root = self.data_home / "python-build"
         self.buildlib_home = self.data_home / "buildlib"
         self.buildlib_cache = self.buildlib_home / "cache"
-        self.buildlib_wheel = self.buildlib_home / "laputa_buildlib-0.3.1-py3-none-any.whl"
+        self.buildlib_wheel = self.buildlib_home / "laputa_buildlib-0.3.2-py3-none-any.whl"
         self._buildlib_module = None
         self.uv_python_root = self.data_home / "uv-python"
         self.node_build_root = self.data_home / "node-build"
