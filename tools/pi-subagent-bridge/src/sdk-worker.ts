@@ -97,7 +97,7 @@ async function run(job: Job, started: (admission: Admission) => void, dispatchin
   const devin = job.model.providerID === DEVIN_PROVIDER
   if (devin) {
     const preflight = devinPreflight()
-    if (!preflight.available) throw new Error(preflight.issue ?? "Devin SWE-2 medium is unavailable")
+    if (!preflight.available) throw new Error(preflight.issue ?? "Devin SWE-2.1 is unavailable")
   } else ensureOpenCodeApiKey()
   const runtime = await ModelRuntime.create()
   // Extension providers register when the SDK host binds its extensions; it never calls the model itself.

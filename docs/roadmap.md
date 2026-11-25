@@ -152,7 +152,7 @@ Extracted-runtime local proof commands use `node --import RUNTIME/node_modules/t
 - **Phase 5 routes, parked:**
   - **Contributor Spark** (scout/medium, mechanic/high) is served by OpenCode Go. It waits for the same quota reset as Phase 2.
   - **Muse** speaks MSP and also serves ACP (`muse acp`). Its route is therefore not an FX provider configuration. Replacing it would mean either extracting the subscription transport or adding a Muse-native ACP executor, which reuses the ACP supervisor but needs a separate design decision plus an authenticated subscription and live quota.
-  - **Devin SWE-2 Flash** likewise needs its own CLI authentication and a qualified executor.
+  - **Devin SWE-2.1** has CLI authentication and a Free catalog on the Max plan, but its `low`/`medium`/`high` lanes still need a qualified executor.
   - Pi stays the executor for these routes.
 - **Phase 3 research tools, parked:** this is an addition, not Pi parity: scoped Pi workers have no research tools today. It needs `pi-web-access` 0.48.0 in a pinned closure, through a pi-build release, plus separate search-provider credentials. The npm tarball's `gitHead` is `896d75bec55e316726db287a870eb166c4e3f40c`, not the `438e58be…` recorded above, so re-verify the source revision when packaging. The grant shape is already proven (see Phase 3 grant shape).
 - **Phase 6, not started:** matched measurement needs live inference on the intended routes, blocked as in Phase 2. Promotion and retirement are owner decisions. The current verdict stays limited-go: FX over ACP is qualified deterministically for leaf workers and one-generation children on three platforms. It has no live-inference proof and no Spark, Muse or Devin replacement.
@@ -275,7 +275,7 @@ Keep children under the root lease with deliberate write coordination. Current r
 
 **Prerequisite:** accepted lifecycle plus each route's required capabilities. **Owns:** transport tests, platform pins/install and context-pressure qualification.
 
-Qualify Contributor Spark scout/medium and mechanic/high separately from DeepSeek. Muse requires authenticated SDK/`muse serve` subscription transport, parked tool calls, context/prefix handling, fork/continuation and cancellation. Devin SWE-2 Flash medium requires CLI auth/catalog, variant mapping, reasoning replay and tool-result/error semantics. Native CLI/ACP custom protocols and headers do not automatically replace either adapter. Extract necessary transport behavior or qualify a native executor; retain Pi until an equivalent passes or the owner explicitly retires that route.
+Qualify Contributor Spark scout/medium and mechanic/high separately from DeepSeek. Muse requires authenticated SDK/`muse serve` subscription transport, parked tool calls, context/prefix handling, fork/continuation and cancellation. Devin SWE-2.1 requires CLI auth/catalog, three-variant effort mapping, reasoning replay and tool-result/error semantics. Native CLI/ACP custom protocols and headers do not automatically replace either adapter. Extract necessary transport behavior or qualify a native executor; retain Pi until an equivalent passes or the owner explicitly retires that route.
 
 Qualify macOS ARM64, Linux x86-64 musl and Linux ARM64 musl with verified artifacts. Version output/ACP handshake on this audit host does not prove a native Alpine lifecycle. Test long context/compaction, restoration, auth refresh, research restart and descendant cleanup.
 

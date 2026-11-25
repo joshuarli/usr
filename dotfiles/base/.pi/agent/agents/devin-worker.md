@@ -1,10 +1,10 @@
 ---
 name: devin-worker
-description: Scoped implementation and debugging with Devin SWE-2 Flash Medium.
+description: Scoped implementation and debugging with Devin SWE-2.1 High.
 # policy:begin native-profile
 # Generated from tools/pi-subagent-bridge/src/policy.ts; run make generate.
-model: devin/swe-2-flash
-thinking: medium
+model: devin/swe-2.1
+thinking: high
 tools:
   - read
   - bash

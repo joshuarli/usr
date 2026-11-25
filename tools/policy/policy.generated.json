@@ -19,6 +19,12 @@
         "effort": "medium"
       },
       {
+        "executor": "pi",
+        "providerID": "devin",
+        "model": "swe-2.1",
+        "effort": "low"
+      },
+      {
         "executor": "codex",
         "model": "gpt-6-luna",
         "effort": "medium"
@@ -35,6 +41,12 @@
         "providerID": "opencode-go",
         "model": "muse-spark-1.3-contributor",
         "effort": "high"
+      },
+      {
+        "executor": "pi",
+        "providerID": "devin",
+        "model": "swe-2.1",
+        "effort": "medium"
       },
       {
         "executor": "codex",
@@ -57,8 +69,8 @@
       {
         "executor": "pi",
         "providerID": "devin",
-        "model": "swe-2-flash",
-        "effort": "medium"
+        "model": "swe-2.1",
+        "effort": "high"
       },
       {
         "executor": "codex",
@@ -91,13 +103,25 @@
       }
     },
     "devinModels": {
+      "scout": {
+        "providerID": "devin",
+        "id": "swe-2.1",
+        "variant": "low"
+      },
+      "mechanic": {
+        "providerID": "devin",
+        "id": "swe-2.1",
+        "variant": "medium"
+      },
       "worker": {
         "providerID": "devin",
-        "id": "swe-2-flash",
-        "variant": "medium"
+        "id": "swe-2.1",
+        "variant": "high"
       }
     },
     "devinAgentNames": {
+      "scout": "devin-scout",
+      "mechanic": "devin-mechanic",
       "worker": "devin-worker"
     },
     "delegation": {
@@ -121,6 +145,13 @@
       ]
     },
     "devinDelegation": {
+      "scout": [
+        "devin-scout"
+      ],
+      "mechanic": [
+        "scout",
+        "devin-mechanic"
+      ],
       "worker": [
         "scout",
         "mechanic",
@@ -174,7 +205,7 @@
     "modelAllowlist": [
       "opencode-go/deepseek-v4.1-flash",
       "opencode-go/muse-spark-1.3-contributor",
-      "devin/swe-2-flash"
+      "devin/swe-2.1"
     ]
   },
   "opencode": {

@@ -14,7 +14,8 @@ from release_cache import seed  # noqa: E402
 PROFILE = ROOT / "dotfiles/base/.pi/agent"
 MODEL = "opencode-go/muse-spark-1.3-contributor"
 GO = "opencode-go/deepseek-v4.1-flash"
-DEVIN = "devin/swe-2-flash"
+DEVIN = "devin/swe-2.1"
+SCOUT_TOOLS = ["read", "grep", "find", "ls", "subagent", "subagent_supervisor"]
 WRITER_TOOLS = ["read", "bash", "edit", "write", "grep", "find", "ls", "subagent", "subagent_supervisor"]
 
 
@@ -137,11 +138,13 @@ class PiTests(unittest.TestCase):
         self.assertTrue(sub["modelScope"]["strict"])
         self.assertEqual(set(sub["modelScope"]["allow"]), {GO, MODEL, DEVIN})
         expected = {
-            "scout": (MODEL, "medium", ["scout"], ["read", "grep", "find", "ls", "subagent", "subagent_supervisor"]),
+            "scout": (MODEL, "medium", ["scout"], SCOUT_TOOLS),
             "mechanic": (MODEL, "high", ["scout", "mechanic"], WRITER_TOOLS),
             "worker": (GO, "high", ["scout", "mechanic", "worker"], WRITER_TOOLS),
             "expert": (GO, "max", ["scout", "mechanic", "worker", "expert"], WRITER_TOOLS),
-            "devin-worker": (DEVIN, "medium", ["scout", "mechanic", "devin-worker"], WRITER_TOOLS),
+            "devin-scout": (DEVIN, "low", ["devin-scout"], SCOUT_TOOLS),
+            "devin-mechanic": (DEVIN, "medium", ["scout", "devin-mechanic"], WRITER_TOOLS),
+            "devin-worker": (DEVIN, "high", ["scout", "mechanic", "devin-worker"], WRITER_TOOLS),
         }
         for name, (model, effort, children, tools) in expected.items():
             self.assertEqual(sub["agentOverrides"][name], {"model": model, "thinking": effort})

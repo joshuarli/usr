@@ -437,7 +437,7 @@ Next: 151
 
 - **Area:** pi-subagent-bridge · notices
 - **Where:** tools/pi-subagent-bridge/src/inspect.ts:144, 285
-- **Problem:** continuedOn and the inherited Pi notice choose between Muse and OpenCode Go only, but devin/swe-2-flash is a production worker fallback, so a Devin fallback tells the parent the wrong provider. Proven by code trace.
+- **Problem:** continuedOn and the inherited Pi notice choose between Muse and OpenCode Go only, but devin/swe-2.1 is a production fallback for scout, mechanic and worker, so a Devin fallback tells the parent the wrong provider. Proven by code trace.
 - **Recommendation:** Derive provider labels from the policy's provider table. Acceptance: a Devin fallback notice names Devin.
 - **Fix with:** single-source-of-truth
 - **Effort:** S

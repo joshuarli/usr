@@ -3,9 +3,11 @@ import { existsSync, readFileSync, statSync } from "node:fs"
 import { createRequire } from "node:module"
 import { homedir } from "node:os"
 import { dirname, isAbsolute, join } from "node:path"
+import { DEVIN_TIER_MODELS } from "./tier-policy.ts"
 
 const require = createRequire(import.meta.url)
 export const DEVIN_PROVIDER = "devin" as const
+const PINNED_MODEL_UIDS = Object.values(DEVIN_TIER_MODELS).map(pin => `${pin.id.replace(".", "-")}-${pin.variant}`)
 
 /** Resolve only the pi-build-pinned provider, never a workspace package. */
 export function devinExtensionPath(): string {
@@ -46,12 +48,13 @@ export function devinPreflight(
     const family = value.catalog.families.find((family: unknown) => {
       if (!family || typeof family !== "object" || Array.isArray(family)) return false
       const found = family as { slug?: string; variants?: Array<{ model_uid?: string }> }
-      return found.slug === "swe-2-flash" && Array.isArray(found.variants) &&
-        found.variants.some(variant => variant.model_uid === "swe-2-flash-medium")
+      const variants = found.variants
+      return found.slug === "swe-2.1" && Array.isArray(variants) &&
+        PINNED_MODEL_UIDS.every(uid => variants.some(variant => variant.model_uid === uid))
     })
-    if (!family) throw new Error("swe-2-flash-medium absent")
+    if (!family) throw new Error("SWE-2.1 pinned variants absent")
     return { available: true, issue: null }
   } catch {
-    return { available: false, issue: "SWE-2 Flash model catalog absent; run /devin-refresh in an authenticated Pi session" }
+    return { available: false, issue: "SWE-2.1 model catalog absent; run /devin-refresh in an authenticated Pi session" }
   }
 }

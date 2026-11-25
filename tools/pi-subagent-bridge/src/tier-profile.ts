@@ -15,8 +15,10 @@ const TIER_GUARDS = {
 } as const satisfies Record<Tier, URL>
 
 const DEVIN_GUARDS = {
+  scout: new URL("./guards/devin-scout.ts", import.meta.url),
+  mechanic: new URL("./guards/devin-mechanic.ts", import.meta.url),
   worker: new URL("./guards/devin-worker.ts", import.meta.url),
-} as const
+} as const satisfies Record<keyof typeof DEVIN_TIER_MODELS, URL>
 export function tierGuardPath(tier: Tier, model?: { providerID: string }): URL {
   if (model?.providerID === "devin") {
     if (!isDevinTier(tier)) throw new Error("Devin cannot execute this tier")

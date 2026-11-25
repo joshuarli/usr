@@ -132,10 +132,13 @@ test("real YAML profiles are validated as runtime policy; drift fails before spa
     assert.throws(() => assertTierProfile(tier,
       profile(tier, family).replace("timeoutMs: " + PI_RUN_DEADLINE_MS + "\n", ""), family), /Unapproved/)
   }
-  assertTierProfile("worker", profile("worker", "devin"), "devin")
+  for (const tier of Object.keys(DEVIN_TIER_MODELS) as (keyof typeof DEVIN_TIER_MODELS)[]) {
+    assertTierProfile(tier, profile(tier, "devin"), "devin")
+    assert.ok(existsSync(tierGuardPath(tier, { providerID: "devin" })))
+    assert.throws(() => assertTierProfile(tier,
+      profile(tier, "devin").replace("thinking: " + DEVIN_TIER_MODELS[tier].variant, "thinking: xhigh"), "devin"), /Unapproved/)
+  }
   assert.throws(() => assertTierProfile("expert", profile("expert"), "devin"), /Unapproved/)
-  assert.ok(existsSync(tierGuardPath("worker", { providerID: "devin" })))
-  assert.throws(() => tierGuardPath("scout", { providerID: "devin" }), /Devin cannot/)
   assert.throws(() => tierGuardPath("expert", { providerID: "devin" }), /Devin cannot/)
 })
 
@@ -145,7 +148,8 @@ test("profile checks enforce one exact pinned scope and one max depth", () => {
   mkdirSync(agentDir)
   try {
     for (const tier of TIERS) writeFileSync(join(agentDir, tier + ".md"), profile(tier))
-    writeFileSync(join(agentDir, DEVIN_AGENT_NAMES.worker + ".md"), profile("worker", "devin"))
+    for (const tier of Object.keys(DEVIN_TIER_MODELS) as (keyof typeof DEVIN_TIER_MODELS)[])
+      writeFileSync(join(agentDir, DEVIN_AGENT_NAMES[tier] + ".md"), profile(tier, "devin"))
     const settings = profileSettings()
     writeFileSync(join(home, "settings.json"), JSON.stringify(settings))
     mkdirSync(join(home, "extensions", "subagent"), { recursive: true })
@@ -189,20 +193,25 @@ test("installed child guard registers a real monotonic capability ceiling", () =
   assert.equal(resolveCurrentSubagentCapabilityCeiling(sessionId), undefined)
 })
 
-test("Devin is pinned to SWE-2 Flash medium on worker only; escapes fail closed", () => {
-  assert.equal(tierForModel(DEVIN_TIER_MODELS.worker, false), "worker")
-  for (const variant of ["off", "low", "high", "xhigh", "max"]) {
-    assert.throws(() => tierForModel({ ...DEVIN_TIER_MODELS.worker, variant }, false), /Unapproved/)
+test("Devin pins SWE-2.1 thinking by tier; escapes fail closed", () => {
+  for (const tier of Object.keys(DEVIN_TIER_MODELS) as (keyof typeof DEVIN_TIER_MODELS)[]) {
+    const pin = DEVIN_TIER_MODELS[tier]
+    assert.equal(tierForModel(pin, tier === "scout"), tier)
+    assert.throws(() => tierForModel(pin, tier !== "scout"), /Unapproved/)
+    for (const variant of ["off", "minimal", "xhigh", "max"])
+      assert.throws(() => tierForModel({ ...pin, variant }, tier === "scout"), /Unapproved/)
+    assert.equal(nestedCallRefusal(tier, "subagent", {
+      agent: DEVIN_AGENT_NAMES[tier], task: "Implement", options: { agentScope: "user" },
+    }, "devin"), undefined)
   }
-  assert.throws(() => tierForModel(DEVIN_TIER_MODELS.worker, true), /Unapproved/)
-  assert.equal(nestedCallRefusal("worker", "subagent", {
-    agent: "devin-worker", task: "Implement", options: { agentScope: "user" },
-  }, "devin"), undefined)
   assert.ok(nestedCallRefusal("worker", "subagent", {
     agent: "worker", task: "Escalate", options: { agentScope: "user" },
   }, "devin"))
   assert.ok(nestedCallRefusal("worker", "subagent", {
     agent: "expert", task: "Escalate", options: { agentScope: "user" },
+  }, "devin"))
+  assert.ok(nestedCallRefusal("scout", "subagent", {
+    agent: "mechanic", task: "Escalate", options: { agentScope: "user" },
   }, "devin"))
   assert.ok(nestedCallRefusal("expert", "subagent", {
     agent: "devin-worker", task: "Escalate", options: { agentScope: "user" },

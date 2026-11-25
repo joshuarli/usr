@@ -477,7 +477,7 @@ export function makeHybridBridge(api: PiAdapter, command = {
         try { devinAvailable = (await api(devinModel).modelCheck(dir)).available }
         catch (e) { devinIssue = String(e) }
         if (!devinAvailable && !devinIssue)
-          devinIssue = devinPreflight().issue ?? "Devin SWE-2 Flash is not authenticated in the Pi SDK"
+          devinIssue = devinPreflight().issue ?? "Devin SWE-2.1 is not authenticated in the Pi SDK"
       }
       const devinInfo = { available: devinAvailable, issue: devinIssue }
       const goInfo = { available: goAvailable, issue: goIssue }
