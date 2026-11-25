@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -12,6 +13,7 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[2]
 CLI = ROOT / "dotfiles/base/.local/bin/standards"
 STANDARDS = ROOT / "dotfiles/base/.agents/standards"
+FIXTURE_STANDARDS = ("cli-interrupt", "github-actions", "shell")
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import standards  # noqa: E402
 
@@ -49,6 +51,7 @@ def scratch() -> tempfile.TemporaryDirectory[str]:
 class Repo:
     def __init__(self, root: Path):
         self.root = root
+        root.mkdir(exist_ok=True)
         self.git("init", "-q", "-b", "main")
         self.git("config", "user.email", "test@example.invalid")
         self.git("config", "user.name", "Test")
@@ -93,7 +96,11 @@ class PathPatternTests(unittest.TestCase):
 class SelectTests(unittest.TestCase):
     def setUp(self):
         self.tmp = scratch()
-        self.repo = Repo(Path(self.tmp.name))
+        self.standards = Path(self.tmp.name) / "standards"
+        self.standards.mkdir()
+        for name in FIXTURE_STANDARDS:
+            shutil.copy(STANDARDS / f"{name}.md", self.standards)
+        self.repo = Repo(Path(self.tmp.name) / "repo")
         self.repo.write("README.md", "hello\n")
         self.repo.write("tool", "#!/bin/sh\nset -eu\necho one\n")
         self.repo.write("app.py", "def f():\n    return 1\n")
@@ -103,7 +110,10 @@ class SelectTests(unittest.TestCase):
         self.tmp.cleanup()
 
     def select(self, *args: str) -> dict[str, list[dict[str, Any]]]:
-        return selected(run("select", "--json", *args, cwd=self.repo.root))
+        return selected(self.cli("select", "--json", *args))
+
+    def cli(self, *args: str) -> subprocess.CompletedProcess[str]:
+        return run(*args, cwd=self.repo.root, directory=self.standards)
 
     def test_clean_tree_and_prose_edits_select_nothing(self):
         self.assertEqual({}, self.select())
@@ -160,26 +170,26 @@ class SelectTests(unittest.TestCase):
         self.repo.commit()
         self.assertEqual({}, self.select())
         self.assertEqual({"cli-interrupt", "shell"}, set(self.select("--tree")))
-        self.assertEqual(2, run("select", "--tree", "tool", cwd=self.repo.root).returncode)
+        self.assertEqual(2, self.cli("select", "--tree", "tool").returncode)
 
     def test_explicit_files_match_whole_content(self):
         self.assertEqual(["shell"], list(self.select("tool")))
         self.assertEqual({}, self.select("README.md"))
-        missing = run("select", "nope", cwd=self.repo.root)
+        missing = self.cli("select", "nope")
         self.assertEqual(2, missing.returncode)
         self.assertIn("nope: not a file", missing.stderr)
 
     def test_text_output_names_standard_file_and_reason(self):
         self.repo.write("tool", "#!/bin/sh\necho changed\n")
-        result = run("select", cwd=self.repo.root)
+        result = self.cli("select")
         self.assertEqual(0, result.returncode, result.stderr)
         name, path, reason = result.stdout.rstrip("\n").split("\t")
-        self.assertEqual(("shell", str(STANDARDS / "shell.md")), (name, path))
+        self.assertEqual(("shell", str(self.standards / "shell.md")), (name, path))
         self.assertTrue(reason.startswith("tool: trigger 2: shebang "), reason)
 
     def test_explain_shows_each_trigger_verdict(self):
         self.repo.write("notes.md", "SIGINT\n")
-        result = run("explain", "notes.md", cwd=self.repo.root)
+        result = self.cli("explain", "notes.md")
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertIn("  cli-interrupt trigger 2: misses (paths no match, content \\bSIG(INT|TERM)\\b)\n", result.stdout)
         self.assertIn("  shell trigger 1: misses (paths no match)\n", result.stdout)

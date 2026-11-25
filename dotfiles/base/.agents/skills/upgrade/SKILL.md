@@ -12,7 +12,7 @@ Update every dependency and explicit version pin to its newest stable release, t
 
 ## Rules
 
-- **Whole repo, all ecosystems.** Find every manifest and lockfile, plus toolchain, runtime, action, container, and script pins. List pins that stay unchanged and why. A pin a skill marks intentional (Solid 2's release candidate in `refactor-ts`) stays. Never change a pinned Rust nightly unless the user explicitly asks.
+- **Whole repo, all ecosystems.** Find every manifest and lockfile, plus toolchain, runtime, action, container, and script pins. List pins that stay unchanged and why. A pin a skill or standard marks intentional (Solid 2's release candidate in `~/.agents/standards/typescript.md`) stays. Never change a pinned Rust nightly unless the user explicitly asks.
 - **Newest means newest stable.** Use package-manager update commands or published version metadata to select the newest stable release. Do not stop at the range already allowed by a manifest.
 - **Update before investigating.** Do not read release notes, migration guides, issues, or source for a bump before applying it, and do not audit call sites or launch scouts first. Let package managers resolve transitives, then review the lockfile diff as a group.
 - **Investigate upgrade-caused failures only.** When a focused check fails, reproduce it and decide whether an upgrade caused it. Inspect only the changed dependencies that could explain it, and use upstream material to find the cause. Do not research unrelated bumps.

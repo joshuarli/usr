@@ -1,22 +1,29 @@
-# Google Rust guide checklist
++++
+name = "rust"
+summary = "Rust follows the Google Rust Style Guide: clear modules and imports, borrowed inputs and unique ownership, matched error contracts, compatible public APIs, and justified unsafe code, without formatters."
 
-Adapted and condensed from Google's [Rust Style Guide](https://google.github.io/styleguide/rustguide.html), licensed under [CC BY 3.0](https://creativecommons.org/licenses/by/3.0/); see [upstream licensing](https://github.com/google/styleguide/blob/gh-pages/README.md#licensing). Reviewed 2026-10-24 against [this source revision](https://github.com/google/styleguide/blob/c775c0c2f73c110613243520c001577cdbc0034d/rustguide.md). Links identify the original rules. Compatibility and verification safeguards below and in the parent skill are additional refactoring guidance, with Rust/Cargo sources where needed.
+[[trigger]]
+paths = ["*.rs", "Cargo.toml", "clippy.toml", "rust-toolchain.toml"]
 
-## Contents
+[examples]
+match = ["src/main.rs", "crates/core/src/lib.rs", "Cargo.toml"]
+skip = ["Cargo.lock", "README.md", "src/main.c"]
++++
 
-- [Applicability](#applicability)
-- [Modules and imports](#modules-and-imports)
-- [Formatting](#formatting)
-- [Ownership and function boundaries](#ownership-and-function-boundaries)
-- [Errors and control flow](#errors-and-control-flow)
-- [Types and traits](#types-and-traits)
-- [Names and accessors](#names-and-accessors)
-- [Public API contracts](#public-api-contracts)
-- [Documentation and unsafe code](#documentation-and-unsafe-code)
-- [Concurrency, macros, and initialization](#concurrency-macros-and-initialization)
-- [Implementation clarity](#implementation-clarity)
+# Rust
 
-## Applicability
+Adapted and condensed from Google's [Rust Style Guide](https://google.github.io/styleguide/rustguide.html), licensed under [CC BY 3.0](https://creativecommons.org/licenses/by/3.0/); see [upstream licensing](https://github.com/google/styleguide/blob/gh-pages/README.md#licensing). Reviewed 2026-10-24 against [this source revision](https://github.com/google/styleguide/blob/c775c0c2f73c110613243520c001577cdbc0034d/rustguide.md). Links identify the original rules. Compatibility and verification safeguards below and in this standard are additional refactoring guidance, with Rust/Cargo sources where needed.
+
+Refactor code and API design using the [Google Rust Style Guide](https://google.github.io/styleguide/rustguide.html). An audit or lint pass alone does not complete actionable work. If the code already conforms, or every candidate is a justified exception or incompatible change, report the evidence and make no edits.
+
+## Code
+
+### Contracts to preserve
+
+- Distinguish reusable library APIs from application internals. Google's API rules are binding guidance for reusable libraries; application code should favor directness over generalized interfaces.
+- Preserve public paths/signatures, trait and auto-trait contracts, serialization/FFI layout, output/exit status, errors/panics, ordering, side effects, resource/lock lifetime, cancellation, and performance constraints unless their change is authorized. Internal APIs may change with all callers.
+
+### Applicability
 
 Follow [public Rust style and API guidance](https://google.github.io/styleguide/rustguide.html#public-rules) where Google's guide does not override it. Apply [API design in context](https://google.github.io/styleguide/rustguide.html#api-design-context): reusable libraries need broadly useful contracts; application code should prioritize simplicity and immediate needs. Do not infer a mandatory architecture from a preference.
 
@@ -28,19 +35,19 @@ Keep platform rules scoped:
 | Fuchsia | [`fuchsia_sync::Mutex`](https://google.github.io/styleguide/rustguide.html#fuchsia-mutex). |
 | Each platform | Its own [test framework](https://google.github.io/styleguide/rustguide.html#test-framework) and [unstable-feature exceptions](https://google.github.io/styleguide/rustguide.html#unstable-features). Keep an ordinary Cargo project's existing layout, runtime, and test framework. |
 
-## Modules and imports
+### Modules and imports
 
 - Name [leaf modules/files](https://google.github.io/styleguide/rustguide.html#userdefined-item) after their primary user-defined item when they have one. Keep [non-leaf modules](https://google.github.io/styleguide/rustguide.html#non-leaf-modules) mostly declarations and re-exports; a little coordinating implementation is allowed. Inline tests and binding modules do not make an otherwise leaf module non-leaf.
 - Avoid [glob imports](https://google.github.io/styleguide/rustguide.html#glob-imports) and defining new preludes. Exceptions: `super::*` in inline modules, enum variants in enum-focused functions, non-leaf public re-exports, and private merging of C++ namespaces. An established third-party prelude may be accepted deliberately.
 - Import from [one module per `use`](https://google.github.io/styleguide/rustguide.html#use-statement): group sibling items, not nested paths in braces. Prefer [function-local trait imports](https://google.github.io/styleguide/rustguide.html#prefer-local-trait-imports) unless methods are used throughout the file.
 - [Qualify imported free functions](https://google.github.io/styleguide/rustguide.html#toplevel-functions) with their module; exceptions include sufficiently disambiguated names, namespace collisions, and Chromium's small first-party crates. [Import type names directly](https://google.github.io/styleguide/rustguide.html#type-names), allowing qualification/aliases for collisions, large related type groups, macros/generated code, or unwieldy import lists.
 
-## Formatting
+### Formatting
 
-- This workflow overrides Google's [formatting-tool recommendation](https://google.github.io/styleguide/rustguide.html#formatting-other): do not install, configure, or run formatters, including `rustfmt`/`cargo fmt`, check-only runs, or indirect invocation through another command. Do not enable formatting lints as a substitute.
+- This standard overrides Google's [formatting-tool recommendation](https://google.github.io/styleguide/rustguide.html#formatting-other): do not install, configure, or run formatters, including `rustfmt`/`cargo fmt`, check-only runs, or indirect invocation through another command. Do not enable formatting lints as a substitute.
 - Keep readable local layout while making substantive changes. Do not reflow untouched code, enforce column/hexadecimal preferences mechanically, or add/remove [`rustfmt::skip`](https://google.github.io/styleguide/rustguide.html#formatting-optout) merely for this pass. Preserve meaningful manual alignment and generated code.
 
-## Ownership and function boundaries
+### Ownership and function boundaries
 
 - Prefer [unique ownership and borrowing](https://google.github.io/styleguide/rustguide.html#avoid-rc-arc). Keep `Rc`/`Arc` when replacing them makes ownership unreasonably complex. Avoid [needless deep copies](https://google.github.io/styleguide/rustguide.html#prefer-borrows), but retain pragmatic cloning when borrowing becomes too complex. Cloning an `Rc`/`Arc` is not a deep copy.
 - Use [flexible immutable borrows](https://google.github.io/styleguide/rustguide.html#flexible-references): `&T` rather than `&Box<T>`, `&[T]` rather than `&Vec<T>`, `&str` rather than `&String`, and `Option<&T>` rather than `&Option<T>`. Keep specialized representations such as ropes when needed.
@@ -48,14 +55,14 @@ Keep platform rules scoped:
 - Reusable APIs that only iterate should accept [iterators or `IntoIterator`](https://google.github.io/styleguide/rustguide.html#accept-iterators). Application slices are fine. Consider [`impl Into<T>`](https://google.github.io/styleguide/rustguide.html#accepting-into) only when library call-site ergonomics justify generic complexity and code size; application APIs should almost never need it.
 - Replace an [ambiguous boolean parameter](https://google.github.io/styleguide/rustguide.html#enum-vs-bool) with an enum. Keep self-explanatory booleans; the guide also permits explanatory argument comments.
 
-## Errors and control flow
+### Errors and control flow
 
 - Match the [error contract](https://google.github.io/styleguide/rustguide.html#reporting-errors): `Option` for anticipated absence/simple failure needing no detail, `Result` for recoverable failures needing context, and panic for bugs or violated invariants. Honor stricter panic policies. Tests and developer-facing binaries have exceptions.
 - Replace [check-then-unwrap](https://google.github.io/styleguide/rustguide.html#dont-check-then-unwrap) with matching. When an invariant panic remains necessary, prefer [`expect`](https://google.github.io/styleguide/rustguide.html#expect-over-unwrap) with the reason. This does not mean converting recoverable failures into panics.
 - In matches on [non-exhaustive enums](https://google.github.io/styleguide/rustguide.html#non-exhaustive-enum-matching), account explicitly for known variants, including ignored ones alongside a wildcard for future variants. Use `if let`/`let else` when interested in only a few variants; a clearer `match` is an allowed exception.
 - Add useful [assertion context](https://google.github.io/styleguide/rustguide.html#assertion-context), especially for user-visible failures, relevant values, and distinguishing caller misuse from implementation bugs. Do not merely repeat the assertion condition.
 
-## Types and traits
+### Types and traits
 
 - Use [newtypes](https://google.github.io/styleguide/rustguide.html#newtypes-vs-type-aliases) for meaningful semantic distinctions, a dedicated API, representation flexibility, or prevention of accidental interchange. Prefer [named fields](https://google.github.io/styleguide/rustguide.html#prefer-named-fields) to ambiguous tuples; newtype tuple structs and clear local tuples are fine.
 - Anticipate needs in low-level libraries; add application [trait implementations](https://google.github.io/styleguide/rustguide.html#traits-yagni) as needed. Use [standard traits](https://google.github.io/styleguide/rustguide.html#known-traits) when behavior matches their contracts; a companion inherent method may help discovery.
@@ -66,7 +73,7 @@ Keep platform rules scoped:
 - For comparisons, prefer `PartialEq`/`PartialOrd` unless stronger `Eq`/`Ord` contracts hold. Anticipated map keys need `Hash` and `Eq`; add `Ord` when meaningful. Keep equality, hashing, and ordering laws consistent.
 - Give important [`From` construction paths](https://google.github.io/styleguide/rustguide.html#from-impls) discoverable inherent constructors. Public-field [options bags](https://google.github.io/styleguide/rustguide.html#options-should-implement-default) should implement `Default`.
 
-## Names and accessors
+### Names and accessors
 
 - Follow [conversion naming](https://google.github.io/styleguide/rustguide.html#naming-methods) and receiver conventions for `as_`, `to_`, and `into_`. Use [`new`/`new_with_foo`](https://google.github.io/styleguide/rustguide.html#naming-initialization-functions), `try_new` for fallible construction, and `from_foo` with the appropriate `From` implementation for value conversions.
 - Give [type lifetimes](https://google.github.io/styleguide/rustguide.html#lifetimes) descriptive names. Anonymous lifetimes, broadly generic abstractions, and one or two local input/output or higher-ranked lifetimes may stay short.
@@ -74,7 +81,7 @@ Keep platform rules scoped:
 - Follow [accessor names](https://google.github.io/styleguide/rustguide.html#getters-and-setters): `foo`, `foo_mut`, `take_foo`, `set_foo`, and `replace_foo` according to borrow/move/replace semantics.
 - Consider [closure accessors](https://google.github.io/styleguide/rustguide.html#closure-accessors), `with_foo`/`with_mut_foo`, when they hide an interior-mutability guard or allow required post-mutation validation. Preserve lock/borrow scope and forward the closure's return value when useful.
 
-## Public API contracts
+### Public API contracts
 
 - Provide [`is_empty` with `len`](https://google.github.io/styleguide/rustguide.html#expected-api-sets). Treat foreign [`doc(hidden)` items](https://google.github.io/styleguide/rustguide.html#doc-hidden) as private.
 - Make a public function [`const`](https://google.github.io/styleguide/rustguide.html#const-functions) only with a durable compatibility commitment or a willingness to migrate clients. Use [operator overloads](https://google.github.io/styleguide/rustguide.html#operator-overloads) for mathematical/logical semantics.
@@ -83,7 +90,7 @@ Keep platform rules scoped:
 - Check [Cargo's compatibility rules](https://doc.rust-lang.org/cargo/reference/semver.html) before public additions: a new inherent method can shadow a downstream trait method, and blanket trait implementations can collide with consumer implementations. Completing an API set is not automatically compatible. Check representative consumer calls, not only the defining crate.
 - Preserve observable auto traits (`Send`, `Sync`, `Unpin`), dyn compatibility, generic bounds/variance, captured lifetimes, and required layout/ABI. A private representation or opaque-return refactor can change these without changing the visible function spelling. Use existing consumer/API checks where relevant; a same-crate build is insufficient evidence for an affected published contract.
 
-## Documentation and unsafe code
+### Documentation and unsafe code
 
 - Write useful [public API documentation](https://google.github.io/styleguide/rustguide.html#writing-doc), covering malformed-input panics and unsafe invariants, with enough examples to teach use. Use `///` for items, `//!` for modules/crates, Markdown, capitalization, and punctuation. Keep implementation-only remarks out of rustdoc.
 - Omit redundant narration, language tutorials, and self-evident variant descriptions. Prefer directly readable doc comments to generated documentation; honor stricter local comment rules.
@@ -91,7 +98,7 @@ Keep platform rules scoped:
 - Explain the affected unsafe invariant with a `SAFETY:` justification at the scope it covers; one coherent justification may cover related operations without repetitive narration. Establish pointer validity, bounds, initialization, alignment, aliasing, lifetime, pinning, and unwind/FFI obligations where affected. A performance justification requires measurements. Never invent a safety argument to finish a style pass.
 - Test the affected invariants with existing targeted [Miri](https://github.com/rust-lang/miri), sanitizer, or concurrency-model checks when relevant and available. These can expose bugs, not prove all executions sound. Ordinary tests or comments cannot replace the invariant argument. Leave a risky transformation unapplied when its obligations cannot be established; report any unavailable required evidence without changing toolchain pins.
 
-## Concurrency, macros, and initialization
+### Concurrency, macros, and initialization
 
 - Do not extract the protected contents of a [poisoned mutex](https://google.github.io/styleguide/rustguide.html#poison). Existing recovery is a behavioral issue to understand before changing.
 - Avoid [`panic::catch_unwind`](https://google.github.io/styleguide/rustguide.html#catch-unwind) in first-party code. Its narrow exception is defense in depth in code already avoiding panics, with no correctness property relying on recovery, and where `panic=unwind` is possible. Do not remove an existing boundary without checking its contract.
@@ -101,9 +108,49 @@ Keep platform rules scoped:
 - Preserve async cancellation and ownership: dropping a future, timing out a wait, and abandoning a spawned task need not stop the same work. Check joining/abort behavior, cleanup, and state or guards retained across `.await`. Do not change synchronization primitives or atomic orderings without an explicit argument for the same coordination guarantees.
 - Inspect the actual edition's [temporary and drop scopes](https://doc.rust-lang.org/reference/destructors.html) when simplifying `match`, `if let`, guards, or tail expressions. An explicit scope/drop boundary can protect a lock or resource lifetime; shorter syntax is not evidence of equivalence.
 
-## Implementation clarity
+### Implementation clarity
 
 - Add enough [type annotations](https://google.github.io/styleguide/rustguide.html#type-inference) to explain generic conversions and complex iterator results. Prefer annotating bindings to unnecessary turbofish syntax; use inference where clear.
 - Prefer direct loops over [long/stateful combinator chains](https://google.github.io/styleguide/rustguide.html#combinator-chains) and usually over `for_each`. Bind a combinator chain to a meaningful name before using it in a `for` header. Keep short, expressive combinators such as `any`.
 - Prefer [`format!`/`write!`](https://google.github.io/styleguide/rustguide.html#prefer-format-or-write) for combining more than two strings or substituting into a literal template. Do not interpret this as a reason to replace every efficient buffer append.
 - Preserve arithmetic and conversion policy, including checked, wrapping, saturating, truncating, and panic behavior. Do not introduce `unsafe`, unchecked indexing, lossy casts, `unwrap`, or silent defaults to satisfy a type/lint/performance preference. Strengthened validation or a new error path needs an established, authorized contract.
+
+### Refactor without changing the product
+
+- Do not apply Chromium's crate layout, import macro, async/thread restrictions, or Google's platform-specific test frameworks to an ordinary Cargo project. Apply a platform rule only in that platform's codebase.
+- Check public additions as well as removals: inherent methods and trait implementations can redirect downstream resolution. Preserve bounds, auto traits, dyn compatibility, and lifetime capture; do not blindly add `#[non_exhaustive]`, iterator returns, or derives. Check representative consumers and report incompatible candidates precisely.
+- Trace evaluation and drop order when changing iterators, borrows, accessors, or matches. For async code preserve cancellation, ownership/joining of tasks, and state or guards held across `.await`; spawning work is not equivalent to awaiting it.
+- Do not mechanically remove poison handling, unwind boundaries, pre-main initialization, required unsafe, or unstable features. Trace their contract first. Prefer a safe equivalent; report necessary departures without adding silent fallbacks or disguising them with lint suppressions.
+- Preserve the selected toolchain and MSRV. Do not install nightly, change dependencies, or rewrite CI to follow a style preference. Do not install, configure, or run formatters, including `rustfmt`, `cargo fmt`, check-only runs, editor actions, hooks, or aggregate commands that invoke them; run the permitted constituent checks instead. Preserve local layout, and do not stand in for a formatter with import-sorting lints or manual reflow.
+- Do not weaken types, safety invariants, or check coverage to get green results. Allow a narrow lint suppression only for a demonstrated false positive.
+
+
+
+Complete applicable changes throughout scope. Do not add traits, newtypes, crates, generics, dependencies, or compatibility wrappers merely for the checklist. Keep useful application slices/vectors, justified shared ownership, short iterator chains, and established third-party preludes.
+
+### Verify
+
+Use existing build wrappers and the affected Cargo packages, targets, and supported feature combinations for checking, tests, and Clippy; check public docs and examples when changed. Verify the intended files and features were actually checked. Do not assume `--all-features` is valid.
+
+Favor correctness and substantive performance lints. Do not blanket-enable pedantic, nursery, or restriction groups, force verbosity, or run blanket autofixes. Keep useful existing checks. For unsafe or synchronization edits, establish the pointer, aliasing, lifetime, pinning, and ordering invariants actually affected. Use existing Miri, model-checking, and sanitizer gates where available; neither a `SAFETY:` comment nor passing ordinary tests proves soundness.
+
+Exercise affected behavior and callers. Use existing representative measurements for performance claims.
+
+## Adoption
+
+Apply these only when bringing a whole repository up to this standard with `/standardize`, not at the completion gate.
+
+### Passes
+
+Work in coherent batches, checking affected callers after each:
+
+1. Clarify module boundaries, imports, names, and control flow. Replace check-then-unwrap patterns, opaque inference, and complicated stateful iterator chains where simpler Rust expresses the same operation.
+2. Simplify ownership and borrowed inputs where lifetimes remain clear. Remove unnecessary allocation or deep copies without changing evaluation timing, ownership, or resource release.
+3. Improve types, error contracts, traits, constructors, accessors, and public API documentation where compatible. Complete related API sets and use derives only when semantics and generic bounds remain equivalent.
+4. Review unsafe code, concurrency, macro/code generation choices, initialization, and API evolution. Make only changes whose safety and behavior can be established.
+
+### Inspect
+
+Read applicable instructions, the working diff, manifests, toolchain/MSRV, feature and target configuration, build scripts, relevant callers, tests, and existing verification commands. Preserve unrelated work.
+
+**Report:** rule groups changed with representative symbols; deliberate exceptions and policy conflicts.

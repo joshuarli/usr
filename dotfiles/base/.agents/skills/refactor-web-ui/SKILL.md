@@ -16,7 +16,7 @@ No v0, paid design API, or image generation: a coding agent, a real browser, and
 
 - Read the repo's instructions, spec, frontend, styles, design system, fixtures, and browser tests first; the code and observed UI are the baseline.
 - Redesign grants no permission to change execution contracts, accounts, infrastructure, or production data.
-- This skill owns composition and visual refinement. Use refactor-dashboard-ui for dashboard signal, ranking, and history; refactor-css only when stylesheet ownership work is explicitly requested; jank-audit for audit-only requests. Do not import their unrelated constraints.
+- This skill owns composition and visual refinement. Use refactor-dashboard-ui for dashboard signal, ranking, and history; `/standardize css` only when stylesheet ownership work is explicitly requested; jank-audit for audit-only requests. Do not import their unrelated constraints.
 - Prefer `@laputa-systems/ui-dashboard` in products that use it; read the installed exports, styles, and peers first. Keep one source of tokens and themes.
 - Add a shared-library primitive only for two plausible consumers, a stable contract, and isolated tests. No second design system, heavy dependency, or opportunistic rewrite.
 - Preserve working transports, routing, state, keyboard behavior, and security semantics. A structural rewrite needs a parity gate before visual polish.
