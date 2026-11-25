@@ -28,7 +28,7 @@ Planning only: it turns a goal into a draft campaign in `docs/roadmap.md` worth 
 4. **Pick the proof for the kind of target:**
    - *Speed, size:* `make-it-fast` and `benchmark-checklist`; a baseline, a noisy-host rule (counts and CPU, medians of interleaved runs), a target.
    - *Looks, layout:* approved images as the spec; browser screenshots diffed against them with `odiff` and a threshold per surface, plus a structural check that no text or datum was lost.
-   - *Behavior parity:* `reference-parity`. *Storage, wire formats:* `durable-state`.
+   - *Behavior parity:* `reference-parity`. *Storage, wire formats:* the `durable-state` standard.
 5. **Decompose and phase** per preflight's Sequence rules. Build foundations that every lane needs (shared stylesheet, harness, types) first, by the coordinator or one lane, never in parallel. Name each slice's acceptance command and the milestones that run the full suite.
 6. **Execution authority.** State which effects execution needs the owner to authorize and forbid the rest. Proof that needs unavailable hardware or hosts goes on **Needs environment**.
 7. **Write** the campaign into `docs/roadmap.md` in preflight's shape: create the roadmap with its header if absent and link it from `AGENTS.md`, add the campaign's section, interleave its items into **Sequence**, remove its **Later** entry, and commit. Never create a separate campaign file.

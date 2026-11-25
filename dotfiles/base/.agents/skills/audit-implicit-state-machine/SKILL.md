@@ -56,7 +56,7 @@ Group findings by root cause, not by file. Give each finding:
 - its domain model source;
 - the witness program and the declaration that admits it;
 - the evidence class, with the trigger sequence or the guard sites;
-- the proposed type, the checks it lets the code delete, and the skill that applies it: `make-invalid-states-unrepresentable` for types, `lifecycle-concurrency` for tasks, timers, and cancellation, `durable-state` for persisted state.
+- the proposed type, the checks it lets the code delete, and the skill or standard that applies it: the `make-invalid-states-unrepresentable` skill for types, the `lifecycle-concurrency` standard for tasks, timers, and cancellation, the `durable-state` standard for persisted state.
 
 The witness becomes the fix's regression test: an expected-error check that fails if the type is ever loosened again. Rank with the priority definitions in `todo`. A guard tax alone is P3 at most. File a ticket for every finding that survives, following `todo`, without waiting to be asked.
 

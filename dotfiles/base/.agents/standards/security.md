@@ -1,11 +1,23 @@
----
-name: security
-description: "Apply when code handles untrusted input that reaches an interpreter, secrets or credentials, authentication or authorization, cryptography, or a network trust decision. Skip paths and FFI (use os-boundaries), local-only tools with no untrusted input, and internal calls between trusted parts."
----
++++
+name = "security"
+summary = "Security work fixes what a realistic attacker can reach: untrusted input never becomes code, secrets stay out of repos, logs, argv, and errors, authorization is server-side and deny-by-default, crypto is vetted, and verification stays on."
+
+[[trigger]]
+paths = ["*", "!*.md", "!*.txt", "!*.rst"]
+content = ['\b(eval|exec)\s*\(', 'shell\s*=\s*True', '\bos\.system\b', '\bpickle\.loads?\b', '\byaml\.load\(', '(?i)\b(password|passwd|secret|api[_-]?key|access[_-]?token|bearer|credential)s?\b', '(?i)\b(hmac|bcrypt|scrypt|argon2|jwt|oauth|csrf)\b', '\b(verify\s*=\s*False|InsecureSkipVerify|danger_accept_invalid_certs|NODE_TLS_REJECT_UNAUTHORIZED)\b', 'rejectUnauthorized\s*:\s*false', '(?i)\bexecute\(\s*f["\x27]']
+
+[examples]
+match = [{ path = "app/auth.py", text = "token = request.headers[\"Authorization\"]  # bearer\n" }, { path = "tools/fetch.py", text = "requests.get(url, verify=False)\n" }, { path = "tools/x.py", text = "subprocess.run(cmd, shell=True)\n" }]
+skip = [{ path = "src/math.py", text = "return a + b\n" }, { path = "docs/security.md", text = "password\n" }]
++++
 
 # Security
 
 Fix what a realistic attacker can reach, in proportion to what they would gain. Hardening nobody can exploit is cost, not safety.
+
+Paths, symlinks, and FFI belong to the `os-boundaries` standard. A local-only tool with no untrusted input, and internal calls between trusted parts, need no security finding.
+
+## Code
 
 - **Name the attacker and the asset first,** in one line: who controls the input or reaches the port, and what they would gain. A personal tool on the owner's machine, with no untrusted input and no shared secret, has no finding. Say so and stop.
 - **Match the deployment.** A local CLI, a LAN service, an internet-facing service, and a multi-tenant system warrant different defenses. Do not borrow the strictest.

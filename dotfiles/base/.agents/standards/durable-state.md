@@ -1,11 +1,24 @@
----
-name: durable-state
-description: "Apply when changing schemas, migrations, persisted or wire formats, transactions, concurrent writes to shared durable state, or retried and leased background jobs. Skip in-memory-only state."
----
++++
+name = "durable-state"
+summary = "Durable state has explicit contracts: transactions follow invariants, the datastore enforces durable truth, formats are versioned compatibility commitments, each fact is stored once, and jobs are durable state machines with leases and idempotency."
+
+[[trigger]]
+paths = ["migrations/", "migration/", "*.sql", "*.proto", "*.avsc", "schema.*", "!*.md"]
+
+[[trigger]]
+paths = ["*", "!*.md", "!*.txt", "!*.rst"]
+content = ['(?i)\b(CREATE|ALTER|DROP)\s+(TABLE|INDEX|VIEW)\b', '(?i)\b(transaction|savepoint|begin\s+immediate)\b', '\b(Serialize|Deserialize)\b', '\b(sqlite3|rusqlite|sqlx|diesel|psycopg|sqlalchemy|prisma|drizzle)\b', '\b(lease|leased_at|idempoten\w*)\b', '\bschema_version\b']
+
+[examples]
+match = ["db/migrations/0003_add_jobs.sql", "proto/api.proto", { path = "src/store.rs", text = "#[derive(Serialize, Deserialize)]\n" }, { path = "app/db.py", text = "import sqlite3\n" }]
+skip = [{ path = "src/math.rs", text = "fn add() {}\n" }, { path = "docs/schema.md", text = "CREATE TABLE jobs\n" }]
++++
 
 # Durable State
 
 Durable state outlives the code that wrote it, so its contracts must be explicit.
+
+## Code
 
 - **Transactions follow invariants.** One transaction covers changes that must succeed or fail together. Domain code decides; one persistence boundary executes.
 - **The datastore guards durable truth.** Use NOT NULL, UNIQUE, CHECK, and foreign keys for facts every write path must respect. Concurrent writers get an atomic update, a version check, or a lock, never a read assumed to stay current. Check existing data before adding a constraint.

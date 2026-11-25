@@ -1,6 +1,6 @@
 ---
 name: rust-cli-lexopt
-description: Rewrite a Rust CLI to use lexopt only, driven by one declarative command schema that generates help and version output, with parser and metadata tests. Builds on design-cli.
+description: Rewrite a Rust CLI to use lexopt only, driven by one declarative command schema that generates help and version output, with parser and metadata tests. Builds on the design-cli standard.
 disable-model-invocation: true
 metadata:
   opencode/autoinvoke: "false"
@@ -8,7 +8,7 @@ metadata:
 
 # Declarative, Lexopt-Only Rust CLI
 
-Read `design-cli` first and follow it: it owns surface preservation, the single schema, help, examples, bare invocation, version, the owned-tool footer, errors, and naming. This skill adds the Rust structure and the lexopt boundary. Apply only when migrating an existing Rust CLI to this architecture; otherwise report the evidence and change nothing. No business-logic changes, unrelated refactors, or unrelated dependencies.
+Read the `design-cli` standard (`~/.agents/standards/design-cli.md`) first and follow it: it owns surface preservation, the single schema, help, examples, bare invocation, version, the owned-tool footer, errors, and naming. This skill adds the Rust structure and the lexopt boundary. Apply only when migrating an existing Rust CLI to this architecture; otherwise report the evidence and change nothing. No business-logic changes, unrelated refactors, or unrelated dependencies.
 
 ## Inspect first
 

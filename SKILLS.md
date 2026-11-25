@@ -110,4 +110,4 @@ Repo upkeep and getting work merged.
 
 ## Not listed
 
-Skills for a language, stack, or engineering method are not in this index. Examples are `rust-hash`, `design-cli`, `rust-cli-lexopt`, `durable-state`, `error-model`, `root-cause`, and `make-it-fast`. Add a skill here only if it changes how the agent works rather than what it works on.
+Skills for a language, stack, or engineering method are not in this index. Examples are `rust-hash`, `rust-cli-lexopt`, `root-cause`, and `make-it-fast`. Rules for how code must look are standards in `~/.agents/standards/`, not skills. Add a skill here only if it changes how the agent works rather than what it works on.

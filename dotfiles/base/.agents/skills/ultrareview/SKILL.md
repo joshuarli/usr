@@ -30,7 +30,9 @@ One repository in, two deliverables out: docs that match the code, and tickets i
 
 ## Lenses
 
-| Aspect | Skill | Ask at repo scale |
+A name without a skill directory is a standard: read `~/.agents/standards/<name>.md`.
+
+| Aspect | Skill or standard | Ask at repo scale |
 | --- | --- | --- |
 | Boundaries and public API | `api-surface-and-module-boundaries` | Is the surface wider than the contract? Do dependencies run one way? |
 | Domain model | `make-invalid-states-unrepresentable`, `typing-audit` | Do the core types admit states the domain forbids, and do declared types match runtime behavior? |

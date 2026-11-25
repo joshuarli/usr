@@ -1,11 +1,21 @@
----
-name: error-model
-description: "Apply when introducing or changing an error type, how errors propagate or are presented, retry or cancellation handling, or exit-code and status mapping. Skip incidental error handling in unrelated code."
----
++++
+name = "error-model"
+summary = "Errors are part of the contract: classified by what callers distinguish, carrying structured causes and retryability, converted to text and exit codes at one boundary, with cancellation kept distinct from failure."
+
+[[trigger]]
+paths = ["*", "!*.md", "!*.txt", "!*.rst"]
+content = ['\bclass\s+\w*(Error|Exception)\b', '\benum\s+\w*Error\b', '\bimpl\b.*\b(Error|Display)\s+for\b', '\bthiserror\b', '\b(sys\.exit|process\.exit(Code)?|std::process::exit|os\.Exit)\b', '\bexit\s+[0-9]+\b', '\b(retry|retries|backoff)\b', '\berror\s*\{', '\bthrows\(']
+
+[examples]
+match = [{ path = "src/error.rs", text = "#[derive(Debug, thiserror::Error)]\npub enum ParseError {}\n" }, { path = "tools/x.py", text = "class ConfigError(Exception):\n" }, { path = "bin/run", text = "exit 3\n" }]
+skip = [{ path = "src/x.py", text = "return value\n" }, { path = "docs/errors.md", text = "class ConfigError(Exception):\n" }]
++++
 
 # Error Model
 
 An error is part of the program's contract, not a string on the unhappy path.
+
+## Code
 
 - **Classify only the failures that matter here** (invalid input, invalid configuration, missing resource, permission, dependency failure, transient, timeout, cancellation, conflict, corrupt state, invariant violation). A category no caller distinguishes does not earn a variant.
 - **User and environment failures return errors; they never panic.** A violated internal invariant stays distinguishable (assert or panic); strengthen the type first (`make-invalid-states-unrepresentable`), and assert only what the type cannot express. Do not disguise it as a recoverable error, and do not turn a bug into a vague runtime error.

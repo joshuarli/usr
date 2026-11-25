@@ -1,11 +1,21 @@
----
-name: os-boundaries
-description: "Apply when code handles untrusted or user-supplied paths, symlinks, temp files or atomic writes, directory traversal, per-OS signal handler mechanics, platform-specific code, syscalls, or unsafe and FFI. Skip incidental path joins."
----
++++
+name = "os-boundaries"
+summary = "Code treats the filesystem and OS as concurrent external systems: paths stay paths, symlink policy and atomic replacement are explicit, supported targets are named, unsafe holds only the unsafe operation, and signal handlers stay async-signal-safe."
+
+[[trigger]]
+paths = ["*", "!*.md", "!*.txt", "!*.rst"]
+content = ['\b(symlink|readlink|realpath|canonicalize|lstat|O_NOFOLLOW|openat|fsync|mkstemp|tempfile|NamedTemporaryFile|TemporaryDirectory|walkdir|os\.walk|read_dir)\b', '\b(os\.replace|os\.rename|fs::rename|renameat)\b', '\b(sigaction|libc::|ctypes|@cImport|syscall)\b', '\bextern\s+"C', '\bunsafe\b', '#\[cfg\(\s*(target_os|unix|windows)', '\b(sys\.platform|platform\.system|process\.platform|builtin\.os)\b']
+
+[examples]
+match = [{ path = "src/fsutil.rs", text = "std::fs::rename(&tmp, &dest)?;\n" }, { path = "tools/w.py", text = "fd, path = tempfile.mkstemp(dir=parent)\n" }, { path = "src/os.rs", text = "#[cfg(target_os = \"macos\")]\n" }]
+skip = [{ path = "src/x.py", text = "path = base / name\n" }, { path = "docs/fs.md", text = "fsync\n" }]
++++
 
 # OS Boundaries
 
 The filesystem is a concurrent, stateful external system, and operating systems are not interchangeable.
+
+## Code
 
 - **Paths are not strings.** Use `Path` and `OsStr`. Convert to text only at presentation or protocol edges. Never lossy-convert a path or an argument.
 - **Pick a symlink policy per operation:** follow, act on the link, reject, or preserve. Convenience APIs choose silently.

@@ -47,7 +47,7 @@ For every structural lens, ask what it buys, who needs it now, and what simpler 
 | Comments | `comment-cleanup` | Which comments excuse code that should be fixed or removed? |
 | Docs | `technical-writing` | Which docs repeat code or each other, describe removed machinery, or track completed work? |
 
-Skip `error-model`, `lifecycle-concurrency`, `durable-state`, `os-boundaries`, and `make-it-fast`; they address changes this review must not add. Read them only to understand the benefit of existing mechanisms.
+Skip the `error-model`, `lifecycle-concurrency`, `durable-state`, and `os-boundaries` standards (`~/.agents/standards/`) and the `make-it-fast` skill; they address changes this review must not add. Read them only to understand the benefit of existing mechanisms.
 
 ## Findings
 
