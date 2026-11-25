@@ -40,7 +40,7 @@ class SkipInstall(Exception):
         self.reason = reason
 
 
-def default_tools(os_name, arch, profile, server_tools=None):
+def default_tools(os_name, arch, profile, server_tools=None, *, musl_loader=None, rustup=False):
     return ["nodejs", "cmd", "parallel-a", "parallel-b"]
 
 
