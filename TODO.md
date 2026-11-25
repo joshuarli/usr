@@ -1,5 +1,5 @@
 Prefix: USR
-Next: 151
+Next: 153
 
 ### USR-83 · P2 · running sessions on two hosts cannot reach each other over intercom
 
@@ -116,6 +116,15 @@ Next: 151
 - **Problem:** A Devin worker (session usrw_4dc92e04…, 2026-11-25) raised a `need_decision` supervisor ask. `worker_status` kept reporting state running with attention null and no pending-ask field, and `worker_steer` failed with 'blocked on a pending supervisor ask… Reply explicitly: subagent_supervisor(...)', a Pi-internal tool that bridge parents (Claude Code, Codex) cannot call. The parent can only find the question by grepping the Pi session JSONL under .work/worker-bridge/pi-sessions/ and must cancel the worker to proceed.
 - **Recommendation:** Report pending asks in worker_status (attention needs_attention, the ask id, reason and body) and add a parent-only `worker_reply` MCP tool and CLI command that forwards to the supervisor reply RPC, with a test that a blocked fixture run resumes after the reply.
 - **Fix with:** none
+- **Effort:** M
+
+### USR-151 · P2 · worker_cancel leaves a Pi-backed run alive
+
+- **Area:** pi-subagent-bridge
+- **Where:** tools/pi-subagent-bridge/src/hybrid.ts runCancel; Pi SDK runner process
+- **Problem:** worker_cancel on a Pi/Devin session returned interrupted true, but the pi-runtime runner (cwd the lane worktree) kept editing files for 20 minutes until killed by PID; worker_status meanwhile reported changed_paths [] while the worktree had edits
+- **Recommendation:** Make cancel signal and verify the Pi runner process tree, report not-terminated when it survives, and refresh changed_paths from git on every status
+- **Fix with:** A test that cancels a Pi fixture whose runner ignores the first interrupt and asserts status reports it alive and its edits
 - **Effort:** M
 
 ### USR-75 · P3 · clang plus mold host links intermittently segfault and leave truncated artifacts
@@ -379,6 +388,15 @@ Next: 151
 - **Fix with:** none
 - **Effort:** S
 
+### USR-152 · P3 · Command Code worker route stalls admission on exhausted credits
+
+- **Area:** pi-subagent-bridge
+- **Where:** tools/pi-subagent-bridge/src/hybrid.ts admission and ExhaustionStore
+- **Problem:** With Command Code out of credits every worker admission first starts Command Code, fails with Insufficient credits, then falls back; the exhaustion is not remembered across admissions, so each lane pays the failed start
+- **Recommendation:** Classify Insufficient credits as route exhaustion and record it in ExhaustionStore so later admissions skip Command Code until it recovers
+- **Fix with:** A hybrid test where the first admission fails on Insufficient credits and the second skips Command Code with the recorded reason
+- **Effort:** S
+
 ### USR-73 · P4 · The refactor-web-ui skill has only been applied to agentctl
 
 - **Area:** Skills
@@ -522,3 +540,4 @@ Next: 151
 - **Recommendation:** Exercise the supported setup and preference changes on a disposable macOS host and verify their resulting state and recovery.
 - **Fix with:** none
 - **Effort:** M
+
