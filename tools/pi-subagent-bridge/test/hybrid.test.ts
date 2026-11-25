@@ -378,6 +378,36 @@ test("known-exhausted Command Code and OpenCode Go are skipped at the next admis
   } finally { f.close() }
 })
 
+test("a credit failure on one Command Code model skips every Command Code model at the next admission", async () => {
+  const f = fixture()
+  const second = join(f.root, ".work", "wt", "b")
+  git(f.root, "worktree", "add", "-qb", "lane-b", second)
+  try {
+    const m = fake(f.cwd), bridge = makeHybridBridge(piAdapter(m.api), m.command, noCodex)
+    const first = await bridge.start(f.cwd, "edit", "worker", f.scope, "Do scoped work")
+    assert.equal(first.backend, "command-code")
+
+    m.failCommand("Error: Insufficient credits for Command Code.\nBuy extra usage (pay-as-you-go at API cost, zero markup) or upgrade: https://commandcode.ai/billing")
+    const fallen = await bridge.status(f.cwd, first.session_id)
+    assert.equal(fallen.backend, "pi")
+
+    // The credit failure is recorded once, account-wide, with its reason: the per-model key is never written.
+    const stored: unknown = JSON.parse(readFileSync(join(stateDir(f.cwd), "exhaustion.json"), "utf8")) as unknown
+    const routes = (stored as { routes: Record<string, { reason: string; until: number }> }).routes
+    assert.match(routes["command-code:*"]?.reason ?? "", /Insufficient credits/)
+    assert.ok(routes["command-code:*"].until > Date.now() + 23 * 3_600_000)
+    assert.equal(routes["command-code:deepseek/deepseek-v4.1-flash"], undefined)
+
+    // A mechanic admission pins a different Command Code model (meta/muse-ember) and must still skip it.
+    const next = await bridge.start(second, "next", "mechanic", f.scope, "Do scoped work")
+    assert.equal(next.backend, "pi")
+    assert.match(next.fallback_notice ?? "", /skipped at admission/)
+    assert.match(next.fallback_notice ?? "", /command-code/)
+    assert.match(next.fallback_notice ?? "", /Insufficient credits/)
+    assert.equal(commandCalls(m.calls).length, 1)
+  } finally { f.close() }
+})
+
 test("explicit model-not-found error allows a single Go fallback", async () => {
   const f = fixture()
   try {

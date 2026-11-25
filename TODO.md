@@ -388,15 +388,6 @@ Next: 153
 - **Fix with:** none
 - **Effort:** S
 
-### USR-152 · P3 · Command Code worker route stalls admission on exhausted credits
-
-- **Area:** pi-subagent-bridge
-- **Where:** tools/pi-subagent-bridge/src/hybrid.ts admission and ExhaustionStore
-- **Problem:** With Command Code out of credits every worker admission first starts Command Code, fails with Insufficient credits, then falls back; the exhaustion is not remembered across admissions, so each lane pays the failed start
-- **Recommendation:** Classify Insufficient credits as route exhaustion and record it in ExhaustionStore so later admissions skip Command Code until it recovers
-- **Fix with:** A hybrid test where the first admission fails on Insufficient credits and the second skips Command Code with the recorded reason
-- **Effort:** S
-
 ### USR-73 · P4 · The refactor-web-ui skill has only been applied to agentctl
 
 - **Area:** Skills

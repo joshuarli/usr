@@ -18,7 +18,7 @@ import {
   fallbackNotice, fallbackSource, inspectSession, observeExecution, quota, runnerStatus, settledState,
   type Inspection, type InspectionDeps, type Known,
 } from "./inspect.ts"
-import { ExhaustionStore, routeKey, type ExhaustedRoute, type RouteRef } from "./exhaustion.ts"
+import { ExhaustionStore, type ExhaustedRoute, type RouteRef } from "./exhaustion.ts"
 import {
   STEER_LIMIT, TURN_LIMIT_CONTINUATIONS, activatePi, activateProcess, admittingParentFrom, backendOf, decodeSession, encodeSession,
   executorOf, isSessionId, piFallbackPlan, processRun, processTarget, targetOf, transition, type PiFallbackPlan, type ProcessExecution,
@@ -58,11 +58,12 @@ function routeRef(target: ExhaustibleTarget): RouteRef | null {
 }
 function activeExhaustion(cwd: string, target: ExhaustibleTarget): ExhaustedRoute | null {
   const ref = routeRef(target)
-  return ref ? new ExhaustionStore(stateDir(cwd)).active(routeKey(ref)) : null
+  return ref ? new ExhaustionStore(stateDir(cwd)).activeRoute(ref) : null
 }
 function exhaustionLabel(target: ExhaustibleTarget, entry: ExhaustedRoute): string {
   const name = target.executor === "pi" ? target.selection.providerID + "/" + target.selection.id : target.executor
-  return name + " (exhausted until " + new Date(entry.until).toISOString() + ")"
+  const reason = entry.reason.split("\n", 1)[0].slice(0, 120)
+  return name + " (exhausted until " + new Date(entry.until).toISOString() + (reason ? ": " + reason : "") + ")"
 }
 function save(s: Session): void {
   const path = pathFor(s.cwd, s.id), tmp = path + "." + randomUUID() + ".tmp"
@@ -271,7 +272,7 @@ export function makeHybridBridge(api: PiAdapter, command = {
       const candidate = plan.pi[index]
       if (contributorModel(candidate.providerID, candidate.id) && !contributorAllowed(cwd)) continue
       const target = { executor: "pi" as const, selection: candidate }
-      const exhausted = store.active(routeKey(routeRef(target)!))
+      const exhausted = store.activeRoute(routeRef(target)!)
       if (exhausted) { skipped.push(exhaustionLabel(target, exhausted)); continue }
       try {
         if ((await api(candidate).modelCheck(cwd)).available) return { selection: candidate, next: index + 1 }
@@ -551,7 +552,7 @@ export function makeHybridBridge(api: PiAdapter, command = {
         let selection: PiSelection | undefined
         for (const candidate of plan.pi) {
           const target = { executor: "pi" as const, selection: candidate }
-          const exhausted = store.active(routeKey(routeRef(target)!))
+          const exhausted = store.activeRoute(routeRef(target)!)
           if (exhausted) { blocked.push(exhaustionLabel(target, exhausted)); continue }
           if (contributorModel(candidate.providerID, candidate.id) && !contributorAllowed(dir)) {
             blocked.push(candidate.providerID + "/" + candidate.id + " (contributor models disallowed by repository or environment policy)")
@@ -619,7 +620,7 @@ export function makeHybridBridge(api: PiAdapter, command = {
         }
         const store = new ExhaustionStore(leaseDir)
         const skipped: string[] = []
-        const commandExhausted = store.active(routeKey(routeRef(commandTarget)!))
+        const commandExhausted = store.activeRoute(routeRef(commandTarget)!)
         if (commandExhausted) skipped.push(exhaustionLabel(commandTarget, commandExhausted))
         if (!commandExhausted && targetAvailable(commandTarget)) {
           activateProcess(s, commandTarget, launch(s, commandTarget, prompt(s)))

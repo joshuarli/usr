@@ -4,6 +4,7 @@ import { join } from "node:path"
 import { isRecord } from "./scope.ts"
 
 export const DEFAULT_EXHAUSTION_MS = 60 * 60 * 1000
+export const ACCOUNT_EXHAUSTION_MS = 24 * 60 * 60 * 1000
 export const MAX_EXHAUSTION_MS = 30 * 24 * 60 * 60 * 1000
 
 export type RouteRef =
@@ -27,6 +28,22 @@ const UNIT_MS: Record<string, number> = {
 
 export function routeKey(route: RouteRef): string {
   return route.executor === "pi" ? `pi:${route.providerID}/${route.id}` : `${route.executor}:${route.model}`
+}
+
+/**
+ * The account-wide key for a route's executor or Pi provider. Credit and billing
+ * failures are not model-scoped: the provider account is out of credit for every
+ * model it serves, so they are recorded under this key and every lookup for the
+ * same executor or provider consults it.
+ */
+export function accountKey(route: RouteRef): string {
+  return route.executor === "pi" ? `pi:${route.providerID}/*` : `${route.executor}:*`
+}
+
+/** Credit or billing exhaustion, which disables the whole provider account rather than one model. */
+const CREDIT = /\b(?:insufficient credits|credits? exhausted|buy extra usage|billing)\b/i
+export function creditExhaustion(error: unknown): boolean {
+  return CREDIT.test(errorText(error))
 }
 
 /** A provider-stated reset delay, or null when the error gives none. */
@@ -131,6 +148,15 @@ export class ExhaustionStore {
     return entry && entry.until > this.clock() ? entry : null
   }
 
+  /** The active exhaustion for a route, consulting both its per-model key and its account-wide key. */
+  activeRoute(route: RouteRef): ExhaustedRoute | null {
+    const routes = this.read().routes, now = this.clock()
+    const own = routes[routeKey(route)]
+    if (own && own.until > now) return own
+    const account = routes[accountKey(route)]
+    return account && account.until > now ? account : null
+  }
+
   /** All still-active entries, for admission notices; expired entries are ignored, not silently rewritten. */
   activeRoutes(): Array<{ key: string; route: ExhaustedRoute }> {
     const now = this.clock()
@@ -140,11 +166,14 @@ export class ExhaustionStore {
 
   async record(route: RouteRef, error: unknown): Promise<ExhaustedRoute> {
     return withLock(this.lock, () => {
-      const data = this.read(), now = this.clock(), key = routeKey(route)
+      const data = this.read(), now = this.clock()
+      const credit = creditExhaustion(error)
+      const key = credit ? accountKey(route) : routeKey(route)
       const existing = data.routes[key]
       if (existing && existing.until > now) return existing
       const entry: ExhaustedRoute = {
-        until: exhaustionUntil(error, now), reason: errorText(error).slice(0, 500),
+        until: now + (resetDurationMs(error) ?? (credit ? ACCOUNT_EXHAUSTION_MS : DEFAULT_EXHAUSTION_MS)),
+        reason: errorText(error).slice(0, 500),
         recorded_at: new Date(now).toISOString(),
       }
       data.routes[key] = entry
