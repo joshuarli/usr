@@ -183,7 +183,8 @@ class Installer:
         self.uv_python_root = self.data_home / "uv-python"
         self.node_build_root = self.data_home / "node-build"
         self.nodejs_root = self.data_home / "nodejs"
-        self.pnpm_root = self.data_home / "pnpm-npm"
+        self.pnpm_root = self.data_home / "pnpm-native"
+        self.pnpm_npm_root = self.data_home / "pnpm-npm"
         self.cf_root = self.data_home / "cf"
         self.agent_browser_root = self.data_home / "agent-browser"  # legacy npm prefix
         self.agent_browser_native_root = self.data_home / "agent-browser-native"
@@ -1361,60 +1362,107 @@ class Installer:
                        fetch_msg="Installing Command Code ...")
 
     def install_pnpm(self) -> None:
-        extra_root = self.pnpm_root
-        if not self.which("npm"):
-            self.unchecked("pnpm", "npm is required")
+        """Install the standalone pnpm release binary; no npm or Node.js is needed."""
+        assets = {("darwin", "aarch64"): "pnpm-darwin-arm64",
+                  ("darwin", "x86_64"): "pnpm-darwin-x64",
+                  ("linux", "x86_64"): "pnpm-linux-x64-musl",
+                  ("linux", "aarch64"): "pnpm-linux-arm64-musl"}
+        if (self.os_name, self.arch) not in assets:
+            self.skip("pnpm", f"no standalone pnpm binary for {self.os_name}/{self.arch}")
+        asset = assets[(self.os_name, self.arch)]
+        try:
+            release = json.loads(self.fetch_text("https://api.github.com/repos/pnpm/pnpm/releases/latest"))
+            tag = release["tag_name"]
+            entry = next(item for item in release["assets"] if item["name"] == asset)
+            algorithm, _, expected = (entry.get("digest") or "").partition(":")
+        except (ValueError, KeyError, TypeError, AttributeError, StopIteration):
+            self.unchecked("pnpm", f"no {asset} in the latest pnpm release")
             return
-        if not self.node_meets_minimum():
-            self.unchecked("pnpm", f"Node.js {NODE_MINIMUM} or newer is required")
+        if (algorithm != "sha256" or not isinstance(tag, str)
+                or not re.fullmatch(r"[0-9a-f]{64}", expected)
+                or not re.fullmatch(r"v\d+\.\d+\.\d+", tag)):
+            self.unchecked("pnpm", f"the latest pnpm release has no usable SHA-256 for {asset}")
             return
-        version = self.npm_view("pnpm@latest")
-        if not self.valid_version(version):
-            self.unchecked("pnpm", "could not resolve the latest pnpm version")
-            return
+        version = tag[1:]
+        record = f"{tag}:{expected}"
         launcher = self.dest / "pnpm"
-        if launcher.exists() or launcher.is_symlink():
-            actual = os.readlink(launcher) if launcher.is_symlink() else ""
-            if actual != str(extra_root / "bin/pnpm") or not (self.state / "pnpm").is_file():
-                self.skip("pnpm", f"{launcher} already exists outside dl management")
-        if extra_root.exists() or extra_root.is_symlink():
-            if extra_root.is_symlink() or not extra_root.is_dir() or not (self.state / "pnpm").is_file():
-                self.skip("pnpm", f"{extra_root} already exists without dl install records")
-        if self._state_text("pnpm") == version and (extra_root / "bin/pnpm").is_file() \
-                and os.access(extra_root / "bin/pnpm", os.X_OK) \
-                and launcher.is_symlink() and os.readlink(launcher) == str(extra_root / "bin/pnpm"):
-            self.own_dir(extra_root)
+        root = self.pnpm_root
+        releases = root / "releases"
+        release_dir = releases / f"{tag}-{expected[:12]}"
+        binary = release_dir / "pnpm"
+        link = root / "bin" / "pnpm"
+        target = str(link)
+        if (self._state_text("pnpm") == record and launcher.is_symlink()
+                and os.readlink(launcher) == target and link.is_symlink()
+                and os.readlink(link) == str(binary) and binary.is_file()):
+            self.own_dir(root)
             self.own_file(launcher)
             self.own_file(self.state / "pnpm")
+            self.remove_npm_pnpm()
             self.current(f"pnpm is current ({version})")
             return
-        self.own_missing_dirs(extra_root.parent)
-        extra_root.parent.mkdir(parents=True, exist_ok=True)
-        prefix = extra_root
-        staged = None
-        if not extra_root.is_dir():
-            staged = self.stage_dir(extra_root.parent, f"{extra_root.name}.")
-            prefix = staged
-        self.fetch_msg(f"Installing pnpm ({version}) ...")
-        if not self.npm_install(prefix, f"pnpm@{version}", "--allow-scripts=pnpm"):
-            if staged is not None:
+        if launcher.exists() or launcher.is_symlink():
+            if not launcher.is_symlink() or os.readlink(launcher) not in (
+                    target, str(self.pnpm_npm_root / "bin/pnpm")):
+                self.skip("pnpm", f"{launcher} already exists outside dl management")
+        if root.is_symlink() or (root.exists() and (not root.is_dir() or not (self.state / "pnpm").is_file())):
+            self.skip("pnpm", f"{root} already exists without dl install records")
+        if releases.is_symlink() or (releases.exists() and not releases.is_dir()):
+            self.skip("pnpm", f"{releases} is not a directory")
+        if release_dir.exists() or release_dir.is_symlink():
+            self.skip("pnpm", f"{release_dir} already exists; refusing to overwrite it")
+
+        self.own_missing_dirs(root.parent)
+        root.parent.mkdir(parents=True, exist_ok=True)
+        staged = self.stage_dir(root.parent, ".pnpm.")
+        try:
+            archive = self.stage_file(staged, "archive.")
+            self.fetch_msg(f"Downloading pnpm {version} ({asset}) ...")
+            url = f"https://github.com/pnpm/pnpm/releases/download/{tag}/{asset}"
+            if not self.download(url, archive):
+                self.skip("pnpm", f"{asset} download failed")
+            if self.sha256_file(archive) != expected:
+                self.skip("pnpm", f"{asset} checksum mismatch")
+            unpacked = staged / "payload"
+            if not self.extract_tar(archive, unpacked):
+                self.skip("pnpm", f"{asset} could not be extracted")
+            archive.unlink()
+            staged_binary = unpacked / "pnpm"
+            if not staged_binary.is_file():
+                self.skip("pnpm", f"{asset} does not contain a pnpm binary")
+            if self.os_name == "darwin":
+                self.run(["xattr", "-d", "com.apple.quarantine", str(staged_binary)])
+                self.run(["codesign", "-fs", "-", str(staged_binary)], check=True)
+            staged_binary.chmod(0o755)
+            probe = self.run([str(staged_binary), "--version"], capture=True)
+            if probe.returncode or probe.stdout.strip() != version:
+                self.skip("pnpm", f"{asset} does not report version {version}")
+            root.mkdir(parents=True, exist_ok=True)
+            releases.mkdir(parents=True, exist_ok=True)
+            os.replace(unpacked, release_dir)
+        finally:
+            if staged.exists():
                 shutil.rmtree(staged, ignore_errors=True)
-            self.skip("pnpm", "npm install failed")
-        binary = prefix / "bin/pnpm"
-        if not binary.is_file() or not os.access(binary, os.X_OK):
-            if staged is not None:
-                shutil.rmtree(staged, ignore_errors=True)
-            self.skip("pnpm", f"npm did not install {binary}")
-        if staged is not None:
-            if extra_root.exists() or extra_root.is_symlink():
-                shutil.rmtree(staged, ignore_errors=True)
-                self.skip("pnpm", f"{extra_root} appeared during install")
-            os.replace(staged, extra_root)
-        self.own_dir(extra_root)
-        self.link_symlink(launcher, str(extra_root / "bin/pnpm"))
-        self.write_state("pnpm", version)
+        self.own_dir(root)
+        link.parent.mkdir(parents=True, exist_ok=True)
+        self.link_symlink(link, str(binary))
+        self.link_symlink(launcher, target)
+        self.write_state("pnpm", record)
         self.changed = True
-        self.ok(f"Installed {self.dest}/pnpm ({version})")
+        self.remove_npm_pnpm()
+        self.ok(f"Installed pnpm {version} ({tag})")
+
+    def remove_npm_pnpm(self) -> None:
+        """Remove the npm prefix earlier syncs installed, once the standalone binary owns the launcher."""
+        root = self.pnpm_npm_root
+        if root.is_symlink() or not root.is_dir() or not (root / "lib/node_modules/pnpm").is_dir():
+            return
+        if set(path.name for path in root.iterdir()) - {"bin", "lib", "etc"}:
+            self.warn(f"Warning: leaving {root}; it holds files the npm install did not create")
+            return
+        shutil.rmtree(root)
+        self.removed.add(root)
+        self.ok(f"Removed the previous npm install at {root}")
 
     def install_cf(self) -> None:
         self._npm_tool("cf", self.cf_root, "cf", "cf", extra=("--ignore-scripts",),
@@ -1706,6 +1754,7 @@ class Installer:
         return True
 
     def install_dsh(self) -> None:
+        self.skip("dsh", "dsh is disabled")
         if not self.which("npm"):
             self.unchecked("dsh", "npm is required")
             return

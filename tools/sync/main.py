@@ -29,7 +29,7 @@ PI_BRIDGE = ROOT / "tools/sync/pi-worker.py"
 OPENCODE_BRIDGE = ROOT / "tools/sync/opencode-worker.py"
 COMPANIONS = ROOT / "tools/sync/companions.py"
 
-NODE_RUNTIME_TOOLS = frozenset({"cmd", "pnpm", "cf", "pi", "dsh"})
+NODE_RUNTIME_TOOLS = frozenset({"cmd", "cf", "pi", "dsh"})
 TOOL_EXECUTABLES = {
     "nodejs": ("node", "npm"), "ffmpeg": ("ffmpeg", "ffprobe"),
     "shuck": ("shellcheck",), "opencode": ("opencode",), "lz": ("less",),
