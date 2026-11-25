@@ -1443,10 +1443,10 @@ class Installer:
 
     def install_pnpm(self) -> None:
         """Install the standalone pnpm release binary; no npm or Node.js is needed."""
-        assets = {("darwin", "aarch64"): "pnpm-darwin-arm64",
-                  ("darwin", "x86_64"): "pnpm-darwin-x64",
-                  ("linux", "x86_64"): "pnpm-linux-x64-musl",
-                  ("linux", "aarch64"): "pnpm-linux-arm64-musl"}
+        assets = {("darwin", "aarch64"): "pnpm-darwin-arm64.tar.gz",
+                  ("darwin", "x86_64"): "pnpm-darwin-x64.tar.gz",
+                  ("linux", "x86_64"): "pnpm-linux-x64-musl.tar.gz",
+                  ("linux", "aarch64"): "pnpm-linux-arm64-musl.tar.gz"}
         if (self.os_name, self.arch) not in assets:
             self.skip("pnpm", f"no standalone pnpm binary for {self.os_name}/{self.arch}")
         asset = assets[(self.os_name, self.arch)]

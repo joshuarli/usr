@@ -1026,10 +1026,10 @@ sys.exit(1)
 
     def pnpm_routes(self, version="12.16.1", digest=None, *, os_name="linux", arch="x86_64"):
         import hashlib
-        asset = {("linux", "x86_64"): "pnpm-linux-x64-musl",
-                 ("linux", "aarch64"): "pnpm-linux-arm64-musl",
-                 ("darwin", "aarch64"): "pnpm-darwin-arm64",
-                 ("darwin", "x86_64"): "pnpm-darwin-x64"}[(os_name, arch)]
+        asset = {("linux", "x86_64"): "pnpm-linux-x64-musl.tar.gz",
+                 ("linux", "aarch64"): "pnpm-linux-arm64-musl.tar.gz",
+                 ("darwin", "aarch64"): "pnpm-darwin-arm64.tar.gz",
+                 ("darwin", "x86_64"): "pnpm-darwin-x64.tar.gz"}[(os_name, arch)]
         payload = make_tar({"pnpm": f'#!/bin/sh\n[ "$1" = "--version" ] && echo {version}\n'.encode()})
         digest = digest or hashlib.sha256(payload).hexdigest()
         tag = f"v{version}"
