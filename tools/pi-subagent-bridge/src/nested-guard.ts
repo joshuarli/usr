@@ -1,3 +1,4 @@
+import { piProviderEnabled, type HarnessSwitches } from "./harnesses.ts"
 import { registerSubagentCapabilityCeiling, type SubagentCapabilityCeilingHandle } from "pi-subagents/capability-ceiling"
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent"
 import { DELEGATION, isDevinTier, DEVIN_DELEGATION, type Tier } from "./tier-policy.ts"
@@ -17,7 +18,7 @@ const START_FIELDS = new Set(["agent", "task", "async", "options"])
 
 /** Reject model-controlled attempts to escape the typed tier graph or reconfigure a nested launch. */
 export type GuardFamily = "go" | "devin"
-export function nestedCallRefusal(parent: Tier, toolName: string, input: unknown, family: GuardFamily = "go"): string | undefined {
+export function nestedCallRefusal(parent: Tier, toolName: string, input: unknown, family: GuardFamily = "go", switches?: HarnessSwitches): string | undefined {
   if (toolName === "subagent_launch") return "Nested workflow scripts are not permitted by usr tier policy"
   if (toolName !== "subagent") return undefined
   if (!input || typeof input !== "object" || Array.isArray(input))
@@ -29,6 +30,8 @@ export function nestedCallRefusal(parent: Tier, toolName: string, input: unknown
     if (typeof request.action !== "string" || !CONTROL_ACTIONS.has(request.action) ||
         Object.keys(request).some((key) => !CONTROL_FIELDS.has(key)))
       return "Nested delegation permits only read/control actions and explicit single-child starts"
+    if ((request.action === "resume" || request.action === "steer") && !piProviderEnabled(family === "devin" ? "devin" : "opencode-go", switches))
+      return "This Pi provider is disabled in harnesses.json"
     return undefined
   }
   if (Object.keys(request).some((key) => !START_FIELDS.has(key)))
@@ -45,6 +48,8 @@ export function nestedCallRefusal(parent: Tier, toolName: string, input: unknown
     : DELEGATION[parent]
   if (typeof request.agent !== "string" || !allowed.includes(request.agent))
     return `Tier ${parent} cannot delegate to ${String(request.agent)}`
+  if (!piProviderEnabled(request.agent.startsWith("devin-") ? "devin" : "opencode-go", switches))
+    return "The requested Pi provider is disabled in harnesses.json"
   return undefined
 }
 
@@ -53,7 +58,7 @@ export function nestedCallRefusal(parent: Tier, toolName: string, input: unknown
  * SDK owner. It runs in the child process, not in the parent prompt. Upstream
  * capability ceilings intersect monotonically and survive nested + async runs.
  */
-export function registerTierGuard(parent: Tier, family: GuardFamily = "go"): (pi: ExtensionAPI) => void {
+export function registerTierGuard(parent: Tier, family: GuardFamily = "go", switches?: HarnessSwitches): (pi: ExtensionAPI) => void {
   const special = family === "devin" ? isDevinTier(parent) : false
   if (family !== "go" && !special) throw new Error("Special provider cannot execute this tier")
   const children: readonly string[] = family === "devin"
@@ -65,7 +70,7 @@ export function registerTierGuard(parent: Tier, family: GuardFamily = "go"): (pi
       ceiling = registerSubagentCapabilityCeiling({
         sessionId: ctx.sessionManager.getSessionId(),
         source: "usr-bridge-" + family + "-" + parent,
-        ceiling: { allowedAgents: [...children] },
+        ceiling: { allowedAgents: children.filter(name => piProviderEnabled(name.startsWith("devin-") ? "devin" : "opencode-go", switches)) },
       })
     })
     pi.on("session_shutdown", () => {
@@ -73,7 +78,7 @@ export function registerTierGuard(parent: Tier, family: GuardFamily = "go"): (pi
       ceiling = undefined
     })
     pi.on("tool_call", (event) => {
-      const reason = nestedCallRefusal(parent, event.toolName, event.input, family)
+      const reason = nestedCallRefusal(parent, event.toolName, event.input, family, switches)
       return reason ? { block: true, reason } satisfies Block : undefined
     })
   }

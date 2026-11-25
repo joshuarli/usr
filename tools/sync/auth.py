@@ -19,6 +19,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from dag import Probe
 from report import TaskLine
+from harnesses import read_switches, tool_enabled
 
 RunProbe = Callable[[Path, dict[str, str]], Probe]
 
@@ -189,8 +190,10 @@ def _installed(home: Path, binary: str) -> bool:
     return os.access(home / ".local/bin" / binary, os.X_OK)
 
 
-def login_lines(home: Path, env: dict[str, str]) -> list[TaskLine]:
-    pending = [harness for harness in HARNESSES if _installed(home, harness.binary)]
+def login_lines(home: Path, env: dict[str, str], *, switches: dict[str, bool] | None = None) -> list[TaskLine]:
+    active = read_switches() if switches is None else switches
+    pending = [harness for harness in HARNESSES
+               if tool_enabled(harness.binary, active) and _installed(home, harness.binary)]
     if not pending:
         return []
     lines: list[TaskLine] = []

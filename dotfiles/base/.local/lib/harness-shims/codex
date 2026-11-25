@@ -1,4 +1,5 @@
 #!/bin/sh
+"$HOME/.local/bin/harness-enabled" codex || exit $?
 # Keep local sessions off the daemon; an explicit remote target stays remote.
 for arg do
 	case $arg in

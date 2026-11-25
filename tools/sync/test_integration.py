@@ -24,8 +24,11 @@ class SyncIntegrationTests(unittest.TestCase):
         self.root = Path(self.temp.name).resolve()
         for relative in ("tools/sync", "dotfiles/base", "dotfiles/linux", "bin", "home"):
             (self.root / relative).mkdir(parents=True, exist_ok=True)
-        for name in ("dag.py", "main.py", "uninstall.py", "ownership.py", "links.py", "link_plan.py", "link_apply.py", "link_recovery.py", "pi_extensions.py", "report.py", "auth.py", "pi_auth.py"):
+        for name in ("dag.py", "main.py", "uninstall.py", "ownership.py", "links.py", "link_plan.py", "link_apply.py", "link_recovery.py", "pi_extensions.py", "report.py", "auth.py", "pi_auth.py", "harnesses.py"):
             shutil.copy2(SOURCE / name, self.root / "tools/sync" / name)
+        shutil.copy2(SOURCE.parents[1] / "harnesses.json", self.root / "harnesses.json")
+        switches = json.loads((self.root / "harnesses.json").read_text())
+        (self.root / "harnesses.json").write_text(json.dumps(dict.fromkeys(switches, True)))
         shutil.copy2(SYNC, self.root / "sync")
         self._script("bin/uname", '#!/bin/sh\nprintf "Linux\\n"\n')
         self._script("dotfiles/migrate-pinact.sh", "#!/bin/sh\nexit 0\n")
@@ -40,7 +43,7 @@ class SkipInstall(Exception):
         self.reason = reason
 
 
-def default_tools(os_name, arch, profile, server_tools=None, *, musl_loader=None, rustup=False):
+def default_tools(os_name, arch, profile, server_tools=None, *, musl_loader=None, rustup=False, harness_switches=None):
     return ["nodejs", "cmd", "parallel-a", "parallel-b"]
 
 

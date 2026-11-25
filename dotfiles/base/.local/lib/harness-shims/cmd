@@ -1,4 +1,5 @@
 #!/bin/sh
+"$HOME/.local/bin/harness-enabled" cmd || exit $?
 # Sync owns updates. Keep startup notices and telemetry out of CLI sessions.
 export CMD_DISABLE_NOTICES=1
 export COMMANDCODE_SKIP_UPDATES=1

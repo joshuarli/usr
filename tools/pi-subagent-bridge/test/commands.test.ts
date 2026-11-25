@@ -60,7 +60,7 @@ test("MCP input schemas are derived from the shared field list", () => {
   assert.equal(start.additionalProperties, false)
   assert.deepEqual(start.properties.scope, SCOPE_SCHEMA)
   assert.deepEqual(start.properties.tier, { type: "string", minLength: 1, maxLength: 8, enum: BRIDGE_TIERS })
-  assert.match(COMMANDS.start.description, /scout: command-code then pi then codex; mechanic: command-code then pi then codex; worker: command-code then pi then codex; expert: pi, no fallback\)/)
+  assert.match(COMMANDS.start.description, /scout: pi then codex; mechanic: pi then codex; worker: pi then codex; expert: pi, no fallback\)/)
   assert.deepEqual(toolSchema("steer").required, ["cwd", "session_id", "note"])
   for (const name of COMMAND_NAMES) {
     const sample = { cwd: "/w", title: "t", tier: "scout", scope: { ...scope, writable_paths: [] }, brief: "b", session_id, feedback: "f", note: "n" }
@@ -105,4 +105,8 @@ test("string field bounds agree between schema and decoder", () => {
     assert.equal(schema.minLength, 1, field)
     assert.equal(schema.maxLength, max, field)
   }
+})
+
+test("disabled harness names do not enter MCP tool descriptions", () => {
+  for (const command of Object.values(COMMANDS)) assert.doesNotMatch(command.description, /command[- ]code/i)
 })

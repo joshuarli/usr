@@ -1,3 +1,4 @@
+import { assertHarnessEnabled } from "./harnesses.ts"
 import { spawn } from "node:child_process"
 import { readFileSync, writeFileSync, openSync, closeSync } from "node:fs"
 import { exhaustionWatcher, secretEnvironment, writeReceipt, type ExhaustionWatch } from "./fx-supervision.ts"
@@ -9,6 +10,11 @@ const job = JSON.parse(readFileSync(process.argv[2]!, "utf8")) as {
 const MAX_BYTES = 1_048_576
 let reason: "exit" | "cancelled" | "deadline" | "oversized" | "spawn" | "supervision" | "exhausted" = "exit"
 let stdout = "", stderr = ""
+try { assertHarnessEnabled("fx") } catch (error) {
+  writeReceipt(job.output, { schema: 1, nonce: job.nonce, supervisor_pid: process.pid, child_pid: null,
+    code: null, signal: null, reason: "spawn", stdout: "", stderr: String(error).slice(0, 4096) })
+  process.exit(1)
+}
 const errorFd = openSync(job.errors, "wx", 0o600)
 let childEnv: NodeJS.ProcessEnv
 try { childEnv = secretEnvironment(job.env, job.env_files) } catch (error) {

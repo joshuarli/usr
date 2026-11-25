@@ -18,6 +18,7 @@ function walk(root: string): Array<string> {
   }
   visit(root)
   found.push(join(root, "..", "package.json"))
+  found.push(join(root, "../../..", "harnesses.json"))
   return found
 }
 

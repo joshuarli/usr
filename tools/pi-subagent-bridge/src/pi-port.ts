@@ -1,3 +1,4 @@
+import { piProviderEnabled, type HarnessSwitches } from "./harnesses.ts"
 import { execFileSync, spawn, type ChildProcess } from "node:child_process"
 import { randomUUID } from "node:crypto"
 import {
@@ -375,30 +376,39 @@ export function devinModelEntry() {
     variants: variants.map(id => ({ id })) }
 }
 
-export type PiPortTestHooks = { workerPath?: string; cancel?: PiCancelHooks }
+export type PiPortTestHooks = { workerPath?: string; cancel?: PiCancelHooks; switches?: HarnessSwitches }
 
 export function piPort(testHooks: PiPortTestHooks = {}): OpenCodePort {
   const children = new Map<number, ChildProcess>()
   const workerPath = testHooks.workerPath ?? worker
+  function assertEnabled(model: ModelRef) {
+    if (!piProviderEnabled(model.providerID, testHooks.switches)) throw new Error(`Pi provider ${model.providerID} is disabled in harnesses.json`)
+  }
   return {
     async models() {
-      // An authenticated Devin account must not require unrelated OpenCode credentials.
-      let goAuthenticated = false
-      try { ensureOpenCodeApiKey(); goAuthenticated = true } catch { /* independent providers */ }
-      const { ModelRuntime } = await import("@earendil-works/pi-coding-agent")
-      const runtime = await ModelRuntime.create()
       const available: Array<{
         id: string; providerID: string; enabled: boolean; status: string; variants: { id: string }[]
-      }> = [...VARIANTS]
-        .filter(([id, config]) => goAuthenticated && runtime.getModel(config.providerID, id) && runtime.hasConfiguredAuth(config.providerID))
-        .map(([id, config]) => ({
-          id, providerID: config.providerID, enabled: true, status: "active",
-          variants: [...config.variants].map((variant) => ({ id: variant })),
-        }))
-      if (devinPreflight().available) available.push(devinModelEntry())
+      }> = []
+      if (piProviderEnabled("opencode-go", testHooks.switches)) {
+        let goAuthenticated = false
+        try { ensureOpenCodeApiKey(); goAuthenticated = true } catch { /* independent providers */ }
+        if (goAuthenticated) {
+          const { ModelRuntime } = await import("@earendil-works/pi-coding-agent")
+          const runtime = await ModelRuntime.create()
+          available.push(...[...VARIANTS]
+            .filter(([id, config]) => runtime.getModel(config.providerID, id) && runtime.hasConfiguredAuth(config.providerID))
+            .map(([id, config]) => ({
+              id, providerID: config.providerID, enabled: true, status: "active",
+              variants: [...config.variants].map(id => ({ id })),
+            })))
+        }
+      }
+      if (piProviderEnabled("devin", testHooks.switches) && devinPreflight(undefined, undefined, undefined, testHooks.switches).available)
+        available.push(devinModelEntry())
       return { data: available }
     },
     async create(input) {
+      assertEnabled(input.model)
       const id = "ses_" + randomUUID().replaceAll("-", "")
       const s: Stored = {
         id, cwd: input.location.directory, title: input.title,
@@ -409,6 +419,7 @@ export function piPort(testHooks: PiPortTestHooks = {}): OpenCodePort {
     },
     async prompt(input) {
       const s = load(input.cwd, input.sessionID)
+      assertEnabled(s.model)
       let prior: string | undefined
       let priorRunId: string | undefined
       if (s.run) {
@@ -479,6 +490,7 @@ export function piPort(testHooks: PiPortTestHooks = {}): OpenCodePort {
     },
     async steer(input) {
       const s = load(input.cwd, input.sessionID)
+      assertEnabled(s.model)
       if (!s.run?.control || !s.run.receipts) throw new Error("Pi worker has no steering channel")
       if (observe(s, children).state !== "running") throw new Error("Pi worker is not running; use worker_resume for a finished session")
       const requestId = randomUUID()
@@ -508,7 +520,8 @@ export function piPort(testHooks: PiPortTestHooks = {}): OpenCodePort {
   }
 }
 
-export async function diagnoseGoModel(model: ModelRef): Promise<string | null> {
+export async function diagnoseGoModel(model: ModelRef, switches?: HarnessSwitches): Promise<string | null> {
+  if (!piProviderEnabled(model.providerID, switches)) return `Pi provider ${model.providerID} is disabled in harnesses.json`
   try {
     ensureOpenCodeApiKey()
     const { ModelRuntime } = await import("@earendil-works/pi-coding-agent")

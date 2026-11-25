@@ -1,3 +1,4 @@
+import { assertHarnessEnabled, harnessEnabled, type HarnessSwitches } from "./harnesses.ts"
 import { spawn, spawnSync, execFileSync, type ChildProcess } from "node:child_process"
 import { randomUUID, createHash } from "node:crypto"
 import { mkdirSync, readFileSync, readdirSync, writeFileSync, realpathSync, openSync, readSync, closeSync, statSync, copyFileSync, chmodSync, existsSync } from "node:fs"
@@ -188,7 +189,7 @@ function acpResult(run: CommandRun, job: Job, receipt: unknown): Status {
     default: return stopped("failed", `${receipt.reason}: FX ACP run ended without completing (stop reason ${String(receipt.stop_reason)})`)
   }
 }
-export function makeFxAdapter(options: FxOptions) {
+export function makeFxAdapter(options: FxOptions, switches?: HarnessSwitches) {
   if (options.transport !== "cli" && options.transport !== "acp") throw new Error("Unknown FX transport")
   const home = realpathSync(options.home), wallMs = options.wallMs ?? 900000
   if (!isAbsolute(options.binary) || !Number.isSafeInteger(wallMs) || wallMs < 1 || wallMs > 900000) throw new Error("Invalid FX qualification configuration")
@@ -209,6 +210,7 @@ export function makeFxAdapter(options: FxOptions) {
     if (name in env || name === "FX_HOME" || name === "TMPDIR") throw new Error("FX secret env name collides with the qualified environment: " + name)
   }
   function available(selection: FxSelection): boolean {
+    if (!harnessEnabled("fx", switches)) return false
     if (isBannedModel(selection.model) || selection.provider !== options.provider || selection.runtimeVersion !== "0.0.17") return false
     try { return createHash("sha256").update(readFileSync(options.binary)).digest("hex") === options.binarySha256 && execFileSync(options.binary, ["--version"], { env, encoding: "utf8", timeout: deadlineTimeout(5000) }).trim() === selection.runtimeVersion } catch { return false }
   }
@@ -225,6 +227,7 @@ export function makeFxAdapter(options: FxOptions) {
   }
   /** Validates a continuation without effects: token, worktree, pins and the saved private configuration. */
   function preflightResume(request: Omit<FxLaunch, "prompt"> & { resume: string }): { cwd: string; settings: string; fxHome: string; resume: string } {
+    assertHarnessEnabled("fx", switches)
     if (!request.resume.startsWith("fx:0.0.17:")) throw new Error("Unsupported FX resume token")
     const saved: unknown = JSON.parse(Buffer.from(request.resume.slice("fx:0.0.17:".length), "base64url").toString("utf8"))
     const savedHome = isRecord(saved) && typeof saved.fxHome === "string" && saved.fxHome.startsWith(request.logDirectory + "/") ? saved.fxHome : null
@@ -236,6 +239,7 @@ export function makeFxAdapter(options: FxOptions) {
     return { cwd, settings, fxHome: saved.fxHome, resume: saved.id }
   }
   function start(request: FxLaunch): CommandRun {
+    assertHarnessEnabled("fx", switches)
     const continued = request.resume ? preflightResume({ ...request, resume: request.resume }) : null
     const selections = request.delegation?.selections ?? {}
     const delegating = options.transport === "acp" && options.delegation !== undefined && Object.keys(selections).length > 0

@@ -95,11 +95,21 @@ class AuthProbeTests(unittest.TestCase):
         auth_json = self.home / ".commandcode" / "auth.json"
         auth_json.parent.mkdir(parents=True)
         auth_json.write_text("{}")
-        self.assertEqual(self.state("cmd", auth.login_lines(self.home, self.env)).state, "login")
+        switches = {**auth.read_switches(), "command-code": True}
+        self.assertEqual(self.state("cmd", auth.login_lines(self.home, self.env, switches=switches)).state, "login")
         auth_json.write_text(json.dumps({"apiKey": "", "authenticatedAt": "2026-11-15"}))
-        self.assertEqual(self.state("cmd", auth.login_lines(self.home, self.env)).state, "login")
+        self.assertEqual(self.state("cmd", auth.login_lines(self.home, self.env, switches=switches)).state, "login")
         auth_json.write_text(json.dumps({"apiKey": "fake-key", "authenticatedAt": "2026-11-15"}))
-        self.assertEqual(self.state("cmd", auth.login_lines(self.home, self.env)).state, "current")
+        self.assertEqual(self.state("cmd", auth.login_lines(self.home, self.env, switches=switches)).state, "current")
+
+    def test_disabled_harnesses_are_not_probed_or_inspected(self):
+        self.fake_bin("cmd", "#!/bin/sh\nexit 0\n")
+        with patch.object(auth, "_read_json", side_effect=AssertionError("credentials read")), \
+                patch.object(auth, "_run", side_effect=AssertionError("client probed")):
+            self.assertEqual(auth.login_lines(self.home, self.env), [])
+            self.fake_bin("codex", "#!/bin/sh\nexit 0\n")
+            switches = dict.fromkeys(auth.read_switches(), False)
+            self.assertEqual(auth.login_lines(self.home, self.env, switches=switches), [])
 
     def test_pi_honours_agent_dir_and_requires_a_provider(self):
         self.fake_bin("pi", "#!/bin/sh\nexit 0\n")

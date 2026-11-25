@@ -1,3 +1,4 @@
+import { piProviderEnabled, type HarnessSwitches } from "./harnesses.ts"
 /** A read-only Devin CLI credential/catalog gate for deterministic scoped workers. */
 import { existsSync, readFileSync, statSync } from "node:fs"
 import { createRequire } from "node:module"
@@ -69,8 +70,9 @@ function missingDevinProfiles(env: NodeJS.ProcessEnv, home: string): string[] {
 
 export function devinPreflight(
   env: NodeJS.ProcessEnv = process.env, home = homedir(),
-  resolveExtension: () => string = devinExtensionPath,
+  resolveExtension: () => string = devinExtensionPath, switches?: HarnessSwitches,
 ): { available: boolean; issue: string | null } {
+  if (!piProviderEnabled("devin", switches)) return { available: false, issue: "Pi Devin provider is disabled in harnesses.json" }
   try { resolveExtension() }
   catch { return { available: false, issue: "Pinned pi-devin-local missing; release and sync the updated pi-build runtime" } }
   const credentials = join(home, ".local/share/devin/credentials.toml")

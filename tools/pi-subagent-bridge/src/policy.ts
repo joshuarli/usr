@@ -4,6 +4,7 @@ import {
   DEVIN_TIER_MODELS, DEVIN_AGENT_NAMES, DEVIN_DELEGATION,
   PI_MODEL_ALLOWLIST, TIER_TOOLS, BRIDGE_TIERS, type Effort, type Tier, type BridgeTier,
 } from "./tier-policy.ts"
+import { HARNESS_SWITCHES, harnessEnabled, piProviderEnabled, type HarnessSwitches } from "./harnesses.ts"
 
 export type { Effort } from "./tier-policy.ts"
 export type Executor = "codex" | "command-code" | "pi" | "fx"
@@ -118,13 +119,15 @@ export const ROOT_PLANS = {
 function piRoute(pin: PiSelection) {
   return { executor: "pi", providerID: pin.providerID, model: pin.id, effort: pin.variant } as const
 }
-export function routesOf(plan: AdmissionPlan): readonly [Route, ...Route[]] {
-  if (plan.kind === "pi-only") return [piRoute(plan.pi[0]), ...plan.pi.slice(1).map(piRoute)]
-  return [
+export function routesOf(plan: AdmissionPlan, switches: HarnessSwitches = HARNESS_SWITCHES): readonly Route[] {
+  const configured: Route[] = plan.kind === "pi-only" ? plan.pi.map(piRoute) : [
     { executor: "command-code", ...plan.command },
     ...plan.pi.map(piRoute),
     { executor: "codex", ...plan.codex },
   ]
+  return configured.filter(route => route.executor === "pi"
+    ? piProviderEnabled(route.providerID, switches)
+    : harnessEnabled(route.executor, switches))
 }
 
 export const OPENCODE_NATIVE = {
@@ -145,30 +148,35 @@ export function isBannedModel(model: string, families: readonly string[] = BANNE
 }
 
 /** Build-time JSON projection for Python/harness consumers; never read generated data here. */
-export const POLICY = {
-  schema_version: 1,
-  tiers: BRIDGE_TIERS,
-  rootRoutes: {
-    scout: routesOf(ROOT_PLANS.scout),
-    mechanic: routesOf(ROOT_PLANS.mechanic),
-    worker: routesOf(ROOT_PLANS.worker),
-    expert: routesOf(ROOT_PLANS.expert),
-  },
-  nativePi: {
-    goModels: GO_TIER_MODELS,
-    devinModels: DEVIN_TIER_MODELS,
-    devinAgentNames: DEVIN_AGENT_NAMES,
-    delegation: DELEGATION,
-    devinDelegation: DEVIN_DELEGATION,
-    tools: TIER_TOOLS,
-    maxSubagentDepth: MAX_SUBAGENT_DEPTH,
-    modelAllowlist: PI_MODEL_ALLOWLIST,
-  },
-  opencode: OPENCODE_NATIVE,
-  commandNative: COMMAND_NATIVE,
-  devinNative: DEVIN_NATIVE,
-  copilotNative: COPILOT_NATIVE,
-  nativeFallback: NATIVE_FALLBACK,
-  antigravityDirect: ANTIGRAVITY_DIRECT,
-  bannedModels: BANNED_MODELS,
-} as const
+export function policyForHarnesses(harnesses: HarnessSwitches) {
+  return {
+    schema_version: 1,
+    harnesses,
+    tiers: BRIDGE_TIERS,
+    rootRoutes: {
+      scout: routesOf(ROOT_PLANS.scout, harnesses),
+      mechanic: routesOf(ROOT_PLANS.mechanic, harnesses),
+      worker: routesOf(ROOT_PLANS.worker, harnesses),
+      expert: routesOf(ROOT_PLANS.expert, harnesses),
+    },
+    nativePi: {
+      goModels: GO_TIER_MODELS,
+      devinModels: DEVIN_TIER_MODELS,
+      devinAgentNames: DEVIN_AGENT_NAMES,
+      delegation: DELEGATION,
+      devinDelegation: DEVIN_DELEGATION,
+      tools: TIER_TOOLS,
+      maxSubagentDepth: MAX_SUBAGENT_DEPTH,
+      modelAllowlist: PI_MODEL_ALLOWLIST,
+    },
+    opencode: OPENCODE_NATIVE,
+    commandNative: COMMAND_NATIVE,
+    devinNative: DEVIN_NATIVE,
+    copilotNative: COPILOT_NATIVE,
+    nativeFallback: NATIVE_FALLBACK,
+    antigravityDirect: ANTIGRAVITY_DIRECT,
+    bannedModels: BANNED_MODELS,
+  } as const
+}
+
+export const POLICY = policyForHarnesses(HARNESS_SWITCHES)

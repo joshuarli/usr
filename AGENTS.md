@@ -15,11 +15,9 @@ Each path belongs to one sync layer (see [sync](docs/sync.md)). Do not `cat` or 
 | Home sync, layers, tools, doctor, uninstall | [docs/sync.md](docs/sync.md) |
 | Development checks and conventions | [docs/development.md](docs/development.md) |
 | Agent setup and harness configuration | [docs/agent-setup.md](docs/agent-setup.md) |
-| Command Code and Antigravity native delegation | [docs/command-code-delegation.md](docs/command-code-delegation.md), [docs/antigravity-native.md](docs/antigravity-native.md) |
-| Copilot CLI native pilot and verification handoff | [docs/copilot-native.md](docs/copilot-native.md) |
 | Lean harness defaults and launch shims | [docs/harness-lean.md](docs/harness-lean.md) |
 | Instruction profiles | [docs/model-profiles.md](docs/model-profiles.md) |
-| Model policy ownership and generation | [tools/policy/README.md](tools/policy/README.md) |
+| Harness switches, model policy ownership and generation | [harnesses.json](harnesses.json), [tools/policy/README.md](tools/policy/README.md) |
 | Markdown audit | [tools/mdtool/README.md](tools/mdtool/README.md) |
 | macOS process sandbox | [docs/sbx-spec.md](docs/sbx-spec.md) |
 | Subagent architecture | [docs/subagents.html](docs/subagents.html) |

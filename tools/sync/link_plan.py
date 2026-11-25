@@ -149,6 +149,7 @@ def _already_correct(spec: LinkSpec, path: Path, text: str,
 
 def plan_links(discovery: Discovery, owned_file: Path) -> LinkPlan:
     desired = {discovery.target / spec.relative.as_posix(): spec for spec in discovery.desired}
+    disabled = {discovery.target / spec.relative.as_posix(): spec for spec in discovery.disabled}
     previous = records(owned_file)
     # A historical path claim does not authorize deleting a currently different
     # link. Use the verified *live* identity before planning prune/replacement.
@@ -196,15 +197,17 @@ def plan_links(discovery: Discovery, owned_file: Path) -> LinkPlan:
         before = snapshot(path)
         if before.kind == "absent":
             actions.append(LinkAction("forget", path, before))
-        elif path in owned_links and before.kind == "symlink" and _old_managed_link(
-            path, discovery.sources, discovery.target
+        elif path in owned_links and before.kind == "symlink" and (
+            _old_managed_link(path, discovery.sources, discovery.target)
+            or (path in disabled and _already_correct(
+                disabled[path], path, _desired_text(disabled[path], path), set()))
         ):
             if not _parent_safe(path, discovery):
                 conflicts.append(f"{path} passes through an unsafe symlinked parent")
             else:
                 actions.append(LinkAction("prune", path, before))
-        # An owned record pointing to a still-present source may belong to
-        # another deliberately retained link. Do not treat it as stale.
+        # Still-present sources remain retained unless their exact declared
+        # link is disabled. A replaced or unowned link is never authorized.
     # A directory that holds desired links can also hold links whose source
     # disappeared together with the ownership record that would prune them.
     # Only sync's exact relpath-of-source signature identifies them safely;

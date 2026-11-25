@@ -1,5 +1,19 @@
 {
   "schema_version": 1,
+  "harnesses": {
+    "claude": true,
+    "codex": true,
+    "command-code": false,
+    "pi": true,
+    "opencode": true,
+    "opencode-go": true,
+    "devin": true,
+    "antigravity": true,
+    "copilot": true,
+    "fx": true,
+    "muse": true,
+    "deepseek": false
+  },
   "tiers": [
     "scout",
     "mechanic",
@@ -8,11 +22,6 @@
   ],
   "rootRoutes": {
     "scout": [
-      {
-        "executor": "command-code",
-        "model": "meta/muse-ember",
-        "effort": "medium"
-      },
       {
         "executor": "pi",
         "providerID": "opencode-go",
@@ -27,11 +36,6 @@
     ],
     "mechanic": [
       {
-        "executor": "command-code",
-        "model": "meta/muse-ember",
-        "effort": "xhigh"
-      },
-      {
         "executor": "pi",
         "providerID": "opencode-go",
         "model": "muse-spark-1.3-contributor",
@@ -44,11 +48,6 @@
       }
     ],
     "worker": [
-      {
-        "executor": "command-code",
-        "model": "deepseek/deepseek-v4.1-flash",
-        "effort": "high"
-      },
       {
         "executor": "pi",
         "providerID": "opencode-go",

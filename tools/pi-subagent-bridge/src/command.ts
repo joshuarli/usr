@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto"
 
 import { plannedCommand, type LaunchRequest } from "./launch.ts"
 import { isBannedModel } from "./policy.ts"
+import { assertHarnessEnabled, type HarnessSwitches } from "./harnesses.ts"
 import { workerEnvironment } from "./worker-env.ts"
 import { deadlineTimeout } from "./steer-deadline.ts"
 import { readBoundedLog } from "./bounded-log.ts"
@@ -21,7 +22,8 @@ export type CommandResult = {
 const children = new Map<number, ChildProcess>()
 const MAX_TURNS = 100_000
 
-export function startCommand(request: LaunchRequest): CommandRun {
+export function startCommand(request: LaunchRequest, switches?: HarnessSwitches): CommandRun {
+  assertHarnessEnabled("command-code", switches)
   const { directory, logDirectory, prompt: text, resume, selection: { model, effort }, access } = request
   if (isBannedModel(model)) throw new Error("Prohibited Command Code model: " + model)
   const suffix = randomUUID()

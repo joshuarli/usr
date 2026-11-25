@@ -1,0 +1,4 @@
+#!/bin/sh
+set -eu
+"$HOME/.local/bin/harness-enabled" devin || exit $?
+exec "$HOME/.local/bin/devin" "$@"

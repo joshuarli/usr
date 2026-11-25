@@ -1,3 +1,4 @@
+import { assertHarnessEnabled } from "./harnesses.ts"
 import { readFileSync } from "node:fs"
 import { dirname } from "node:path"
 import { randomUUID } from "node:crypto"
@@ -85,6 +86,7 @@ function continueChild(child: FxChildEntry, note: string) {
 async function call(tool: string, raw: unknown): Promise<unknown> {
   if (!(CHILD_TOOLS as readonly string[]).includes(tool)) throw new Error("unknown tool " + tool)
   const name = tool as keyof typeof SCHEMAS, args = exact(raw, name)
+  if (name === "spawn" || name === "resume" || name === "steer") assertHarnessEnabled("fx")
   switch (name) {
     case "spawn": {
       const tier = args.tier, task = text(args.task, "task"), intent = text(args.intent_id, "intent_id", 128)

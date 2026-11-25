@@ -32,7 +32,7 @@ const FIELDS = {
 
 const routingSummary = BRIDGE_TIERS.map(name => {
   const routes = routesOf(ROOT_PLANS[name])
-  return `${name}: ${routes.map(route => route.executor).join(" then ")}${routes.length === 1 ? ", no fallback" : ""}`
+  return `${name}: ${routes.map(route => route.executor).join(" then ") || "disabled"}${routes.length === 1 ? ", no fallback" : ""}`
 }).join("; ")
 
 export const COMMANDS: Record<CommandName, {
@@ -44,11 +44,11 @@ export const COMMANDS: Record<CommandName, {
   },
   start: {
     tool: "worker_start", cli: "start", fields: ["cwd", "title", "tier", "scope", "brief"],
-    description: `Delegate a scoped task using policy routes (${routingSummary}). Never start a duplicate. Admission is not completion: run the returned watch command as a background task to learn when the worker ends. Pi dispatches carry run_deadline_ms (the pinned 4-hour wall clock); FX dispatches carry the admitted wall deadline in run_deadline_ms and their step budget in run_step_limit. Each is null when the backend has no such cap.`,
+    description: `Delegate a scoped task using policy routes (${routingSummary}). Never start a duplicate. Admission is not completion: run the returned watch command as a background task to learn when the worker ends. run_deadline_ms and run_step_limit expose the admitted wall-clock and step budgets; each is null when the backend has no such cap.`,
   },
   status: {
     tool: "worker_status", cli: "status", fields: ["cwd", "session_id"],
-    description: "Observe actual backend/model, claimed proof, changed/out-of-scope paths, and HEAD. Reports continuations used against the continuation cap and steers used against the steer cap. A run that ends without a final `ACCEPTANCE: met` line reports state incomplete and acceptance_blocked. A Codex or Command Code run whose recorded process is gone without a terminal receipt or whose PID identity changed is interrupted. A Pi or FX run that reaches its wall-clock deadline reports state timed_out with the partial output, distinct from a provider failure. run_deadline_ms and run_step_limit show the effective budgets (null when unbounded or unrecorded). A timed-out or cancelled FX run whose termination the supervisor verified can be resumed in the same native session with worker_resume. When fallback_reason is set, fallback_notice identifies the switch. The original provider message is kept in fallback_detail for diagnosis; error is null once the fallback has safely taken over.",
+    description: "Observe actual backend/model, claimed proof, changed/out-of-scope paths, and HEAD. Reports continuations used against the continuation cap and steers used against the steer cap. A run that ends without a final `ACCEPTANCE: met` line reports state incomplete and acceptance_blocked. A process run whose recorded process is gone without a terminal receipt or whose PID identity changed is interrupted. A run that reaches its wall-clock deadline reports state timed_out with the partial output, distinct from a provider failure. run_deadline_ms and run_step_limit show the effective budgets (null when unbounded or unrecorded). A timed-out or cancelled supervised run whose termination the supervisor verified can be resumed in the same native session with worker_resume. When fallback_reason is set, fallback_notice identifies the switch. The original provider message is kept in fallback_detail for diagnosis; error is null once the fallback has safely taken over.",
   },
   resume: {
     tool: "worker_resume", cli: "resume", fields: ["cwd", "session_id", "feedback"],
@@ -56,7 +56,7 @@ export const COMMANDS: Record<CommandName, {
   },
   steer: {
     tool: "worker_steer", cli: "steer", fields: ["cwd", "session_id", "note"],
-    description: "Parent ONLY: redirect a RUNNING worker in the same scope and write boundaries. Pi workers forward the note to the native pi-subagents steer RPC. Codex and Command Code runs are interrupted, termination is proven, and the same session resumes with the note; attempts are unchanged and a separate steer cap applies. A finished session is refused; use worker_resume.",
+    description: "Parent ONLY: redirect a RUNNING worker in the same scope and write boundaries. RPC workers receive the note directly. Process workers are interrupted, termination is proven, and the same session resumes with the note; attempts are unchanged and a separate steer cap applies. A finished session is refused; use worker_resume.",
   },
   cancel: {
     tool: "worker_cancel", cli: "cancel", fields: ["cwd", "session_id"],

@@ -28,6 +28,8 @@ Both arguments are required. Normalize the agent name, but never guess the sessi
 
 If the user explicitly wants to reopen the original agent, provide the correct host-shell command (or execute it only when a suitable interactive terminal and explicit authority are available). Native resume uses that agent's own session state; it is **not** what this skill does by default:
 
+<!-- policy:begin resume-commands -->
+<!-- Generated from tools/pi-subagent-bridge/src/policy.ts; run make generate. -->
 | Agent | Host-shell command |
 | --- | --- |
 | Codex | `codex resume <ID>` |
@@ -35,11 +37,10 @@ If the user explicitly wants to reopen the original agent, provide the correct h
 | Muse Code | `muse resume <ID>` |
 | OpenCode | `opencode --session <ID>` |
 | Pi | `pi --session <ID>` |
-| Command Code | `cmd --session <ID>` |
 | Antigravity CLI | `agy --conversation <ID>` |
-| DeepSeek Harness | `dsh tui --resume <ID>` |
 | fx | `fx resume <ID>` |
 | Devin | `devin --resume <ID>` |
+<!-- policy:end resume-commands -->
 
 These commands require the relevant CLI, its own surviving session data/service, and often the original workspace. Do not try to run an interactive nested agent through a non-interactive shell tool.
 

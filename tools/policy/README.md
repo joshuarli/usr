@@ -1,11 +1,21 @@
 # Model policy projections
 
+[`harnesses.json`](../../harnesses.json) is the single on/off control for every
+harness and subscription provider. Flip one boolean, then run `make generate`.
+Disabled harnesses disappear from shared instructions, delegation tables and
+resume suggestions; their configured pins and authored definitions remain in
+source so enabling the same switch restores them. Runtime launch and probe
+guards read the switches directly. `opencode-go` controls the headless provider
+independently of the native `opencode` harness, while `pi` disables all SDK lanes.
+No enabled route means a blocked tier; generation never invents a replacement.
+
 Root admission plans and native exceptions are authored in
 [`policy.ts`](../pi-subagent-bridge/src/policy.ts): `ROOT_PLANS` holds one typed
 `RootPlan` per admitted bridge tier (`scout`, `mechanic`, `worker`: Codex,
 Command Code and an ordered Pi list), and `routesOf` derives the ordered route
-list that the JSON export, the tables and the MCP summary share. `expert` is a
-harness-native lane with no bridge route. Nested Pi pins, tool sets and
+list that the JSON export, the tables and the MCP summary share after applying
+the harness switches. `expert` has one configured SDK route and no provider
+fallback; native parents keep their own expert lanes. Nested Pi pins, tool sets and
 descendant ceilings are authored in
 [`tier-policy.ts`](../pi-subagent-bridge/src/tier-policy.ts). The first module
 composes both domains into one pure `POLICY` value. Runtime code imports these
@@ -44,8 +54,21 @@ defaults, profile descriptions, unrelated harness settings and authored
 instructions remain outside generator ownership. Pi expert profiles back the
 first-class Pi expert bridge lane.
 
+[`templates/pi-settings.json`](templates/pi-settings.json) is the authored source
+for Pi settings. Edit session defaults and per-profile custom settings there;
+`dotfiles/base/.pi/agent/settings.json` is its generated effective projection.
+The template omits managed model pins, which still come from the typed policy.
+Generation omits disabled profiles from `agentOverrides` and `modelScope.agents`,
+filters the model allowlist, and filters each profile's `allowedAgents` to
+installed enabled children. This keeps the SDK from resolving absent profiles.
+Custom settings survive toggling because they remain in the source template.
+
+
 Named `policy:begin` / `policy:end` blocks are the only Markdown template
-mechanism. Rendering rejects missing, duplicate, nested, malformed and unknown
+mechanism. Their reversible templates live in `generate.ts` and
+`harness-context.ts`, outside installed agent context. Native-parent instructions
+share one block so disabled harness names do not survive as empty markers;
+disabled content is removed, never hidden in comments. Rendering rejects missing, duplicate, nested, malformed and unknown
 markers before changing any output. Native profile frontmatter uses the same
 markers in YAML comments. Generated documents are ordinary, complete files;
 session hooks and installed harnesses never run a renderer.
@@ -128,7 +151,10 @@ generation ever runs over another live session's claim. Mutations are
 serialized by a lock directory with an abandoned-lock bound, so concurrent
 claimants cannot silently overwrite each other.
 
-The generator tests prove reproduction, ownership and propagation. One
+The generator tests prove reproduction, ownership and propagation. They disable
+each switch independently, disable every harness together, and restore the
+original instructions byte-for-byte after reenabling; repeated generation in
+either state is a no-op. One
 hand-written list names every remaining policy dimension (Codex and
 Command Code pins per lower tier, the Pi fallback list, OpenCode, native
 fallback, direct Antigravity models, banned families and each native Pi field);

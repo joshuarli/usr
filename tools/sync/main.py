@@ -18,6 +18,7 @@ from links import LinkError, discover
 from link_plan import plan_links
 from link_apply import LinkApplyError, apply as apply_link_plan
 from installer import Installer, SkipInstall, default_tools
+from harnesses import install_enabled, read_switches
 import pi_auth
 from pi_extensions import missing as missing_pi_extensions
 from report import TaskLine, render, render_json
@@ -90,7 +91,8 @@ def tool_list(ctx: Context) -> list[str]:
         arch = "aarch64"
     return default_tools(ctx.platform, arch, ctx.profile,
                          ctx.root / "host/alpine/tools-server.txt",
-                         rustup=os.access(ctx.home / ".cargo/bin/rustup", os.X_OK))
+                         rustup=os.access(ctx.home / ".cargo/bin/rustup", os.X_OK),
+                         harness_switches=read_switches(ctx.root))
 
 
 def _link_plan(ctx: Context):
@@ -157,12 +159,14 @@ def pi_extensions_apply(ctx: Context) -> None:
 
 
 def bridge_status(ctx: Context) -> Probe:
-    r = command(ctx, sys.executable, "-I", str(BRIDGE), "check", capture=True)
+    mode = () if read_switches(ctx.root)["pi"] else ("--core",)
+    r = command(ctx, sys.executable, "-I", str(BRIDGE), "check", *mode, capture=True)
     return Probe(r.returncode == 0, "bridge registered" if r.returncode == 0 else (r.stderr.strip() or "bridge missing"))
 
 
 def bridge_apply(ctx: Context) -> None:
-    required(command(ctx, sys.executable, "-I", str(BRIDGE), "install"), "Claude MCP registration")
+    mode = () if read_switches(ctx.root)["pi"] else ("--core",)
+    required(command(ctx, sys.executable, "-I", str(BRIDGE), "install", *mode), "Claude MCP registration")
 
 
 def pi_bridge_status(ctx: Context) -> Probe:
@@ -362,7 +366,8 @@ def graph(ctx: Context, names: list[str], *, setup: bool) -> Graph:
     nodes.append(Task("pi-extensions", ("links", "tool:pi"),
                       lambda: pi_extensions_status(ctx), lambda: pi_extensions_apply(ctx),
                       lambda: pi_extensions_status(ctx), frozenset({"pi-config"}), reconcile=True))
-    nodes.append(Task("claude-mcp", ("pi-extensions", "tool:nodejs", "tool:pi"),
+    claude_bridge_deps = ("pi-extensions", "tool:nodejs", "tool:pi") if read_switches(ctx.root)["pi"] else ("links", "tool:nodejs")
+    nodes.append(Task("claude-mcp", claude_bridge_deps,
                       lambda: bridge_status(ctx), lambda: bridge_apply(ctx),
                       lambda: bridge_status(ctx), frozenset({"claude-config", "pi-sdk-install"})))
     nodes.append(Task("pi-mcp", ("pi-extensions", "tool:nodejs", "tool:pi"),
@@ -391,9 +396,27 @@ def default_goals(ctx: Context) -> list[str]:
     if ctx.platform == "darwin":
         goals.append("host:mac-packages")
     if ctx.profile != "server":
-        goals.extend(["claude-mcp", "pi-mcp", "pi-auth", "opencode-mcp", "companions-mcp"])
+        goals.extend(bridge_goals(ctx))
     if ctx.platform == "darwin" or os.access(ctx.home / ".cargo/bin/rustup", os.X_OK):
         goals.append("kache")
+    return goals
+
+
+def bridge_goals(ctx: Context) -> list[str]:
+    switches = read_switches(ctx.root)
+    goals: list[str] = []
+    has_bridge_lane = switches["codex"] or switches["command-code"] or (
+        switches["pi"] and (switches["opencode-go"] or switches["devin"]))
+    if switches["claude"] and has_bridge_lane:
+        goals.append("claude-mcp")
+    if switches["pi"]:
+        goals.append("pi-mcp")
+        if switches["opencode-go"]:
+            goals.append("pi-auth")
+    if switches["opencode"]:
+        goals.append("opencode-mcp")
+    if any(switches[name] for name in ("claude", "codex", "opencode")):
+        goals.append("companions-mcp")
     return goals
 
 
@@ -460,7 +483,7 @@ def main(argv: list[str]) -> int:
     if command_name in {"apply", "plan", "doctor"}:
         def probes() -> list[TaskLine]:
             from auth import login_lines
-            return login_lines(ctx.home, ctx.env)
+            return login_lines(ctx.home, ctx.env, switches=read_switches(ctx.root))
 
         pool = ThreadPoolExecutor(max_workers=1)
         auth_pool = pool
@@ -500,11 +523,16 @@ def main(argv: list[str]) -> int:
     emit = (lambda lines: render_json(command_name, host, lines)) if as_json else (lambda lines: render(command_name, host, lines, show_all))
     defaults = tool_list(ctx) if command_name in ("apply", "plan", "doctor") or (command_name == "tools" and not argv) else []
     chosen = argv if command_name == "tools" and argv else defaults
+    if command_name == "tools" and argv:
+        switches = read_switches(ctx.root)
+        disabled = [name for name in chosen if not install_enabled(name, switches)]
+        if disabled:
+            raise GraphError(f"disabled in harnesses.json: {', '.join(disabled)}")
     full = graph(ctx, chosen, setup=command_name in {"apply", "plan", "doctor"})
     if command_name == "links":
         selected = full.select(["links"])
     elif command_name == "bridge":
-        selected = full.select(["claude-mcp", "pi-mcp", "pi-auth", "opencode-mcp", "companions-mcp"])
+        selected = full.select(bridge_goals(ctx))
     elif command_name == "tools":
         selected = full.select(["tool:" + name for name in chosen])
     elif command_name in {"apply", "plan", "doctor"}:

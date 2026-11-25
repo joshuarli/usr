@@ -2,7 +2,11 @@ import test from "node:test"
 import assert from "node:assert/strict"
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync, existsSync } from "node:fs"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { dirname, join } from "node:path"
+import { fileURLToPath } from "node:url"
+import { ALL_HARNESSES, NO_HARNESSES } from "./harness-fixtures.ts"
+import { policyForHarnesses } from "../src/policy.ts"
+import { renderOutputs } from "../../policy/generate.ts"
 import {
   assertDelegation, canDelegate, DELEGATION, GO_TIER_MODELS,
   DEVIN_TIER_MODELS, DEVIN_AGENT_NAMES, DEVIN_DELEGATION,
@@ -224,4 +228,48 @@ test("Devin pins SWE-2.1 thinking by tier; escapes fail closed", () => {
   assert.ok(nestedCallRefusal("expert", "subagent", {
     agent: "devin-worker", task: "Escalate", options: { agentScope: "user" },
   }, "devin"))
+})
+
+
+test("generated Pi settings and profile validation agree for independently disabled providers", () => {
+  const repository = fileURLToPath(new URL("../../..", import.meta.url))
+  const prefix = "dotfiles/base/.pi/agent/"
+  const scenarios = [
+    { name: "both", switches: ALL_HARNESSES, names: [...TIERS, ...Object.values(DEVIN_AGENT_NAMES)] },
+    { name: "Go only", switches: { ...ALL_HARNESSES, devin: false }, names: [...TIERS] },
+    { name: "Devin only", switches: { ...ALL_HARNESSES, "opencode-go": false }, names: [...Object.values(DEVIN_AGENT_NAMES)] },
+    { name: "none", switches: NO_HARNESSES, names: [] },
+  ]
+  for (const scenario of scenarios) {
+    const home = mkdtempSync(join(tmpdir(), "usr-enabled-profiles-"))
+    try {
+      const outputs = renderOutputs(repository, policyForHarnesses(scenario.switches))
+      for (const output of outputs) {
+        if (!output.path.startsWith(prefix)) continue
+        const local = output.path.slice(prefix.length)
+        const agent = /^agents\/(.+)\.md$/.exec(local)
+        if (agent && !scenario.names.some(name => name === agent[1])) continue
+        const path = join(home, local)
+        mkdirSync(dirname(path), { recursive: true })
+        writeFileSync(path, output.content)
+      }
+      assert.doesNotThrow(() => assertTierProfiles(home, scenario.switches), scenario.name)
+      if (scenario.name === "Go only") {
+        const settings = profileSettings()
+        writeFileSync(join(home, "settings.json"), JSON.stringify(settings))
+        assert.throws(() => assertTierProfiles(home, scenario.switches), /allowlist/)
+      }
+    } finally { rmSync(home, { recursive: true, force: true }) }
+  }
+})
+
+test("nested disabled providers reject new work while allowing observation and cancellation", () => {
+  const task = { agent: "devin-worker", task: "Implement", options: { agentScope: "user" } }
+  assert.match(nestedCallRefusal("worker", "subagent", task, "devin", { ...ALL_HARNESSES, devin: false }) ?? "", /disabled/)
+  const goTask = { ...task, agent: "scout" }
+  assert.match(nestedCallRefusal("worker", "subagent", goTask, "devin", { ...ALL_HARNESSES, "opencode-go": false }) ?? "", /disabled/)
+  for (const action of ["resume", "steer"])
+    assert.match(nestedCallRefusal("worker", "subagent", { action, id: "old" }, "go", NO_HARNESSES) ?? "", /disabled/)
+  for (const action of ["status", "interrupt"])
+    assert.equal(nestedCallRefusal("worker", "subagent", { action, id: "old" }, "go", NO_HARNESSES), undefined)
 })

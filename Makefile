@@ -14,6 +14,7 @@ deploy-setup.sh: ## Deploy the Alpine bootstrap Worker
 
 generate: ## Refresh checked-in model policy projections
 	@$(NODE) tools/policy/generate.ts
+	@$(NODE) tools/policy/subagent-visualization.ts
 
 check-generated: ## Check policy projections without changing files
 	@$(NODE) tools/policy/generate.ts --check

@@ -7,6 +7,7 @@ anything in the developer's HOME.
 from __future__ import annotations
 
 import os
+import json
 from pathlib import Path
 from unittest.mock import patch
 import subprocess
@@ -686,6 +687,99 @@ class LinkTests(unittest.TestCase):
         p = self.plan()
         self.assertNotIn(foreign_elsewhere, [a.path for a in p.actions])
         self.assertNotIn(foreign_live, [a.path for a in p.actions])
+
+    def test_63_disabled_harness_unlinks_only_managed_context_and_restores_it(self):
+        switches = {name: True for name in (
+            "claude", "codex", "command-code", "pi", "opencode", "opencode-go",
+            "devin", "antigravity", "copilot", "fx", "muse", "deepseek")}
+        config = self.root / "harnesses.json"
+        config.write_text(json.dumps(switches))
+        self.source(".commandcode/settings.json")
+        self.source(".commandcode/agents/usr-worker.md")
+        self.source(".local/lib/harness-shims/cmd")
+        self.sync()
+        credentials = self.home / ".commandcode/auth.json"
+        credentials.write_text("keep credentials")
+        session = self.home / ".commandcode/session.json"
+        session.write_text("keep session")
+        switches["command-code"] = False
+        config.write_text(json.dumps(switches))
+        self.sync()
+        self.assertFalse((self.home / ".commandcode/settings.json").is_symlink())
+        self.assertFalse((self.home / ".commandcode/agents/usr-worker.md").is_symlink())
+        self.assertTrue((self.home / ".local/lib/harness-shims/cmd").is_symlink())
+        self.assertEqual(credentials.read_text(), "keep credentials")
+        self.assertEqual(session.read_text(), "keep session")
+        switches["command-code"] = True
+        config.write_text(json.dumps(switches))
+        self.sync()
+        self.assertTrue((self.home / ".commandcode/agents/usr-worker.md").is_symlink())
+
+    def test_64_pi_profiles_follow_provider_switches_and_shared_contract_survives(self):
+        switches = {name: True for name in (
+            "claude", "codex", "command-code", "pi", "opencode", "opencode-go",
+            "devin", "antigravity", "copilot", "fx", "muse", "deepseek")}
+        config = self.root / "harnesses.json"
+        self.source(".pi/agent/agents/devin-worker.md")
+        self.source(".pi/agent/agents/worker.md")
+        self.source(".pi/agent/settings.json")
+        self.source(".codex/AGENTS.md")
+        self.source(".codex/config.toml")
+        switches.update({"devin": False, "codex": False})
+        config.write_text(json.dumps(switches))
+        self.sync()
+        self.assertFalse((self.home / ".pi/agent/agents/devin-worker.md").is_symlink())
+        self.assertTrue((self.home / ".pi/agent/agents/worker.md").is_symlink())
+        self.assertTrue((self.home / ".codex/AGENTS.md").is_symlink())
+        self.assertFalse((self.home / ".codex/config.toml").is_symlink())
+        switches["opencode-go"] = False
+        config.write_text(json.dumps(switches))
+        self.sync()
+        self.assertFalse((self.home / ".pi/agent/agents/worker.md").is_symlink())
+        self.assertTrue((self.home / ".pi/agent/settings.json").is_symlink())
+        switches["pi"] = False
+        config.write_text(json.dumps(switches))
+        self.sync()
+        self.assertFalse((self.home / ".pi/agent/settings.json").is_symlink())
+
+    def test_65_all_disabled_harness_context_including_directory_links_is_absent(self):
+        from harnesses import CONTEXT_HARNESSES, HARNESS_IDS
+        config = self.root / "harnesses.json"
+        config.write_text(json.dumps(dict.fromkeys(HARNESS_IDS, True)))
+        for prefix in CONTEXT_HARNESSES:
+            self.source(prefix + "/settings.json")
+        self.marker(".claude/agents")
+        self.source(".claude/agents/custom.md")
+        self.source(".codex/AGENTS.md")
+        self.sync()
+        # Replacing a link invalidates ownership; disablement cannot remove it.
+        replaced = self.home / ".commandcode/settings.json"
+        replaced.unlink()
+        replaced.symlink_to(self.root / "foreign")
+        config.write_text(json.dumps(dict.fromkeys(HARNESS_IDS, False)))
+        self.sync()
+        for prefix in CONTEXT_HARNESSES:
+            path = self.home / prefix / "settings.json"
+            if path != replaced:
+                self.assertFalse(path.is_symlink(), str(path))
+        self.assertTrue(replaced.is_symlink())
+        self.assertEqual(os.readlink(replaced), str(self.root / "foreign"))
+        self.assertFalse((self.home / ".claude/agents").is_symlink())
+        self.assertTrue((self.home / ".codex/AGENTS.md").is_symlink())
+
+    def test_66_declared_switchboard_must_validate_before_link_changes(self):
+        reader = self.root / "tools/sync/harnesses.py"
+        reader.parent.mkdir(parents=True)
+        reader.touch()
+        self.source(".commandcode/settings.json")
+        with self.assertRaises(FileNotFoundError):
+            self.plan()
+        config = self.root / "harnesses.json"
+        for value in ("{", '{"command-code": false}'):
+            config.write_text(value)
+            with self.assertRaises(ValueError):
+                self.plan()
+        self.assertFalse((self.home / ".commandcode").exists())
 
 
 if __name__ == "__main__":

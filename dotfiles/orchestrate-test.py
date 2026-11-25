@@ -9,6 +9,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 POLICY = json.loads((ROOT / "tools/policy/policy.generated.json").read_text())
 TIERS = POLICY["tiers"]
+HARNESSES = POLICY["harnesses"]
+NATIVE_LABELS = {"opencode": "OpenCode", "devin": "Devin", "command-code": "Command Code", "antigravity": "Antigravity", "copilot": "Copilot CLI"}
 
 
 def read(path: str) -> str:
@@ -143,13 +145,22 @@ class OrchestrateTests(unittest.TestCase):
         cls.skill_blocks = html_blocks("dotfiles/base/.agents/skills/orchestrate/SKILL.md")
 
     def block(self, name: str) -> str:
+        labels = {**NATIVE_LABELS, "native-fallback": "Claude Code"}
+        if name in labels:
+            body = self.skill_blocks["native-parents"]
+            match = re.search(r"(?ms)^\*\*" + re.escape(labels[name]) + r"[^\n]*.*?(?=^\*\*|\Z)", body)
+            return match.group(0).strip() if match else ""
         self.assertIn(name, self.skill_blocks)
         return self.skill_blocks[name]
 
     def assert_summary_identifiers(self, block: str, bridge_identifier: bool = False) -> None:
-        expert = POLICY["rootRoutes"]["expert"][0]
+        expert = POLICY["rootRoutes"]["expert"]
         expected = Counter(TIERS)
-        expected.update(["expert", policy_route(expert)[1], expert["effort"], "god"])
+        expected.update(["expert", "god"])
+        if expert:
+            expected.update([policy_route(expert[0])[1], expert[0]["effort"]])
+        if HARNESSES["claude"]:
+            expected.update(["opus", "xhigh"])
         expected.update(POLICY["bannedModels"])
         if bridge_identifier:
             expected.update(["pi-subagent-bridge"])
@@ -164,12 +175,15 @@ class OrchestrateTests(unittest.TestCase):
         for row in rows:
             tier = row["Tier"]
             routes = POLICY["rootRoutes"][tier]
-            self.assertEqual(route_segments(row["Primary"]), [policy_route(routes[0])])
+            self.assertEqual(route_segments(row["Primary"]), [policy_route(routes[0])] if routes else [])
             self.assertEqual(route_segments(row["Fallback (in order)"]), [policy_route(route) for route in routes[1:]])
 
     def assert_generated_pi_nesting_table(self):
         blocks = html_blocks("tools/pi-subagent-bridge/README.md")
         tables = markdown_tables(blocks["pi-nesting"])
+        if not HARNESSES["pi"] or not HARNESSES["opencode-go"]:
+            self.assertEqual(tables, [])
+            return
         self.assertEqual(len(tables), 1)
         rows = tables[0]
         delegation = POLICY["nativePi"]["delegation"]
@@ -182,7 +196,7 @@ class OrchestrateTests(unittest.TestCase):
     def test_generated_policy_blocks_exist_exactly_once(self):
         html_expectations = {
             "dotfiles/base/.agents/skills/orchestrate/SKILL.md": {
-                "routing-intro", "opencode", "devin", "command-code", "antigravity", "copilot", "native-fallback",
+                "routing-intro", "native-parents", "go-boundary", "expert-guidance", "devin-review", "nesting",
             },
             "dotfiles/base/.codex/AGENTS.md": {"delegation", "direct-models"},
             "dotfiles/base/.agents/instructions/lean.md": {"delegation"},
@@ -202,9 +216,12 @@ class OrchestrateTests(unittest.TestCase):
 
     def test_every_harness_uses_shared_bridge(self):
         block = self.block("routing-intro")
-        self.assert_summary_identifiers(block, bridge_identifier=True)
-        for harness in ("OpenCode", "Devin", "Command Code", "Antigravity", "Copilot CLI"):
-            self.assertIn(harness, block)
+        self.assert_summary_identifiers(block, bridge_identifier=any(POLICY["rootRoutes"].values()))
+        for harness, label in NATIVE_LABELS.items():
+            if HARNESSES[harness]:
+                self.assertIn(label, block)
+            else:
+                self.assertNotIn(label, block)
         methods = ("worker_model_check", "worker_start", "worker_status", "worker_resume")
         paragraphs = re.split(r"\n\s*\n", self.text)
         self.assertTrue(any(all("`" + method + "`" in paragraph for method in methods) for paragraph in paragraphs))
@@ -215,9 +232,12 @@ class OrchestrateTests(unittest.TestCase):
         self.assertEqual(set(POLICY["rootRoutes"]), set(TIERS))
         self.assertEqual(set(POLICY["nativePi"]["goModels"]), set(TIERS))
         self.assertEqual(set(POLICY["nativePi"]["devinModels"]), set(TIERS))
-        for tier in TIERS:
-            self.assertTrue(POLICY["rootRoutes"][tier])
-        self.assertEqual(len(POLICY["rootRoutes"]["expert"]), 1)
+        for routes in POLICY["rootRoutes"].values():
+            for route in routes:
+                self.assertTrue(HARNESSES[route["executor"]])
+                if route["executor"] == "pi":
+                    self.assertTrue(HARNESSES[route["providerID"]])
+        self.assertLessEqual(len(POLICY["rootRoutes"]["expert"]), 1)
         self.assertNotIn("antigravity", {route["executor"] for routes in POLICY["rootRoutes"].values() for route in routes})
         self.assertNotIn("god", POLICY["rootRoutes"])
         for family in POLICY["bannedModels"]:
@@ -234,6 +254,10 @@ class OrchestrateTests(unittest.TestCase):
     def test_direct_antigravity_models_require_an_availability_check(self):
         contract_blocks = html_blocks("dotfiles/base/.codex/AGENTS.md")
         direct = contract_blocks["direct-models"]
+        if not HARNESSES["antigravity"]:
+            self.assertEqual(direct.strip(), "")
+            self.assertEqual(self.block("antigravity"), "")
+            return
         direct_models = POLICY["antigravityDirect"]
         for model in direct_models["models"]:
             self.assertIn("`" + model + "`", direct)
@@ -286,9 +310,10 @@ class OrchestrateTests(unittest.TestCase):
         self.assertNotIn("usr-opencode-worker", json.dumps(opencode))
 
     def test_native_subagents_cover_claude_code(self):
-        for harness in ("OpenCode", "Devin", "Codex", "Pi", "Claude Code"):
-            self.assertIn(harness, self.text)
         block = self.block("native-fallback")
+        if not HARNESSES["claude"]:
+            self.assertEqual(block, "")
+            return
         mappings = re.findall(r"\b(scout|mechanic|worker|expert)\s*:\s*`([^`]+)`", block)
         fallback = POLICY["nativeFallback"]
         self.assertEqual(set(fallback["claudeModels"]), set(fallback["tiers"]))
@@ -313,6 +338,9 @@ class OrchestrateTests(unittest.TestCase):
 
     def test_opencode_exception(self):
         block = self.block("opencode")
+        if not HARNESSES["opencode"]:
+            self.assertEqual(block, "")
+            return
         policy = POLICY["opencode"]
         tables = markdown_tables(block)
         self.assertEqual(len(tables), 1)
@@ -339,6 +367,9 @@ class OrchestrateTests(unittest.TestCase):
 
     def test_devin_native_agents_pin_swe21_variants(self):
         block = self.block("devin")
+        if not HARNESSES["devin"]:
+            self.assertEqual(block, "")
+            return
         pins = POLICY["devinNative"]
         self.assertEqual(set(pins), set(TIERS))
         tables = markdown_tables(block)
@@ -367,6 +398,9 @@ class OrchestrateTests(unittest.TestCase):
         pins = POLICY["copilotNative"]
         self.assertEqual(set(pins), set(TIERS))
         block = self.block("copilot")
+        if not HARNESSES["copilot"]:
+            self.assertEqual(block, "")
+            return
         tables = markdown_tables(block)
         self.assertEqual(len(tables), 1)
         rows = tables[0]
@@ -406,6 +440,16 @@ class OrchestrateTests(unittest.TestCase):
         block = self.block("command-code")
         config = POLICY["commandNative"]
         self.assertEqual(set(config), set(TIERS) | {"pilot"})
+        if not HARNESSES["command-code"]:
+            self.assertEqual(block, "")
+            self.assertNotIn("Command Code", self.text)
+            for pin in config.values():
+                content = yaml_blocks("dotfiles/base/.commandcode/agents/" + pin["name"] + ".md")
+                expected = {"model": pin["model"]}
+                if "effort" in pin:
+                    expected["reasoningEffort"] = pin["effort"]
+                self.assertEqual(yaml_fields(content["native-agent"]), expected)
+            return
         tables = markdown_tables(block)
         self.assertEqual(len(tables), 1)
         rows = tables[0]
@@ -438,19 +482,28 @@ class OrchestrateTests(unittest.TestCase):
             self.assertIn("`" + identifier + "`", block)
 
     def test_global_rule(self):
-        expert = POLICY["rootRoutes"]["expert"][0]
+        expert = POLICY["rootRoutes"]["expert"]
         for path in ("dotfiles/base/.codex/AGENTS.md", "dotfiles/base/.agents/instructions/lean.md"):
             generated = html_blocks(path)["delegation"]
-            self.assertIn("`pi-subagent-bridge`", generated)
+            if any(POLICY["rootRoutes"].values()):
+                self.assertIn("`pi-subagent-bridge`", generated)
+            else:
+                self.assertIn("blocked", generated)
             self.assertIn("`orchestrate`", generated)
             self.assertIn("`god`", generated)
             for family in POLICY["bannedModels"]:
                 self.assertIn("`" + family + "`", generated)
-            for harness in ("OpenCode", "Devin", "Command Code", "Antigravity", "Copilot CLI"):
-                self.assertIn(harness, generated)
+            for harness, label in NATIVE_LABELS.items():
+                if HARNESSES[harness]:
+                    self.assertIn(label, generated)
+                else:
+                    self.assertNotIn(label, generated)
         generated = html_blocks("dotfiles/base/.codex/AGENTS.md")["delegation"]
-        self.assertIn("`" + policy_route(expert)[1] + "`", generated)
-        self.assertIn("`" + expert["effort"] + "`", generated)
+        if expert:
+            self.assertIn("`" + policy_route(expert[0])[1] + "`", generated)
+            self.assertIn("`" + expert[0]["effort"] + "`", generated)
+        else:
+            self.assertIn("blocked", generated)
 
 
     def test_policy_claim_guidance(self):

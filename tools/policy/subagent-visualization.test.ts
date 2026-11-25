@@ -3,8 +3,9 @@ import assert from "node:assert/strict"
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs"
 import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
-import { POLICY } from "../pi-subagent-bridge/src/policy.ts"
-import { main } from "./subagent-visualization.ts"
+import { POLICY, policyForHarnesses } from "../pi-subagent-bridge/src/policy.ts"
+import { HARNESS_IDS, HARNESS_SWITCHES, parseHarnessSwitches } from "../pi-subagent-bridge/src/harnesses.ts"
+import { html as renderHtml, main } from "./subagent-visualization.ts"
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..")
 const DESTINATION = "docs/subagents.html"
@@ -64,7 +65,7 @@ test("native lane map labels Copilot candidates and preserves unspecified effort
   const f = fixture()
   try {
     assert.equal(main([], f.root), 0)
-    const html = readFileSync(f.path, "utf8")
+    const html = renderHtml(policyForHarnesses({ ...HARNESS_SWITCHES, "command-code": true }))
     const graph = html.match(/<svg[\s\S]*?<\/svg>/)![0]
     assert.match(graph, /Top-level native parent\?[\s\S]*?Copilot/)
     const headers = [...html.matchAll(/<thead><tr>(.*?)<\/tr><\/thead>/g)][0]![1]
@@ -88,4 +89,19 @@ test("native lane map labels Copilot candidates and preserves unspecified effort
     assert.match(cells[copilot]!, /blocked/)
     assert.match(cells[copilot]!, /no bridge fallback/)
   } finally { f.close() }
+})
+
+test("visualization removes disabled native lanes and renders an entirely blocked configuration", () => {
+  assert.doesNotMatch(renderHtml(), /Command Code|thinkingmachines\/inkling|usr-worker-hy4/)
+  for (const [id, label] of [["claude", "Claude Code"], ["codex", "Codex"], ["command-code", "Command Code"],
+    ["opencode", "OpenCode"], ["devin", "Devin"], ["antigravity", "Antigravity"], ["copilot", "Copilot"]] as const) {
+    const config = { ...HARNESS_SWITCHES, "command-code": true, [id]: false }
+    assert.ok(!renderHtml(policyForHarnesses(config)).includes(label), id)
+  }
+  const disabled = parseHarnessSwitches(Object.fromEntries(HARNESS_IDS.map(id => [id, false])))
+  const blocked = renderHtml(policyForHarnesses(disabled))
+  assert.match(blocked, /Blocked: no enabled harnesses/)
+  assert.match(blocked, /Blocked: no enabled route/)
+  assert.doesNotMatch(blocked, /undefined<|Command Code|Claude Code|Antigravity|Copilot|swe-2/)
+  assert.equal(renderHtml(), renderHtml(POLICY))
 })

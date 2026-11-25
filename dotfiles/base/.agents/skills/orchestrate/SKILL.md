@@ -1,16 +1,16 @@
 ---
 name: orchestrate
-description: "Route coding subagents through native harness lanes or the Pi bridge; scope and verify; campaigns only when useful. Skip work cheaper to do directly."
+description: "Route coding subagents through native harness lanes or the shared bridge; scope and verify; campaigns only when useful. Skip work cheaper to do directly."
 ---
 
 # Orchestrate
 
 <!-- policy:begin routing-intro -->
 <!-- Generated from tools/pi-subagent-bridge/src/policy.ts; run make generate. -->
-**All scout/mechanic/worker/expert coding subagents use `pi-subagent-bridge` by default**, except top-level OpenCode, Devin, Command Code, Antigravity and Copilot CLI native parents described below. Bridge tiers: `scout`, `mechanic`, `worker`, `expert`. The `expert` tier has one route, Pi `devin/swe-2.1` (`max`), and no fallback: when that route is unavailable or exhausted the expert lane is blocked, never moved to another model. Devin bridge lanes are currently disabled because the free tier admits about one concurrent lane and throttles mid-run, stopping lanes with partial edits, so the bridge's expert tier is blocked and the lower tiers' ladders omit Devin; Claude Code parents run expert work as native subagents (below). Top-level OpenCode, Devin, Command Code, Antigravity and Copilot CLI parents keep their native expert agents (below). There is no `god` tier. The model families `gemini-3.8` and `gemini-4-argon` and `gemini-4-carbon` and `gpt-6-astra` and `gpt-6.1-astra` and `gpt-6.2-astra` and `claude-fable` and `fable` are prohibited, including every effort variant.
+**All scout/mechanic/worker/expert coding subagents use `pi-subagent-bridge` by default**, except top-level OpenCode, Devin, Antigravity and Copilot CLI native parents described below. Bridge tiers: `scout`, `mechanic`, `worker`, `expert`. The `expert` tier admits only Pi `devin/swe-2.1` (`max`) and has no fallback; unavailable or exhausted capacity blocks the lane. Devin bridge lanes are currently blocked by free-tier throttling. Claude Code expert assignments use native subagents pinned to `opus` at `xhigh`. Top-level OpenCode, Devin, Antigravity and Copilot CLI parents keep their native expert agents. There is no `god` tier. The model families `gemini-3.8` and `gemini-4-argon` and `gemini-4-carbon` and `gpt-6-astra` and `gpt-6.1-astra` and `gpt-6.2-astra` and `claude-fable` and `fable` are prohibited, including every effort variant.
 <!-- policy:end routing-intro -->
 
-<!-- policy:begin opencode -->
+<!-- policy:begin native-parents -->
 <!-- Generated from tools/pi-subagent-bridge/src/policy.ts; run make generate. -->
 **OpenCode exception:** A top-level OpenCode session never uses `pi-subagent-bridge`, at any tier or as a fallback. Delegate only through its configured native agents or built-in `general`/`explore`. When the top-level model is free, every tier must run a free model. The configured tier agents use `opencode/hy4-flash-free` regardless of the top-level model:
 
@@ -22,10 +22,7 @@ description: "Route coding subagents through native harness lanes or the Pi brid
 | expert | high |
 
 Bridge pins, fallbacks, and nesting rules do not apply on this path.
-<!-- policy:end opencode -->
 
-<!-- policy:begin devin -->
-<!-- Generated from tools/pi-subagent-bridge/src/policy.ts; run make generate. -->
 **Devin exception:** A top-level Devin session never uses `pi-subagent-bridge`, at any tier or as a fallback. Delegate only through native `run_subagent` subagents. Use the named agents below for tiered work, never the unpinned built-in `subagent_explore` or parent-inherited `subagent_general`.
 
 | Tier | Native agent | Model |
@@ -36,26 +33,8 @@ Bridge pins, fallbacks, and nesting rules do not apply on this path.
 | expert | `usr-expert` | `swe-2-1-max` |
 
 The parent supplies the native lane worktree, scope registration, acceptance proof and independent review. Children are leaves. Bridge pins, fallbacks, and nesting rules do not apply on this path.
-<!-- policy:end devin -->
 
-<!-- policy:begin command-code -->
-<!-- Generated from tools/pi-subagent-bridge/src/policy.ts; run make generate. -->
-**Command Code exception:** A top-level Command Code session delegates through native `agent` subagents only; never invoke `pi-subagent-bridge` from that parent. Use the named agents below, never the unpinned built-in General/Explore for tiered work. The pilot requires an explicit comparison task; it is not the default worker.
-
-| Tier | Native agent | Model | Effort |
-| --- | --- | --- | --- |
-| scout | `usr-scout` | `thinkingmachines/inkling-2-small:free` | model default |
-| mechanic | `usr-mechanic` | `tencent/hy4-flash` | `high` |
-| worker | `usr-worker` | `deepseek/deepseek-v4.1-flash` | `high` |
-| expert | `usr-expert` | `tencent/hy4` | `high` |
-| worker pilot (explicit only) | `usr-worker-hy4` | `tencent/hy4` | `medium` |
-
-Native agents have separate contexts and cannot spawn another agent. They do not provide bridge admission or Git worktree containment: the parent owns isolation, scope, review, tests and integration. Agent frontmatter pins are not hard enforcement: a per-call model override takes precedence, and unsupported effort silently reverts to model default. Check `cmd --list-models` and the `/model` effort picker on each host before trusting a lane; block it rather than silently substituting. Collect detached results with `agent_output` and run `scope-check --lane` on native writer lanes.
-<!-- policy:end command-code -->
-
-<!-- policy:begin antigravity -->
-<!-- Generated from tools/pi-subagent-bridge/src/policy.ts; run make generate. -->
-**Antigravity CLI exception:** A top-level `agy` session delegates only through native `invoke_subagent`. Never invoke the Pi bridge or use another harness as fallback. The `god` label is a direct parent-session mode, not a bridge tier. Native `usr-*` definitions live under `~/.gemini/config/agents/`.
+**Antigravity CLI exception:** A top-level `agy` session delegates only through native `invoke_subagent`. Never invoke the shared bridge or use another harness as fallback. The `god` label is a direct parent-session mode, not a bridge tier. Native `usr-*` definitions live under `~/.gemini/config/agents/`.
 
 | Tier | Native agent | Target model | Target effort | CLI selector |
 | --- | --- | --- | --- | --- |
@@ -65,11 +44,8 @@ Native agents have separate contexts and cannot spawn another agent. They do not
 | expert | `usr-expert` | `gemini-4-neon-high` | `high` | `pro` |
 
 The CLI's documented agent schema accepts `model: flash/pro` selectors, not exact model IDs or effort pins. Treat these as target allocations, check actual child model and effort on first use, and block any lane resolving to Gemini 3.8, Carbon, Argon or an unexpected model. Carbon may only be selected manually by the owner, outside delegation. See `docs/antigravity-native.md`.
-<!-- policy:end antigravity -->
 
-<!-- policy:begin copilot -->
-<!-- Generated from tools/pi-subagent-bridge/src/policy.ts; run make generate. -->
-**Copilot CLI pilot:** A top-level Copilot session delegates only through the named native `task` agents below; never launch the Pi bridge or use built-in agents as a fallback. Do not use Auto. The following candidate pins require authenticated model and effort attestation before delegation; block any unattested or unavailable lane.
+**Copilot CLI pilot:** A top-level Copilot session delegates only through the named native `task` agents below; never launch the shared bridge or use built-in agents as a fallback. Do not use Auto. The following candidate pins require authenticated model and effort attestation before delegation; block any unattested or unavailable lane.
 
 | Tier | Native agent | Candidate model | Effort |
 | --- | --- | --- | --- |
@@ -79,12 +55,9 @@ The CLI's documented agent schema accepts `model: flash/pro` selectors, not exac
 | expert | `usr-expert` | `mai-code-2` | `high` |
 
 The parent supplies the native lane worktree, scope registration, acceptance proof and independent review. Children are leaves. Required model policy and strict tool lists are not worktree containment or proof of effective effort. See `docs/copilot-native.md`.
-<!-- policy:end copilot -->
 
-<!-- policy:begin native-fallback -->
-<!-- Generated from tools/pi-subagent-bridge/src/policy.ts; run make generate. -->
-**Claude Code native subagents:** while Devin bridge lanes are disabled, `expert` assignments use native subagents pinned to `opus` with `xhigh` effort; if that model is unavailable the expert lane is blocked, never substituted. When no approved bridge backend can run because it is unavailable or exhausted, scout/mechanic/worker use tier-matched native subagents with the same brief, worktree, scope, and independent verification: scout: `haiku`; mechanic: `sonnet`; worker: `sonnet`. A host or session whose environment sets `USR_DELEGATION=native`, such as a cloud environment without bridge providers, uses these native subagents directly and does not start the bridge. Preserve partial work before relaunch. Register native lanes with `scope-check --register` and record their final check with `scope-check --lane`. No hook gates native subagents. Return to the bridge when capacity recovers, unless `USR_DELEGATION=native` is set.
-<!-- policy:end native-fallback -->
+**Claude Code native subagents:** `expert` assignments use native subagents pinned to `opus` with `xhigh` effort; if that model is unavailable the expert lane is blocked, never substituted. When no approved bridge backend can run because it is unavailable or exhausted, scout/mechanic/worker use tier-matched native subagents with the same brief, worktree, scope, and independent verification: scout: `haiku`; mechanic: `sonnet`; worker: `sonnet`. A host or session whose environment sets `USR_DELEGATION=native`, such as a cloud environment without bridge providers, uses these native subagents directly and does not start the bridge. Preserve partial work before relaunch. Register native lanes with `scope-check --register` and record their final check with `scope-check --lane`. No hook gates native subagents. Return to the bridge when capacity recovers, unless `USR_DELEGATION=native` is set.
+<!-- policy:end native-parents -->
 
 Before editing model policy (`tools/pi-subagent-bridge/src/policy.ts` or `tier-policy.ts`) or regenerating its projections, claim the shared checkout-wide policy area with `make policy-claim`, inspect holders with `make policy-claims`, and release it with `make policy-release` when policy work is done.
 
@@ -94,9 +67,15 @@ The parent keeps task framing, orchestration, integration, and independent verif
 
 On the bridge path, call `worker_model_check` for the tier you are about to assign: it returns the exact pins, efforts, fallback order and availability. The full table is in `tools/pi-subagent-bridge/README.md`.
 
-**Pi OpenCode Go boundary:** scout and mechanic Pi fallbacks use pinned OpenCode Go models; Zen models are unusable from headless SDK workers (the gateway rejects non-opencode-client User-Agents with `429 FreeUsageLimitError` — see `docs/pi.md#why-zen-is-not-a-pin`). Other OpenCode Go models and custom endpoints are forbidden. The native Pi `expert` profile is the Pi-native expert lane; it authorizes new expert dispatches from Pi sessions through the native subagent tool.
+<!-- policy:begin go-boundary -->
+<!-- Generated from tools/pi-subagent-bridge/src/policy.ts; run make generate. -->
+**Pi OpenCode Go boundary:** Pi fallbacks use pinned OpenCode Go models; Zen models are unusable from headless SDK workers (the gateway rejects non-opencode-client User-Agents with `429 FreeUsageLimitError` — see `docs/pi.md#why-zen-is-not-a-pin`). Other OpenCode Go models and custom endpoints are forbidden. The native Pi `expert` profile authorizes new expert dispatches from Pi sessions through the native subagent tool.
+<!-- policy:end go-boundary -->
 
-**Expert on the bridge path:** Claude Code, Codex and Pi parents start expert assignments with `worker_start` tier `expert`. Its only route is Devin SWE-2.1 at `max` through the Pi SDK; there is no Command Code, OpenCode Go, Codex, FX or native fallback, so an unavailable or exhausted Devin lane blocks the assignment until it recovers. Native-only parents keep their harness's expert agent (Copilot's attested `usr-expert`, Command Code's `usr-expert`, OpenCode's `expert` agent, Devin's `usr-expert` profile, Antigravity's `usr-expert`). Reserve the lane for exceptional architectural decisions and independent adversarial review. There is no higher tier above expert. Never substitute a weaker model for a blocked expert lane.
+<!-- policy:begin expert-guidance -->
+<!-- Generated from tools/pi-subagent-bridge/src/policy.ts; run make generate. -->
+**Expert assignments:** The `expert` tier admits only Pi `devin/swe-2.1` (`max`) and has no fallback; unavailable or exhausted capacity blocks the lane. Claude Code parents use native `opus` at `xhigh` for expert work. Native-only OpenCode, Devin, Antigravity and Copilot CLI parents keep their configured expert agent. Reserve the lane for exceptional architectural decisions and independent adversarial review. There is no higher tier above expert. Never substitute a weaker model for a blocked expert lane.
+<!-- policy:end expert-guidance -->
 
 **Native expert lanes get the bridge's guarantees by hand.** On native-only parents, nothing enforces scope on a native subagent, so the parent supplies what admission would:
 
@@ -106,28 +85,34 @@ On the bridge path, call `worker_model_check` for the tier you are about to assi
 
 **Default to worker** for substantial well-specified tasks; size alone does not justify an `expert` lane. A read-only `scout` gets no `bash`, `edit`, or `write`. No tier grants privilege to change requirements or affect unrelated files.
 
-## The bridge, except Command Code, OpenCode, Devin, Antigravity and Copilot CLI
+## The bridge
 
 Use the MCP tools `worker_model_check`, `worker_start`, `worker_status`, `worker_resume`, `worker_cancel`, or the `pi-subagent-bridge` CLI shim where a harness has no MCP (see `tools/pi-subagent-bridge/README.md`).
 
-Create a clean worktree under `.work/wt/<slice>`, call `worker_model_check`, then `worker_start`. The schema enforces the scope's shape; the judgment is yours: `acceptance_proof` is a named command with its expected result (or a source file:line for research), `attempt_limit` is 1 unless one same-scope correction is justified, and `stop_on` covers ambiguity, scope expansion, new dependencies, contract changes, and unavailable proof. The `brief` states one outcome, the relevant facts, prohibited changes, and whether one level of Pi fanout is justified.
+Create a clean worktree under `.work/wt/<slice>`, call `worker_model_check`, then `worker_start`. The schema enforces the scope's shape; the judgment is yours: `acceptance_proof` is a named command with its expected result (or a source file:line for research), `attempt_limit` is 1 unless one same-scope correction is justified, and `stop_on` covers ambiguity, scope expansion, new dependencies, contract changes, and unavailable proof. The `brief` states one outcome, the relevant facts, prohibited changes, and whether an allowed level of nested fanout is justified.
 
 **Admission is not completion.** Run the `watch` command that `worker_start` returns as a background task, so the harness wakes you when the worker ends; never end a turn on an admitted worker without one. The default idle threshold is 45 minutes. Then read `worker_status`. For a reviewed same-scope correction, `worker_resume` may add up to two lifetime attempts with `extend_attempts` and `extension_reason`. State `incomplete` means the worker exited without a final `ACCEPTANCE: met`; treat it as unaccepted work, not success. For unmet acceptance, check `stopped_on` and `stop_condition_valid` against the assigned stop conditions. It reports the actual backend, model, thinking/effort, changed paths, out-of-scope changes, and whether HEAD stayed pinned. Require exact commands, exit codes and decisive output; prose is only a claim.
 
 The parent independently reviews `git diff --check`, the diff against `base_revision` (including commits) and untracked paths once. Verify requested behavior, permitted scope, imports and obvious regressions before integrating. An optional single `worker_resume` correction may touch only the same files, without increasing the attempt budget. Otherwise park or reject. Scouts never commit; other workers may commit on their lane branch. Workers never merge, push, switch branches, or clean worktrees.
 
-**Devin (`devin/swe-2.1`, `low`/`medium`/`high`/`max` for scout/mechanic/worker/expert) needs the closest review.** `worker_status` names the route that actually ran; scout, mechanic and worker reach Devin when their earlier routes are exhausted, and expert always runs there. The retired SWE-2 Flash lane wrote sound code for a narrow, well-specified slice but optimized for the literal acceptance proof: when a gate was hard to pass it bent the code to the metric instead of stopping, for example deleting a safety check so surviving mutants died, and it assumed the host platform in tests. SWE-2.1 has no live production evidence yet, so keep the same caution. When Devin may run a slice:
+<!-- policy:begin devin-review -->
+<!-- Generated from tools/pi-subagent-bridge/src/policy.ts; run make generate. -->
+**Devin needs the closest review.** Its past lanes optimized for literal acceptance proof, including attempts to weaken checks to satisfy a gate. When a lane is available:
 
 - State in the brief that no check, guard or test may be removed or weakened to satisfy a mutation, lint or test gate; a surviving mutant in protective code is killed with a test or reported under `stop_on`.
-- Require tests that pass on every supported OS and architecture, never only on the host's target triple.
-- Read every deleted line in its diff, especially in validation, path and archive handling, and error paths, and run the acceptance proof yourself before integrating.
-- Prefer Codex, or doing the work yourself, for security-sensitive code or gate-heavy cleanup.
+- Require tests that pass on every supported OS and architecture.
+- Read every deleted line in its diff, especially validation, path and archive handling, and error paths, and run the acceptance proof yourself before integrating.
+- Prefer doing security-sensitive work directly when independent verification is unavailable.
+<!-- policy:end devin-review -->
 
 ## Provider fallback and ambiguous runs
 
 **The bridge owns provider fallback on bridge-path parents only.** `worker_status` switches only along the tier's admitted routes, only before edits and with unambiguous termination, and admitted sessions keep their recorded models. Never start a replacement worker yourself: a task failure, rejected acceptance check, or changed path is not a provider failure. A session whose `attention` is `needs_attention` (any `blocked_*` state) or `unknown` needs you to inspect the session and worktree before deciding anything; do not launch a second paid worker over it. Check `pending_steer` and `last_steer` before retrying steering. Cancellation acknowledgement is not proof of termination; wait until `watch` or `inspect` shows the run gone. The scope check is Git-based; ignored files and host writes are not contained.
 
-**Nesting:** Command Code native children cannot launch subagents. On the bridge path, grant one level of Pi fanout in the brief only when the slice needs it; the bridge's guard enforces the rest. Codex and Command Code workers are leaves.
+<!-- policy:begin nesting -->
+<!-- Generated from tools/pi-subagent-bridge/src/policy.ts; run make generate. -->
+**Nesting:** On the bridge path, grant one level of Pi fanout in the brief only when the slice needs it; the bridge's guard enforces the rest. Codex workers are leaves.
+<!-- policy:end nesting -->
 
 **Clef-flash advice** (per the global contract): build the `TaskBrief` from verified facts and call `decide route --guide`, then `decide route --baseline worker` once. On any failure, choose the tier yourself without retrying.
 
@@ -152,7 +137,7 @@ Carry forward findings and failed approaches. Every child gets:
 
 The parent owns each child worktree from creation through removal. Every skill that removes worktrees or branches follows this section. Record its exact path, its branch when it has one, and the integration worktree when you create it or the harness creates it. A child finishing does not remove its worktree. Remove only the recorded path, never every entry under `.work/wt/`.
 
-Treat retirement as part of accepting the lane, regardless of free disk space. Claude's `WorktreeRemove` hook does not run when a hook-created subagent finishes: the parent must explicitly retire that lane. Separately, unsolicited cleanup sweeps require an `agent-disk-pressure` notice and a fresh reading strictly below 16 GiB; use `cleanup`, never periodic model polling. Workers report pressure to their parent and keep their assigned scope.
+Treat retirement as part of accepting the lane, regardless of free disk space. A harness exit hook may not retire a finished subagent lane; the parent must explicitly retire it. Separately, unsolicited cleanup sweeps require an `agent-disk-pressure` notice and a fresh reading strictly below 16 GiB; use `cleanup`, never periodic model polling. Workers report pressure to their parent and keep their assigned scope.
 
 After a child finishes, review its changes and decide whether to integrate or park them. For accepted changes, inspect the integrated diff and reuse worker evidence unless integration or changed inputs could invalidate it. Remove the child worktree only after applicable proof is complete, the child has stopped, and all work worth keeping is in the integration branch or a preserved branch.
 

@@ -1155,6 +1155,15 @@ sys.exit(1)
         inst.repair_dsh_tui_patch()
         self.assertEqual(patch_file.read_text(), "keep\n")
 
+    def test_dsh_switch_restores_its_existing_optional_installer(self):
+        inst = self.make()
+        switches = {**installer.read_switches(), "deepseek": True}
+        with patch.object(installer, "read_switches", return_value=switches), \
+                patch.object(inst, "npm_view", return_value=""), \
+                patch.object(inst, "unchecked") as unavailable:
+            inst.install_dsh()
+        self.assertEqual(unavailable.call_args.args, ("dsh", "no npm release found"))
+
     def test_codex_install_and_checksum(self):
         import hashlib
         target = "x86_64-unknown-linux-musl"
@@ -1638,6 +1647,24 @@ esac
         self.assertEqual(default_tools("linux", "x86_64", "server", server_file), ["fd", "rg"])
         alpine_profile = Path(__file__).resolve().parents[2] / "host/alpine/tools-server.txt"
         self.assertIn("vault", default_tools("linux", "x86_64", "server", alpine_profile))
+
+    def test_default_harness_installs_follow_one_switchboard(self):
+        import harnesses
+        self.assertNotIn("cmd", default_tools("darwin", "aarch64", ""))
+        enabled = dict.fromkeys(harnesses.HARNESS_IDS, True)
+        self.assertIn("cmd", default_tools("darwin", "aarch64", "", harness_switches=enabled))
+        disabled = dict.fromkeys(harnesses.HARNESS_IDS, False)
+        tools = default_tools("darwin", "aarch64", "", harness_switches=disabled)
+        self.assertFalse(set(harnesses.CLI_HARNESSES) & set(tools))
+        self.assertTrue({"fd", "rg", "nodejs", "python3"} <= set(tools))
+
+    def test_pi_go_keeps_only_the_opencode_credential_helper_dependency(self):
+        import harnesses
+        switches = {**dict.fromkeys(harnesses.HARNESS_IDS, True), "opencode": False}
+        self.assertIn("opencode", default_tools("linux", "x86_64", "", harness_switches=switches))
+        for disabled in ("pi", "opencode-go"):
+            self.assertNotIn("opencode", default_tools("linux", "x86_64", "",
+                harness_switches={**switches, disabled: False}))
 
     def fake_uv(self, directory=None):
         directory = directory or self.bin

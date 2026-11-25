@@ -11,6 +11,8 @@ import os
 from pathlib import Path, PurePosixPath
 import subprocess
 
+from harnesses import context_enabled, read_switches
+
 
 class LinkError(ValueError):
     """Unsafe or ambiguous link declaration."""
@@ -35,6 +37,7 @@ class Discovery:
     target: Path
     sources: tuple[Path, ...]
     desired: tuple[LinkSpec, ...]
+    disabled: tuple[LinkSpec, ...] = ()
 
 
 def _safe_relative(name: PurePosixPath) -> None:
@@ -93,6 +96,10 @@ def discover(root: Path, target: Path, platform: str) -> Discovery:
         raise LinkError("target directory contains a tab")
     specs: dict[PurePosixPath, LinkSpec] = {}
     sources: list[Path] = []
+    # Generic dotfile fixtures need no harness policy. A declared policy must
+    # validate before discovery, so an invalid switchboard never enables links.
+    has_policy = (root / "harnesses.json").exists() or (root / "tools/sync/harnesses.py").is_file()
+    switches = read_switches(root) if has_policy else None
     toplevel = _git_toplevel(root)
     for layer in (root / "dotfiles/base", root / "dotfiles" / platform):
         if not layer.is_dir():
@@ -123,7 +130,9 @@ def discover(root: Path, target: Path, platform: str) -> Discovery:
         for parent in relative.parents:
             if parent in specs and specs[parent].directory:
                 raise LinkError(f"overlapping link declarations: {parent} contains {relative}")
-    return Discovery(target_real, tuple(sources), tuple(specs[key] for key in keys))
+    disabled = {key for key in keys if switches is not None and not context_enabled(key, switches)}
+    return Discovery(target_real, tuple(sources), tuple(specs[key] for key in keys if key not in disabled),
+                     tuple(specs[key] for key in keys if key in disabled))
 
 
 def _add(specs: dict[PurePosixPath, LinkSpec], spec: LinkSpec) -> None:

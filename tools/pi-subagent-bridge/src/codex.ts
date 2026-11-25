@@ -6,9 +6,11 @@ import { workerAlive, processStartTime, verifiedSignal, type CommandResult, type
 import { plannedCommand, type LaunchRequest } from "./launch.ts"
 import { fileURLToPath } from "node:url"
 import { isBannedModel } from "./policy.ts"
+import { assertHarnessEnabled, harnessEnabled, type HarnessSwitches } from "./harnesses.ts"
 import { workerEnvironment } from "./worker-env.ts"
 const children = new Map<number, ChildProcess>()
-export function codexAvailable(): boolean {
+export function codexAvailable(switches?: HarnessSwitches): boolean {
+  if (!harnessEnabled("codex", switches)) return false
   try {
     const env = workerEnvironment()
     delete env.OPENAI_API_KEY
@@ -17,7 +19,8 @@ export function codexAvailable(): boolean {
     return result.status === 0 && (result.stdout + result.stderr).includes("Logged in using ChatGPT")
   } catch { return false }
 }
-export function startCodex(request: LaunchRequest): CommandRun {
+export function startCodex(request: LaunchRequest, switches?: HarnessSwitches): CommandRun {
+  assertHarnessEnabled("codex", switches)
   const { directory, logDirectory, prompt: text, resume, selection: { model, effort }, access } = request
   if (isBannedModel(model)) throw new Error("Prohibited Codex model: " + model)
   const readOnly = access.kind === "read-only"

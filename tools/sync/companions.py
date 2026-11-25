@@ -29,6 +29,7 @@ import zlib
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import pi_offline  # noqa: E402
 import pi_release  # noqa: E402
+from harnesses import read_switches  # noqa: E402
 
 COMPANIONS = pi_release.COMPANIONS
 CLAUDE_MCP_NAME = "claude-intercom"
@@ -554,39 +555,54 @@ def load_pin_for_sync(env: dict[str, str]) -> dict:
 
 
 def command_install(env: dict) -> int:
+    switches = read_switches()
+    enabled = [name for name in COMPANIONS if switches[name.removeprefix("agent-intercom-")]]
+    if not enabled:
+        return 0
     pin = load_pin_for_sync(env)
     root = prefix(env)
     root.mkdir(parents=True, exist_ok=True)
     cache = pi_offline.cache_dir(home_of(env), env)
-    for name in COMPANIONS:
+    for name in enabled:
         install_companion(pin, cache, root / name, name)
-    for name in COMPANIONS:
+    for name in enabled:
         install_shims(root / name, name, env)
-    sync_claude(root / "agent-intercom-claude", "install", env)
-    remove_opencode(env)
+    if switches["claude"]:
+        sync_claude(root / "agent-intercom-claude", "install", env)
+    if switches["opencode"]:
+        remove_opencode(env)
     return 0
 
 
 def command_check(env: dict) -> int:
+    switches = read_switches()
+    enabled = [name for name in COMPANIONS if switches[name.removeprefix("agent-intercom-")]]
+    if not enabled:
+        return 0
     pin = load_pin_for_sync(env)
     root = prefix(env)
-    for name in COMPANIONS:
+    for name in enabled:
         destination = root / name
         status = install_status(destination, pin, name)
         if status != "current":
             die(f"companion {name} installation is {status}")
-    sync_claude(root / "agent-intercom-claude", "check", env)
+    if switches["claude"]:
+        sync_claude(root / "agent-intercom-claude", "check", env)
     return 0
 
 
 def command_plan(env: dict) -> int:
+    switches = read_switches()
+    enabled = [name for name in COMPANIONS if switches[name.removeprefix("agent-intercom-")]]
+    if not enabled:
+        return 0
     pin = load_pin_for_sync(env)
     root = prefix(env)
-    for name in COMPANIONS:
+    for name in enabled:
         status = install_status(root / name, pin, name)
         if status in ("absent", "stale"):
             print(f"companions: install {name} {pin['companions'][name]['version']}")
-    print("companions: ensure shims, Claude MCP entry and OpenCode plugin cleanup")
+    print("companions: ensure enabled harness shims and registrations")
     return 0
 
 

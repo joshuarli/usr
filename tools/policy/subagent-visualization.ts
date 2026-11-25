@@ -2,6 +2,14 @@ import { readFileSync, writeFileSync } from "node:fs"
 import { dirname, join, resolve } from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
 import { POLICY, type Route } from "../pi-subagent-bridge/src/policy.ts"
+import { HARNESS_LABELS, type HarnessId } from "../pi-subagent-bridge/src/harnesses.ts"
+
+type Policy = typeof POLICY
+const NATIVE_PARENTS = ["opencode", "devin", "command-code", "antigravity", "copilot"] as const
+
+function labels(policy: Policy, ids: readonly HarnessId[]): string {
+  return ids.filter(id => policy.harnesses[id]).map(id => HARNESS_LABELS[id]).join(" · ")
+}
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..")
 const DESTINATION = "docs/subagents.html"
@@ -166,18 +174,20 @@ function key(): string {
 type GraphNode = { id: string; x: number; y: number; w: number; h: number; item: Item }
 type GraphEdge = { from: string; to: string; label?: string; path?: string; labelAt?: { x: number; y: number } }
 
-function graphNodes(): GraphNode[] {
-  const claude = POLICY.nativeFallback.claudeModels
+function graphNodes(policy: Policy): GraphNode[] {
+  const claude = policy.nativeFallback.claudeModels
   return [
     { id: "start", x: 400, y: 12, w: 200, h: 42, item: { kind: "primary", title: "Parent wants a subagent" } },
-    { id: "cwd", x: 690, y: 148, w: 220, h: 96, item: { kind: "primary", title: "Top-level native parent?", detail: "OpenCode · Devin · Command Code · Antigravity · Copilot pilot" } },
-    { id: "native", x: 470, y: 365, w: 240, h: 96, item: { kind: "native", title: "Native tier lanes", detail: "native usr-* / run_subagent; Copilot: attest or block; never the bridge" } },
+    { id: "cwd", x: 690, y: 148, w: 220, h: 96, item: { kind: "primary", title: "Top-level native parent?", detail: labels(policy, NATIVE_PARENTS) || "No enabled native parents" } },
+    { id: "native", x: 470, y: 365, w: 240, h: 96, item: { kind: "native", title: "Native tier lanes", detail: "Named native agents; attest or block; never the bridge" } },
     { id: "bridge", x: 760, y: 365, w: 200, h: 84, item: { kind: "primary", title: "pi-subagent-bridge", detail: "worker_model_check → worker_start" } },
-    { id: "plan", x: 700, y: 465, w: 300, h: 130, item: { kind: "primary", title: "Admitted ordered plan", models: POLICY.rootRoutes.worker.map(modelOf) } },
+    { id: "plan", x: 700, y: 465, w: 300, h: 130, item: { kind: "primary", title: "Admitted ordered plan", models: policy.rootRoutes.worker.map(modelOf), detail: policy.rootRoutes.worker.length ? undefined : "Blocked: no enabled route" } },
     { id: "available", x: 770, y: 625, w: 180, h: 42, item: { kind: "primary", title: "First route available?" } },
     { id: "admitted", x: 480, y: 705, w: 240, h: 100, item: { kind: "native", title: "worker_start: one scoped assignment", detail: "clean worktree · bounded attempts · scope; parent verifies proof and diff" } },
     { id: "next", x: 770, y: 705, w: 180, h: 60, item: { kind: "fallback", title: "Next admitted route", detail: "only before edits" } },
-    { id: "fallback", x: 180, y: 705, w: 260, h: 80, item: { kind: "native", title: "Tier-matched native subagents", models: POLICY.nativeFallback.tiers.map(tier => claude[tier as "scout"]), detail: "Claude Code; same brief and scope" } },
+    { id: "fallback", x: 180, y: 705, w: 260, h: 80, item: policy.harnesses.claude
+      ? { kind: "native", title: "Tier-matched native subagents", models: policy.nativeFallback.tiers.map(tier => claude[tier as "scout"]), detail: "Claude Code; same brief and scope" }
+      : { kind: "undefined", title: "Blocked", detail: "No enabled native fallback" } },
   ]
 }
 
@@ -220,8 +230,8 @@ function svgNode(node: GraphNode): string {
     `${heading}${detail}</div></foreignObject>`
 }
 
-function graph(): string {
-  const nodes = graphNodes()
+function graph(policy: Policy): string {
+  const nodes = graphNodes(policy)
   return '<div class="graph-scroll"><svg viewBox="0 0 1000 820" width="1000" height="820" role="img" aria-label="Subagent delegation decision graph">' +
     '<defs><marker id="g-arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="5" markerHeight="5" orient="auto-start-reverse">' +
     '<path d="M 0 0 L 8 4 L 0 8 z" fill="#aeb6c4"/></marker></defs>' +
@@ -234,92 +244,90 @@ function modelOf(route: Route): string {
   return route.executor === "pi" ? `${route.providerID}/${route.model}` : route.model
 }
 
-function commandEffort(tier: "scout" | "mechanic" | "worker" | "expert"): string | undefined {
-  const pin = POLICY.commandNative[tier]
+function commandEffort(policy: Policy, tier: "scout" | "mechanic" | "worker" | "expert"): string | undefined {
+  const pin = policy.commandNative[tier]
   return "effort" in pin ? pin.effort : undefined
 }
 
-function laneMap(): string {
-  const opencode = POLICY.opencode
-  const agy = POLICY.antigravityDirect
-  const command = POLICY.commandNative
-  const copilot = POLICY.copilotNative
-  const claude = POLICY.nativeFallback.claudeModels
-  const head = ["Assignment", "OpenCode", "Devin", "Command Code", "Codex", "Pi", "Claude Code", "Antigravity", "Copilot (unqualified pilot)"]
-  const rows: string[] = []
+function laneMap(policy: Policy): string {
+  const ids = ["opencode", "devin", "command-code", "codex", "pi", "claude", "antigravity", "copilot"] as const
+  const enabled = ids.filter(id => policy.harnesses[id])
+  if (!enabled.length) return '<section><h2>Lane map</h2><p>Blocked: no enabled harnesses.</p></section>'
 
   function cell(item: Item): string {
-    const compact = { ...item, compact: true }
-    return `<td><span class="name">${esc(item.title)}</span>${meta(compact)}</td>`
+    return `<td><span class="name">${esc(item.title)}</span>${meta({ ...item, compact: true })}</td>`
   }
-
-  for (const tier of ["scout", "mechanic", "worker", "expert"] as const) {
-    const agyTier = agy.tiers[tier]
-    const bridge = POLICY.rootRoutes[tier][0]!
-    const devin = POLICY.devinNative[tier]
-    rows.push(`<tr><th>${tier}</th>` + [
-      cell({ kind: "native", title: "native tier agent", model: opencode.model, effort: opencode.efforts[tier] }),
-      cell({ kind: "native", title: devin.name, model: devin.model, effort: devin.effort }),
-      cell({ kind: "native", title: command[tier].name, model: command[tier].model, effort: commandEffort(tier), detail: commandEffort(tier) ? undefined : "model default" }),
-      cell({ kind: "primary", title: "bridge", model: modelOf(bridge), effort: bridge.effort, detail: tier === "expert" ? "expert; no fallback" : `${tier} ladder` }),
-      cell({ kind: "primary", title: "bridge", model: modelOf(bridge), effort: bridge.effort, detail: tier === "expert" ? "expert; no fallback" : `${tier} ladder` }),
-      cell({ kind: "primary", title: "bridge", model: modelOf(bridge), effort: bridge.effort, detail: tier === "expert" ? "expert; no fallback" : `${tier} ladder` }),
-      cell({ kind: "native", title: agyTier.name, model: agyTier.model, effort: agyTier.effort, detail: `selector ${agyTier.selector}; verify` }),
-      cell({ kind: "pilot", title: copilot[tier].name, model: copilot[tier].model, effort: copilot[tier].effort, detail: "candidate; attest first" }),
-    ].join("") + "</tr>")
+  function tierCell(id: typeof ids[number], tier: Tier): Item {
+    switch (id) {
+      case "opencode": return { kind: "native", title: "native tier agent", model: policy.opencode.model, effort: policy.opencode.efforts[tier] }
+      case "devin": return { kind: "native", title: policy.devinNative[tier].name, model: policy.devinNative[tier].model, effort: policy.devinNative[tier].effort }
+      case "command-code": return { kind: "native", title: policy.commandNative[tier].name, model: policy.commandNative[tier].model, effort: commandEffort(policy, tier), detail: commandEffort(policy, tier) ? undefined : "model default" }
+      case "antigravity": {
+        const pin = policy.antigravityDirect.tiers[tier]
+        return { kind: "native", title: pin.name, model: pin.model, effort: pin.effort, detail: `selector ${pin.selector}; verify` }
+      }
+      case "copilot": {
+        const pin = policy.copilotNative[tier]
+        return { kind: "pilot", title: pin.name, model: pin.model, effort: pin.effort, detail: "candidate; attest first" }
+      }
+      case "claude":
+        if (tier === "expert") return { kind: "native", title: "native expert", model: "opus", effort: "xhigh", detail: "verify availability" }
+    }
+    const route = policy.rootRoutes[tier][0]
+    if (!route) return { kind: "undefined", title: "blocked", detail: "no enabled route" }
+    if (tier === "expert") return { kind: "undefined", title: "blocked", detail: "provider lane unavailable; no fallback" }
+    return { kind: "primary", title: "bridge", model: modelOf(route), effort: route.effort, detail: `${tier} ladder` }
   }
-
-  rows.push('<tr><th>quota exhaustion</th>' + [
-    cell({ kind: "undefined", title: "no bridge" }),
-    cell({ kind: "undefined", title: "no bridge" }),
-    cell({ kind: "undefined", title: "no bridge", detail: "no model switch" }),
-    cell({ kind: "undefined", title: "not defined", detail: "report instead" }),
-    cell({ kind: "undefined", title: "not defined", detail: "report instead" }),
-    cell({ kind: "native", title: "native subagents", models: POLICY.nativeFallback.tiers.map(tier => claude[tier as "scout"]), detail: "same scope" }),
-    cell({ kind: "undefined", title: "no bridge", detail: "block mismatch" }),
-    cell({ kind: "undefined", title: "blocked", detail: "no bridge fallback" }),
-  ].join("") + "</tr>")
-
+  const rows = policy.tiers.map(tier => `<tr><th>${tier}</th>` + enabled.map(id => cell(tierCell(id, tier))).join("") + "</tr>")
+  rows.push('<tr><th>quota exhaustion</th>' + enabled.map(id => cell(id === "claude"
+    ? { kind: "native", title: "native subagents", models: policy.nativeFallback.tiers.map(tier => policy.nativeFallback.claudeModels[tier]), detail: "same scope" }
+    : { kind: "undefined", title: "blocked", detail: "no bridge fallback" })).join("") + "</tr>")
+  const headers = ["Assignment", ...enabled.map(id => id === "copilot" ? "Copilot (unqualified pilot)" : HARNESS_LABELS[id])]
   return '<section><h2>Lane map</h2><div class="table-scroll"><table><thead><tr>' +
-    head.map(header => `<th>${header}</th>`).join("") + '</tr></thead><tbody>' +
+    headers.map(header => `<th>${header}</th>`).join("") + '</tr></thead><tbody>' +
     rows.join("\n") + '</tbody></table></div></section>'
 }
 
-function bridgeRoutes(): string {
-  const rows = POLICY.tiers.map(tier => {
-    const routes = POLICY.rootRoutes[tier].map((route, index) => {
+function bridgeRoutes(policy: Policy): string {
+  const rows = policy.tiers.map(tier => {
+    const routes = policy.rootRoutes[tier].map((route, index) => {
       const model = modelOf(route)
       return `<div class="route"><span class="route-top"><span class="rank">P${index + 1}</span>` +
         modelPill(model.slice(model.lastIndexOf("/") + 1)) + '</span>' + effortLabel(route.effort) + '</div>'
     }).join("")
-    return `<div class="route-row">${tierLabel(tier)}${routes}</div>`
+    return `<div class="route-row">${tierLabel(tier)}${routes || "Blocked: no enabled route"}</div>`
   }).join("\n")
   return '<section><h2>The bridge, per tier</h2>' + rows +
     '<p>A task failure, rejected acceptance check or scope change is not a provider failure: an admitted route is never replaced after edits.</p></section>'
 }
 
-function hardRules(): string {
-  const opencode = POLICY.opencode
-  const banned = POLICY.bannedModels.map(model => `\`${model}\``).join(" / ")
+function hardRules(policy: Policy): string {
+  const banned = policy.bannedModels.map(model => `\`${model}\``).join(" / ")
+  const native = labels(policy, NATIVE_PARENTS)
+  const bridgeParents = labels(policy, ["claude", "codex", "pi"])
+  const leaves = labels(policy, ["codex", "command-code"])
   const rules = [
     "The bridge admits `scout`, `mechanic`, `worker` and `expert`. There is no `god` tier.",
     "Expert is the strongest lane: use it for exceptional architectural decisions and adversarial review, never as a size-based upgrade.",
-    "Top-level OpenCode, Devin and Command Code sessions never use the bridge, at any tier or as a fallback. Command Code uses native `usr-*` agents; HY4-medium worker is an explicit pilot, not a default. When the OpenCode top-level model is free, every tier runs a free model (its configured tier agents use `" + opencode.model + "`).",
-    "Top-level Antigravity CLI sessions use native usr-* subagents only. Its flash/pro model selectors do not enforce exact model IDs or efforts: verify or block the lane. God is a direct main-session mode.",
-    "Copilot CLI is an unqualified native-only pilot. Its named usr-* lanes require observed model and effort attestation before dispatch. Block unavailable or unattested lanes; never use Auto, built-in agents or the bridge as a fallback. Children are leaves.",
-    "Claude Code, Codex and Pi sessions use the bridge for every tier; the bridge owns provider fallback (Command Code → ordered Pi → Codex), only before edits, only along admitted routes.",
-    "Command Code native children cannot spawn another subagent. Native frontmatter pins and parent scoping are instructions, not bridge-enforced admission; model overrides and unsupported effort can bypass intended settings.",
-    "An admitted session keeps its recorded model and route. A task failure, rejected acceptance check or scope change is not a provider failure and never authorizes a replacement worker.",
-    "Codex and Command Code workers are leaves. Pi workers may fan out one nested generation to equal-or-weaker approved tiers; the typed ceiling is enforced per child, depth is 2, and `options: { agentScope: \"user\" }` is required for nested calls.",
+    ...(native ? [`Top-level ${native} sessions use named native tier agents; never the bridge.`] : []),
+    ...(policy.harnesses.opencode ? [`When the OpenCode top-level model is free, every tier runs a free model (configured: \`${policy.opencode.model}\`).`] : []),
+    ...(policy.harnesses["command-code"] ? ["Command Code uses native `usr-*` agents; HY4-medium worker is an explicit pilot. Children are leaves. Model overrides and unsupported effort can bypass frontmatter pins; verify before dispatch."] : []),
+    ...(policy.harnesses.antigravity ? ["Antigravity flash/pro selectors do not enforce exact model IDs or efforts: verify or block. God is a direct main-session mode."] : []),
+    ...(policy.harnesses.copilot ? ["Copilot CLI is an unqualified native-only pilot. Attest model and effort before dispatch. Never use Auto, built-in agents or the bridge as fallback. Children are leaves."] : []),
+    ...(bridgeParents ? [`${bridgeParents} sessions use the enabled bridge routes; the bridge owns fallback only before edits. Expert lanes with an unavailable provider block without fallback.`] : []),
+    ...(policy.harnesses.claude ? ["Claude Code uses native `opus` at `xhigh` for expert assignments while the bridge expert provider is unavailable."] : []),
+    "An admitted session keeps its recorded model and route. Disabling its harness or provider prevents new work and resume; inspection and cancellation remain available.",
+    ...(leaves ? [`${leaves} bridge workers are leaves.`] : []),
+    ...(policy.harnesses.pi ? ['Pi workers may fan out one nested generation to equal-or-weaker approved tiers; depth is 2, and `options: { agentScope: "user" }` is required. Disabled providers cannot receive new work.'] : []),
     `Ban on delegation of ${banned} families in every harness, including every effort variant.`,
-    "The parent owns scope, worktrees, verification and integration in every harness. Agent output is a claim until the parent checks the diff and the acceptance proof.",
+    "The parent owns scope, worktrees, verification and integration. Agent output is a claim until the parent checks the diff and acceptance proof.",
   ]
   return '<section><h2>Hard rules</h2><ol class="rules">' +
     rules.map(rule => `<li>${inline(rule)}</li>`).join("\n") + '</ol></section>'
 }
 
-function html(): string {
-  const banned = POLICY.bannedModels.map(model => code(model)).join(" / ")
+export function html(policy: Policy = POLICY): string {
+  const banned = policy.bannedModels.map(model => code(model)).join(" / ")
   return [
     "<!doctype html>",
     '<html lang="en">',
@@ -334,13 +342,13 @@ function html(): string {
     '<header>',
     "<h1>Subagent architecture</h1>",
     `<p>Decision graph for delegating a coding subagent. Tiers: <code>scout</code> (read-only: no <code>bash</code>, <code>edit</code> or <code>write</code>), <code>mechanic</code>, <code>worker</code>, <code>expert</code>. There is no <code>god</code> tier, and the ${banned} families are prohibited everywhere, including every effort variant.</p>`,
-    '<p>The bridge serves every tier in harnesses without a native top-level exception. Top-level Devin parents use pinned native SWE-2.1 lanes instead.</p>',
+    '<p>Only enabled harnesses and provider routes are shown. A tier without an enabled route is blocked.</p>',
     key(),
     '</header>',
-    '<section><h2>Decision graph</h2>' + graph() + '</section>',
-    laneMap(),
-    bridgeRoutes(),
-    hardRules(),
+    '<section><h2>Decision graph</h2>' + graph(policy) + '</section>',
+    laneMap(policy),
+    bridgeRoutes(policy),
+    hardRules(policy),
     '<footer>See <a href="../dotfiles/base/.agents/skills/orchestrate/SKILL.md">orchestrate</a> for the routing contract and <a href="../tools/pi-subagent-bridge/README.md">the bridge reference</a> for admission, fallback and state semantics.</footer>',
     "</main></body>",
     "</html>",

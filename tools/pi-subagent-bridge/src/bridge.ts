@@ -1,3 +1,4 @@
+import { piProviderEnabled, type HarnessSwitches } from "./harnesses.ts"
 import { execFileSync } from "node:child_process"
 import { realpathSync } from "node:fs"
 import { dirname, relative, resolve, sep } from "node:path"
@@ -144,7 +145,10 @@ function latestAssistantError(value: unknown): unknown {
   return null
 }
 
-export function makeWorkerBridge(api: OpenCodePort, model = selectedModel()) {
+export function makeWorkerBridge(api: OpenCodePort, model = selectedModel(), switches?: HarnessSwitches) {
+  function assertEnabled() {
+    if (!piProviderEnabled(model.providerID, switches)) throw new Error(`Pi provider ${model.providerID} is disabled in harnesses.json`)
+  }
   async function ownedSession(sessionID: unknown, cwd: unknown): Promise<{ id: string; directory: string; info: Record<string, unknown> }> {
     const id = requiredText(sessionID, "session_id", 128)
     if (!/^ses_[a-zA-Z0-9_-]+$/.test(id)) throw new Error("Invalid OpenCode session ID")
@@ -163,11 +167,13 @@ export function makeWorkerBridge(api: OpenCodePort, model = selectedModel()) {
     return { id, directory, info }
   }
   async function preflightResume(cwd: unknown, sessionID: unknown, feedback: unknown) {
+    assertEnabled()
     const { id, directory } = await ownedSession(sessionID, cwd)
     const text = requiredText(feedback, "feedback")
     const [active, inbox] = await Promise.all([api.active({ cwd: directory }), api.inbox({ sessionID: id, cwd: directory })])
     if (activeSession(active, id) || queuedInputs(inbox)) throw new Error("Worker is running or has queued input; do not enqueue competing feedback")
     return async () => {
+      assertEnabled()
       await api.prompt({ sessionID: id, cwd: directory, text: `Parent feedback (same scope and write boundaries):\n${text}` })
       return { session_id: id, cwd: directory, status: "admitted" }
     }
@@ -175,10 +181,12 @@ export function makeWorkerBridge(api: OpenCodePort, model = selectedModel()) {
   return {
     preflightResume,
     async modelCheck(cwd: unknown) {
+      if (!piProviderEnabled(model.providerID, switches)) return { model, available: false }
       const directory = checkedWorktree(cwd)
       return { model, available: modelAvailable(await api.models({ location: { directory } }), model) }
     },
     async start(cwd: unknown, title: unknown, brief: unknown, readOnly = false) {
+      assertEnabled()
       const directory = checkedWorktree(cwd, true)
       const name = requiredText(title, "title", 100)
       const text = requiredText(brief, "brief")
@@ -229,6 +237,7 @@ export function makeWorkerBridge(api: OpenCodePort, model = selectedModel()) {
       return (await preflightResume(cwd, sessionID, feedback))()
     },
     async steer(cwd: unknown, sessionID: unknown, note: unknown) {
+      assertEnabled()
       const { id, directory } = await ownedSession(sessionID, cwd)
       const text = "PARENT STEERING (same scope and write boundaries):\n" + requiredText(note, "note")
       const receipt = object(unbox(await api.steer({ sessionID: id, cwd: directory, text })))

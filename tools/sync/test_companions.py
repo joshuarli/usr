@@ -76,6 +76,15 @@ def companion_tgz(name: str, version: str) -> bytes:
 
 
 class CompanionPinSelectionTests(unittest.TestCase):
+    def test_disabled_companions_skip_packages_and_harness_configuration(self):
+        switches = dict.fromkeys(companions.read_switches(), False)
+        with patch.object(companions, "read_switches", return_value=switches), \
+                patch.object(companions, "load_pin_for_sync", side_effect=AssertionError("loaded pin")), \
+                patch.object(companions, "sync_claude", side_effect=AssertionError("touched Claude")):
+            self.assertEqual(companions.command_install({}), 0)
+            self.assertEqual(companions.command_check({}), 0)
+            self.assertEqual(companions.command_plan({}), 0)
+
     def test_reviewed_absolute_override_selects_all_companions_with_its_runtime(self):
         with tempfile.TemporaryDirectory(prefix="usr-companion-pin-") as directory:
             override = Path(directory) / "reviewed.json"

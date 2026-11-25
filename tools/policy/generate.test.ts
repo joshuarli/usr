@@ -3,17 +3,21 @@ import assert from "node:assert/strict"
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs"
 import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
-import { POLICY } from "../pi-subagent-bridge/src/policy.ts"
-import { main, renderOutputs, replaceBlocks, writeOutputs, type Policy } from "./generate.ts"
+import { POLICY, policyForHarnesses } from "../pi-subagent-bridge/src/policy.ts"
+import { HARNESS_IDS, type HarnessSwitches } from "../pi-subagent-bridge/src/harnesses.ts"
+import { main, renderOutputs, replaceBlocks, writeOutputs, TEMPLATE_PATHS, type Policy } from "./generate.ts"
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..")
 const JSON_PATH = "tools/policy/policy.generated.json"
 
-function fixture() {
+const ALL_ENABLED = Object.fromEntries(HARNESS_IDS.map(id => [id, true])) as HarnessSwitches
+const ENABLED_POLICY = policyForHarnesses(ALL_ENABLED)
+
+function fixture(policy: Policy = POLICY) {
   const scratch = join(ROOT, ".work/tmp")
   mkdirSync(scratch, { recursive: true })
   const root = mkdtempSync(join(scratch, "policy-"))
-  const initial = renderOutputs(ROOT)
+  const initial = renderOutputs(ROOT, policy)
   for (const output of initial) {
     mkdirSync(dirname(join(root, output.path)), { recursive: true })
     writeFileSync(join(root, output.path), output.content)
@@ -22,11 +26,11 @@ function fixture() {
 }
 
 test("a root route pin change propagates to the README table and JSON export, leaving native policy untouched", () => {
-  const f = fixture()
+  const f = fixture(ENABLED_POLICY)
   try {
     const policy: Policy = {
-      ...POLICY,
-      rootRoutes: { ...POLICY.rootRoutes, worker: [{ ...POLICY.rootRoutes.worker[0], model: "fixture-worker-model" }, ...POLICY.rootRoutes.worker.slice(1)] },
+      ...ENABLED_POLICY,
+      rootRoutes: { ...ENABLED_POLICY.rootRoutes, worker: [{ ...ENABLED_POLICY.rootRoutes.worker[0], model: "fixture-worker-model" }, ...ENABLED_POLICY.rootRoutes.worker.slice(1)] },
     }
     const outputs = renderOutputs(f.root, policy)
     const changed = outputs.filter(output => output.content !== output.previous)
@@ -35,7 +39,7 @@ test("a root route pin change propagates to the README table and JSON export, le
     assert.ok(table.content.includes("| worker | Command Code `fixture-worker-model` (`high`) |"))
     const exported = JSON.parse(changed.find(output => output.path === JSON_PATH)!.content)
     assert.equal(exported.rootRoutes.worker[0].model, "fixture-worker-model")
-    assert.deepEqual(exported.nativePi, POLICY.nativePi)
+    assert.deepEqual(exported.nativePi, ENABLED_POLICY.nativePi)
     assert.deepEqual(writeOutputs(f.root, outputs), changed.map(output => output.path))
     const mtimes = f.paths.map(path => statSync(join(f.root, path)).mtimeMs)
     assert.deepEqual(writeOutputs(f.root, renderOutputs(f.root, policy)), [])
@@ -67,18 +71,23 @@ test("generation preserves authored prose, profile descriptions and unrelated JS
     const profile = join(f.root, "dotfiles/base/.pi/agent/agents/scout.md")
     writeFileSync(profile, readFileSync(profile, "utf8").replace("description: Read-only inventory and evidence gathering.", "description: Authored sentinel."))
     const pi = join(f.root, "dotfiles/base/.pi/agent/settings.json")
+    const source = join(f.root, TEMPLATE_PATHS[0])
+    const authored = JSON.parse(readFileSync(source, "utf8"))
+    authored.defaultModel = "owner-session-default"
+    authored.subagents.agentOverrides.scout = { extra: "retained" }
+    authored.subagents.modelScope.agents.scout = { extra: "retained" }
+    writeFileSync(source, JSON.stringify(authored, null, 2) + "\n")
     const settings = JSON.parse(readFileSync(pi, "utf8"))
-    settings.defaultModel = "owner-session-default"
+    settings.defaultModel = authored.defaultModel
     settings.subagents.agentOverrides.scout.extra = "retained"
     settings.subagents.modelScope.agents.scout.extra = "retained"
-    writeFileSync(pi, JSON.stringify(settings, null, 2) + "\n")
     const opencode = join(f.root, "dotfiles/base/.config/opencode/opencode.json")
     const native = JSON.parse(readFileSync(opencode, "utf8"))
     native.model = "owner-session-default"
     native.agents.scout.description = "Authored sentinel"
     native.agents.custom = { model: "owner-custom-agent" }
     writeFileSync(opencode, JSON.stringify(native, null, 2) + "\n")
-    assert.deepEqual(writeOutputs(f.root, renderOutputs(f.root)), [])
+    assert.deepEqual(writeOutputs(f.root, renderOutputs(f.root)), ["dotfiles/base/.pi/agent/settings.json"])
     assert.match(readFileSync(doc, "utf8"), /Authored sentinel outside policy/)
     assert.match(readFileSync(profile, "utf8"), /description: Authored sentinel/)
     assert.deepEqual(JSON.parse(readFileSync(pi, "utf8")), settings)
@@ -116,6 +125,24 @@ test("generation refuses input changes after planning instead of overwriting con
     writeFileSync(path, edited)
     assert.throws(() => writeOutputs(f.root, outputs), /input changed while rendering/)
     assert.equal(readFileSync(path, "utf8"), edited)
+  } finally { f.close() }
+})
+
+test("a concurrent template edit rejects stale projections before writing any output", () => {
+  const f = fixture()
+  try {
+    const policy = structuredClone(POLICY)
+    Reflect.set(policy.rootRoutes.worker[0], "model", "pending-route-update")
+    const outputs = renderOutputs(f.root, policy)
+    const source = join(f.root, TEMPLATE_PATHS[0])
+    const authored = JSON.parse(readFileSync(source, "utf8"))
+    authored.defaultModel = "concurrent-owner-choice"
+    const edited = JSON.stringify(authored, null, 2) + "\n"
+    writeFileSync(source, edited)
+    const before = f.paths.map(path => readFileSync(join(f.root, path), "utf8"))
+    assert.throws(() => writeOutputs(f.root, outputs), /input changed while rendering: tools\/policy\/templates\/pi-settings\.json/)
+    assert.deepEqual(f.paths.map(path => readFileSync(join(f.root, path), "utf8")), before)
+    assert.equal(readFileSync(source, "utf8"), edited)
   } finally { f.close() }
 })
 
@@ -322,23 +349,127 @@ const dimensions: Dimension[] = [
 
   { name: "native depth", mutate: p => { p.nativePi.maxSubagentDepth = 3 } },
   { name: "invalid native depth", mutate: p => { p.nativePi.maxSubagentDepth = 0 }, rejects: /Invalid native Pi depth/ },
-  { name: "native model allowlist", mutate: p => { p.nativePi.modelAllowlist.push("fixture-provider/fixture-model") } },
+  { name: "native model allowlist", mutate: p => { p.nativePi.modelAllowlist.push("opencode-go/fixture-model") } },
 ]
 
 test("every policy dimension reaches a rendered output or is rejected before generation", () => {
   assert.equal(new Set(dimensions.map(dimension => dimension.name)).size, dimensions.length)
-  const f = fixture()
+  const f = fixture(ENABLED_POLICY)
   try {
     for (const dimension of dimensions) {
-      const mutated: MutablePolicy = JSON.parse(JSON.stringify(POLICY))
+      const mutated: MutablePolicy = JSON.parse(JSON.stringify(ENABLED_POLICY))
       dimension.mutate(mutated)
-      const policy: Policy = Object.assign({}, POLICY, mutated)
+      const policy: Policy = Object.assign({}, ENABLED_POLICY, mutated)
       if (dimension.rejects) {
         assert.throws(() => renderOutputs(f.root, policy), dimension.rejects, dimension.name)
         continue
       }
       const changed = renderOutputs(f.root, policy).filter(output => output.content !== output.previous).map(output => output.path)
       assert.ok(changed.some(path => path !== JSON_PATH), dimension.name + " changed only the JSON export: " + changed.join(", "))
+    }
+  } finally { f.close() }
+})
+
+const CONTEXT_PATHS = [
+  "dotfiles/base/.codex/AGENTS.md",
+  "dotfiles/base/.agents/instructions/lean.md",
+  "dotfiles/base/.agents/skills/orchestrate/SKILL.md",
+  "dotfiles/base/.agents/skills/resume-session/SKILL.md",
+  "dotfiles/base/.agents/skills/resume-session/references/locate.md",
+]
+const HARNESS_TEXT = {
+  claude: /Claude Code/,
+  codex: /\bCodex\b/,
+  "command-code": /Command Code|cmd --|COMMANDCODE_HOME/,
+  pi: /\bPi\b/,
+  opencode: /OpenCode(?! Go)/,
+  "opencode-go": /OpenCode Go/,
+  devin: /\bDevin\b/,
+  antigravity: /Antigravity/,
+  copilot: /Copilot/,
+  fx: /\bfx\b/,
+  muse: /Muse Code/,
+  deepseek: /DeepSeek (?:Harness|TUI)/,
+} as const
+
+function context(outputs: ReturnType<typeof renderOutputs>): string {
+  return outputs.filter(output => CONTEXT_PATHS.includes(output.path)).map(output => output.content).join("\n")
+}
+
+test("each disabled harness disappears from shared instructions and restores without losing its source", () => {
+  const f = fixture(ENABLED_POLICY)
+  try {
+    const baseline = context(renderOutputs(f.root, ENABLED_POLICY))
+    for (const id of HARNESS_IDS) {
+      assert.match(baseline, HARNESS_TEXT[id], `${id} has an enabled context projection`)
+      const policy = policyForHarnesses({ ...ALL_ENABLED, [id]: false })
+      const disabled = renderOutputs(f.root, policy)
+      assert.doesNotMatch(context(disabled), HARNESS_TEXT[id], `${id} leaked into shared context`)
+      writeOutputs(f.root, disabled)
+      assert.deepEqual(writeOutputs(f.root, renderOutputs(f.root, policy)), [], `${id} disabled regeneration is idempotent`)
+      const restored = renderOutputs(f.root, ENABLED_POLICY)
+      assert.equal(context(restored), baseline, `${id} enable restores the original instructions`)
+      writeOutputs(f.root, restored)
+      assert.deepEqual(writeOutputs(f.root, renderOutputs(f.root, ENABLED_POLICY)), [])
+    }
+  } finally { f.close() }
+})
+
+test("all harnesses can be disabled without a missing-route crash or implicit fallback", () => {
+  const f = fixture(ENABLED_POLICY)
+  try {
+    const policy = policyForHarnesses(Object.fromEntries(HARNESS_IDS.map(id => [id, false])) as HarnessSwitches)
+    const outputs = renderOutputs(f.root, policy)
+    const rendered = context(outputs)
+    for (const id of HARNESS_IDS) assert.doesNotMatch(rendered, HARNESS_TEXT[id], id)
+    assert.match(rendered, /Delegation is blocked: no harness lane is enabled/)
+    const exported = JSON.parse(outputs.find(output => output.path === JSON_PATH)!.content)
+    assert.ok(Object.values(exported.rootRoutes).every(routes => Array.isArray(routes) && routes.length === 0))
+    const table = outputs.find(output => output.path === "tools/pi-subagent-bridge/README.md")!.content
+    assert.equal((table.match(/Blocked\. No enabled route\./g) ?? []).length, policy.tiers.length)
+    writeOutputs(f.root, outputs)
+    assert.deepEqual(writeOutputs(f.root, renderOutputs(f.root, policy)), [])
+    assert.equal(context(renderOutputs(f.root, ENABLED_POLICY)), context(renderOutputs(ROOT, ENABLED_POLICY)))
+  } finally { f.close() }
+})
+
+test("the shipped disabled Command Code switch removes all of its active context", () => {
+  assert.equal(POLICY.harnesses["command-code"], false)
+  const outputs = renderOutputs(ROOT)
+  assert.doesNotMatch(context(outputs), HARNESS_TEXT["command-code"])
+  assert.match(context(renderOutputs(ROOT, ENABLED_POLICY)), /Command Code/)
+  assert.ok(CONTEXT_PATHS.every(path => outputs.some(output => output.path === path)))
+})
+
+test("disabled Pi providers leave no missing-profile settings and preserve authored extras on reenable", () => {
+  const f = fixture(ENABLED_POLICY)
+  try {
+    const source = join(f.root, TEMPLATE_PATHS[0])
+    const authored = JSON.parse(readFileSync(source, "utf8"))
+    authored.subagents.agentOverrides.scout = { extra: "keep-owner-override" }
+    authored.subagents.modelScope.agents["devin-expert"] = { extra: "keep-owner-scope" }
+    writeFileSync(source, JSON.stringify(authored, null, 2) + "\n")
+    const baseline = renderOutputs(f.root, ENABLED_POLICY)
+    const settingsPath = "dotfiles/base/.pi/agent/settings.json"
+    const original = baseline.find(output => output.path === settingsPath)!.content
+    for (const disabled of ["opencode-go", "devin", "pi"] as const) {
+      const policy = policyForHarnesses({ ...ALL_ENABLED, [disabled]: false })
+      const outputs = renderOutputs(f.root, policy)
+      const settings = JSON.parse(outputs.find(output => output.path === settingsPath)!.content)
+      const activeNames = Object.keys(settings.subagents.agentOverrides)
+      assert.deepEqual([...activeNames].sort(), Object.keys(settings.subagents.modelScope.agents).sort())
+      assert.ok(settings.subagents.modelScope.allow.every((pin: string) => disabled !== "pi" && !pin.startsWith(disabled + "/")))
+      for (const [name, override] of Object.entries(settings.subagents.agentOverrides)) {
+        assert.ok(disabled !== "pi" && !(override as { model: string }).model.startsWith(disabled + "/"), name)
+        const profile = outputs.find(output => output.path === `dotfiles/base/.pi/agent/agents/${name}.md`)!.content
+        const allowed = profile.split("allowedAgents:")[1].split("# policy:end")[0].trim()
+        const children = allowed === "[]" ? [] : allowed.split("\n").map(line => line.trim().slice(2))
+        assert.ok(children.every(child => activeNames.includes(child)), `${name} names an unavailable child`)
+      }
+      writeOutputs(f.root, outputs)
+      assert.deepEqual(writeOutputs(f.root, renderOutputs(f.root, policy)), [])
+      assert.equal(renderOutputs(f.root, ENABLED_POLICY).find(output => output.path === settingsPath)!.content, original)
+      assert.deepEqual(JSON.parse(readFileSync(source, "utf8")), authored)
     }
   } finally { f.close() }
 })

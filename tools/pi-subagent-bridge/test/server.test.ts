@@ -41,8 +41,9 @@ test("stdio MCP handshake, tool discovery and malformed tool rejection need no O
 
 test("an MCP server reloads source changes and refuses changed tool schemas", async () => {
   const root = mkdtempSync(join(tmpdir(), "usr-mcp-stale-"))
-  const source = join(root, "src")
-  mkdirSync(source)
+  const source = join(root, "tools/pi-subagent-bridge/src")
+  mkdirSync(source, { recursive: true })
+  copyFileSync(fileURLToPath(new URL("../../../harnesses.json", import.meta.url)), join(root, "harnesses.json"))
   for (const file of readdirSync(fileURLToPath(new URL("../src", import.meta.url)))) {
     if (file.endsWith(".ts")) copyFileSync(fileURLToPath(new URL("../src/" + file, import.meta.url)), join(source, file))
   }
@@ -92,9 +93,10 @@ test("an MCP server reloads source changes and refuses changed tool schemas", as
 test("MCP discovery shares policy schemas and rejects malformed scopes before loading providers", () => {
   const root = mkdtempSync(join(tmpdir(), "usr-mcp-policy-"))
   try {
-    const source = join(root, "src")
-    mkdirSync(source)
-    for (const file of ["server.ts", "commands.ts", "policy.ts", "tier-policy.ts", "scope.ts", "source-manifest.ts"]) {
+    const source = join(root, "tools/pi-subagent-bridge/src")
+    mkdirSync(source, { recursive: true })
+  copyFileSync(fileURLToPath(new URL("../../../harnesses.json", import.meta.url)), join(root, "harnesses.json"))
+    for (const file of ["server.ts", "commands.ts", "policy.ts", "tier-policy.ts", "scope.ts", "source-manifest.ts", "harnesses.ts"]) {
       copyFileSync(fileURLToPath(new URL("../src/" + file, import.meta.url)), join(source, file))
     }
     const scope = { base_revision: "a".repeat(40), writable_paths: ["src/"],

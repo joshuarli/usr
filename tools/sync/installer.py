@@ -36,6 +36,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import ffmpeg_runtime  # noqa: E402
 import pi_offline  # noqa: E402
 import pi_release  # noqa: E402
+from harnesses import install_enabled, read_switches, tool_enabled  # noqa: E402
 
 HTTP_TIMEOUT = 30
 NODE_MINIMUM = "26.12.0"
@@ -1834,7 +1835,8 @@ class Installer:
         return True
 
     def install_dsh(self) -> None:
-        self.skip("dsh", "dsh is disabled")
+        if not tool_enabled("dsh", read_switches()):
+            self.skip("dsh", "deepseek is disabled in harnesses.json")
         if not self.which("npm"):
             self.unchecked("dsh", "npm is required")
             return
@@ -3367,6 +3369,8 @@ class Installer:
         self.own_dir(app)
 
     def install(self, tool: str) -> None:
+        if not install_enabled(tool, read_switches()):
+            self.skip(tool, "disabled in harnesses.json")
         handlers = {
             "fd": lambda: self.install_fd_or_rg("fd"), "rg": lambda: self.install_fd_or_rg("rg"),
             "fx": self.install_fx, "dsh": self.install_dsh,
@@ -3612,7 +3616,8 @@ def musl_loader_present(os_name: str, arch: str, root: Path = Path("/")) -> bool
 
 
 def default_tools(os_name: str, arch: str, profile: str, server_tools: Path | None = None,
-                  *, musl_loader: bool | None = None, rustup: bool = False) -> list[str]:
+                  *, musl_loader: bool | None = None, rustup: bool = False,
+                  harness_switches: dict[str, bool] | None = None) -> list[str]:
     tools = ["fd", "rg"]
     if (os_name, arch) in (("darwin", "aarch64"), ("linux", "x86_64"), ("linux", "aarch64")):
         tools.append("jaq")
@@ -3637,7 +3642,8 @@ def default_tools(os_name: str, arch: str, profile: str, server_tools: Path | No
         tools = [tool for tool in tools if tool in allowed]
     if not (musl_loader_present(os_name, arch) if musl_loader is None else musl_loader):
         tools = [tool for tool in tools if tool not in MUSL_ONLY_TOOLS]
-    return tools
+    switches = read_switches() if harness_switches is None else harness_switches
+    return [tool for tool in tools if install_enabled(tool, switches)]
 
 
 def _profile(env: dict[str, str]) -> str:

@@ -1,10 +1,11 @@
+import { startCommand } from "./harness-fixtures.ts"
 import test from "node:test"
 import assert from "node:assert/strict"
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, realpathSync } from "node:fs"
 import { spawn } from "node:child_process"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { COMMAND_EMBER_MODEL, COMMAND_MODEL, cancelCommand, commandResult, commandSession, processStartTime, startCommand } from "../src/command.ts"
+import { COMMAND_EMBER_MODEL, COMMAND_MODEL, cancelCommand, commandResult, commandSession, processStartTime } from "../src/command.ts"
 import { codexResult } from "../src/codex.ts"
 import type { LaunchRequest } from "../src/launch.ts"
 

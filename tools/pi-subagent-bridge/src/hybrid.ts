@@ -26,6 +26,7 @@ import {
 } from "./session.ts"
 import { PI_RUN_DEADLINE_MS } from "./tier-policy.ts"
 import type { Access, PlannedRun } from "./launch.ts"
+import { assertHarnessEnabled, harnessEnabled, piProviderEnabled, type HarnessSwitches } from "./harnesses.ts"
 import { ROOT_PLANS, type CliExecutor, type CliPin, type PiSelection, type RootPlan } from "./policy.ts"
 import { parseScope, requiredText as required, type Scope } from "./scope.ts"
 import { beforeDeadline, deadlineTimeout, steerCleanup, steerDeadline, SteerDeadlineError } from "./steer-deadline.ts"
@@ -138,7 +139,8 @@ async function withSessionLock<T>(cwd: unknown, id: unknown, work: (session: Ses
     rmdirSync(lock)
   }
 }
-function cmdAvailable(): boolean {
+function cmdAvailable(switches?: HarnessSwitches): boolean {
+  if (!harnessEnabled("command-code", switches)) return false
   try {
     // A PATH shim can exist before its underlying executable is installed.
     execFileSync("cmd", ["--version"], { timeout: 5000, stdio: "ignore", env: workerEnvironment() })
@@ -154,9 +156,10 @@ function prompt(s: Session): string {
     "Required acceptance proof: " + s.scope.acceptance_proof,
     "Attempt limit: " + s.scope.attempt_limit + ". Stop on: " + s.scope.stop_on,
     ...(s.tier === "scout" && executorOf(s) === "codex" ? ["Use bridge_scout tools to inspect the actual files. Never claim a shell command ran; report only tool output you observed."] : []),
-    "Native Pi workers may delegate at most one generation to equal-or-weaker typed tiers within the assigned worktree and scope.",
-    "A nested child may not delegate again; never launch a new pi-subagent-bridge CLI/MCP session yourself.",
-    "Codex and Command Code workers remain leaves: do not spawn subagents.",
+    ...(executorOf(s) === "pi" ? [
+      "You may delegate at most one generation to equal-or-weaker typed tiers within the assigned worktree and scope.",
+      "A nested child may not delegate again; never launch a new pi-subagent-bridge CLI/MCP session yourself.",
+    ] : executorOf(s) === "fx" ? [] : ["You are a leaf worker: do not spawn subagents."]),
     ...(s.tier !== "scout" && executorOf(s) === "codex" ? ["Before other work, call create_goal with the required acceptance proof as its objective. Mark the goal complete only when that proof is met; a listed stop condition ends the run with the goal still active."] : []),
     s.tier === "scout" ? "Do not commit, switch branches, merge, push, add dependencies, or edit outside writable paths." :
       "You may commit your work on the current branch of this worktree (Conventional Commits, explaining why); do not amend or rewrite commits that existed at admission, merge, rebase, switch branches, push, add dependencies, or edit outside writable paths.",
@@ -210,7 +213,7 @@ export function hybridOwnerOps(bridge: object): HybridOwnerOps | undefined {
 export function makeHybridBridge(api: PiAdapter, command = {
   start: startCommand, status: commandResult, cancel: cancelCommand, available: cmdAvailable,
 }, codex = { start: startCodex, status: codexResult, cancel: cancelCodex, available: codexAvailable, session: codexSession },
-  resolvePolicy: (tier: BridgeTier) => ExecutionPlan = tier => ROOT_PLANS[tier], fx?: FxAdapter) {
+  resolvePolicy: (tier: BridgeTier) => ExecutionPlan = tier => ROOT_PLANS[tier], fx?: FxAdapter, switches?: HarnessSwitches) {
   const inspection: InspectionDeps = { api, command, codex, fx: { status: fxResult } }
   let ownerResolver: OwnerResolver | undefined
   function runnerFor(executor: CliExecutor) {
@@ -220,9 +223,23 @@ export function makeHybridBridge(api: PiAdapter, command = {
       case "command-code": return command
     }
   }
+  function targetEnabled(target: ExhaustibleTarget): boolean {
+    return target.executor === "pi" ? piProviderEnabled(target.selection.providerID, switches) : harnessEnabled(target.executor, switches)
+  }
+  function assertTargetEnabled(target: ExhaustibleTarget): void {
+    if (target.executor !== "pi") { assertHarnessEnabled(target.executor, switches); return }
+    if (!targetEnabled(target)) throw new Error(`Pi provider ${target.selection.providerID} is disabled in harnesses.json`)
+  }
+  function planEnabled(plan: ExecutionPlan): boolean {
+    if (plan.kind === "leaf") return targetEnabled(plan.target)
+    return plan.pi.some(selection => targetEnabled({ executor: "pi", selection })) ||
+      (plan.kind !== "pi-only" && (harnessEnabled("command-code", switches) || harnessEnabled("codex", switches) ||
+        (plan.kind === "fx-fallback" && harnessEnabled("fx", switches))))
+  }
   function targetAvailable(target: ProcessTarget): boolean {
+    if (!targetEnabled(target)) return false
     if (target.executor === "fx") return fx?.available(target.selection) === true
-    return target.executor === "codex" ? codex.available() : command.available()
+    return target.executor === "codex" ? codex.available(switches) : command.available(switches)
   }
   function observe(execution: ProcessExecution) {
     return runnerStatus(inspection, execution)
@@ -243,11 +260,12 @@ export function makeHybridBridge(api: PiAdapter, command = {
     return pins
   }
   function launch(s: Session, target: ProcessTarget, text: string, resume?: string, planned_run?: PlannedRun): CommandRun {
+    assertTargetEnabled(target)
     const request = { directory: s.cwd, logDirectory: stateDir(s.cwd), prompt: text, selection: target.selection, resume, ...(planned_run ? { planned_run } : {}) }
     switch (target.executor) {
       case "fx": { if (!fx) throw new Error("FX adapter unavailable"); return fx.start({ ...request, selection: target.selection, access: accessFor(s), delegation: { selections: childPins(s.tier) } }) }
-      case "codex": return codex.start({ ...request, access: accessFor(s) })
-      case "command-code": return command.start({ ...request, access: accessFor(s) })
+      case "codex": return codex.start({ ...request, access: accessFor(s) }, switches)
+      case "command-code": return command.start({ ...request, access: accessFor(s) }, switches)
     }
   }
   function fallbackToProcess(s: Session, target: ProcessTarget, reason: string, detail?: unknown): Session {
@@ -270,6 +288,8 @@ export function makeHybridBridge(api: PiAdapter, command = {
     const store = new ExhaustionStore(stateDir(cwd))
     for (let index = from; index < plan.pi.length; index++) {
       const candidate = plan.pi[index]
+      if (!piProviderEnabled(candidate.providerID, switches)) continue
+      if (candidate.providerID === "devin") continue // Existing bridge restriction is independent of the global switch.
       if (contributorModel(candidate.providerID, candidate.id) && !contributorAllowed(cwd)) continue
       const target = { executor: "pi" as const, selection: candidate }
       const exhausted = store.activeRoute(routeRef(target)!)
@@ -293,7 +313,7 @@ export function makeHybridBridge(api: PiAdapter, command = {
       return await fallbackToPi(s, plan, reason, detail, skipped)
     } catch (error) {
       if (!(error instanceof PiUnavailableError) || plan.kind !== "codex-last") throw error
-      return fallbackToCodex(s, plan, "Command Code and the approved Pi providers are unavailable; continued on Codex before edits.", detail)
+      return fallbackToCodex(s, plan, "Earlier enabled routes are unavailable; continued on Codex before edits.", detail)
     }
   }
   async function fallbackToPi(s: Session, plan: PiFallbackPlan, reason: string, detail?: unknown, skipped: string[] = []): Promise<Session> {
@@ -301,13 +321,14 @@ export function makeHybridBridge(api: PiAdapter, command = {
     // An in-flight, interrupted, or ambiguous Command Code process must never be duplicated.
     const previousRun = processRun(s)
     if (previousRun && command.status(previousRun).state !== "failed")
-      throw new Error("Command Code is not known terminal; OpenCode Go fallback refused")
+      throw new Error("Worker process is not known terminal; Pi fallback refused")
     ensureWorktree(stateDir(s.cwd), s.cwd, s.id)
     let next = 0
     for (;;) {
       const available = await availablePi(plan, next, s.cwd, skipped)
       if (!available) throw new PiUnavailableError("Pinned Pi fallback models are unavailable")
       const { selection } = available
+      assertTargetEnabled({ executor: "pi", selection })
       next = available.next
       const worker = api(selection)
       transition(s, { executor: "pi", selection }, true)
@@ -360,11 +381,12 @@ export function makeHybridBridge(api: PiAdapter, command = {
       const clean = source === null || untouched(s)
       let state = settledState(s, observation, clean).state
       let known: Known | undefined = { observation }
-      if (source?.kind === "pi" && clean && source.plan.kind === "pi-first") {
+      if (source?.kind === "pi" && clean && source.plan.kind === "pi-first" &&
+          targetAvailable({ executor: "command-code", selection: source.plan.command })) {
         fallbackToCommand(s, source.plan.command, "Primary Pi runner unavailable during execution (provider usage limit); no edits existed, so the task continued on Command Code.", observation.error)
         state = "running"
         known = undefined
-      } else if (source?.kind === "pi" && clean && source.plan.kind === "codex-last" && codex.available()) {
+      } else if (source?.kind === "pi" && clean && source.plan.kind === "codex-last" && targetAvailable({ executor: "codex", selection: source.plan.codex })) {
         try {
           fallbackToCodex(s, source.plan, "Pi provider/model unavailable during execution; no edits existed, so the task continued on Codex, the final approved route.", observation.error)
           state = "running"
@@ -380,9 +402,9 @@ export function makeHybridBridge(api: PiAdapter, command = {
           transition(s, source.from)
           save(s)
           const codexTarget: ProcessTarget = { executor: "codex", selection: source.plan.codex }
-          if (codex.available()) fallbackToProcess(s, codexTarget, "FX provider/model exhausted or unavailable; continued on Codex before edits.", observation.error)
-          else if (command.available()) fallbackToCommand(s, source.plan.command, "FX provider/model exhausted or unavailable and Codex is unavailable; continued on Command Code before edits.", observation.error)
-          else await fallbackToPi(s, source.plan, "FX, Codex and Command Code unavailable; continued on an approved Pi provider.", observation.error)
+          if (targetAvailable(codexTarget)) fallbackToProcess(s, codexTarget, "FX provider/model exhausted or unavailable; continued on Codex before edits.", observation.error)
+          else if (targetAvailable({ executor: "command-code", selection: source.plan.command })) fallbackToCommand(s, source.plan.command, "FX provider/model exhausted or unavailable and Codex is unavailable; continued on Command Code before edits.", observation.error)
+          else await fallbackToPi(s, source.plan, "Earlier enabled routes unavailable; continued on an approved Pi provider.", observation.error)
           state = "running"
           known = undefined
         } catch (fallbackError) {
@@ -395,8 +417,8 @@ export function makeHybridBridge(api: PiAdapter, command = {
         try {
           transition(s, source.from)
           save(s)
-          if (command.available()) fallbackToCommand(s, source.plan.command, "Codex provider/model unavailable; continued on Command Code before edits.", observation.error)
-          else await fallbackToPi(s, piFallbackPlan(source.plan), "Codex and Command Code unavailable; continued on an approved Pi provider.", observation.error)
+          if (targetAvailable({ executor: "command-code", selection: source.plan.command })) fallbackToCommand(s, source.plan.command, "Codex provider/model unavailable; continued on Command Code before edits.", observation.error)
+          else await fallbackToPi(s, piFallbackPlan(source.plan), "Earlier enabled routes unavailable; continued on an approved Pi provider.", observation.error)
           state = "running"
           known = undefined
         } catch (fallbackError) {
@@ -461,10 +483,12 @@ export function makeHybridBridge(api: PiAdapter, command = {
       const dir = checkedWorktree(cwd)
       if (!isBridgeTier(tierInput)) throw new Error("Unknown bridge tier")
       const plan = resolvePolicy(tierInput)
-      if (plan.kind === "leaf") return { primary: { backend: plan.target.executor, ...plan.target.selection, available: targetAvailable(plan.target) }, fallback: null }
-      const [firstPi] = plan.pi
-      const goModel = plan.pi.find(pin => pin.providerID === "opencode-go")
-      const devinModel = plan.pi.find(pin => pin.providerID === "devin")
+      if (plan.kind === "leaf") return { primary: targetEnabled(plan.target)
+        ? { backend: plan.target.executor, ...plan.target.selection, available: targetAvailable(plan.target) }
+        : { backend: "none", model: null, available: false, issue: "No enabled routes for this tier in harnesses.json" }, fallback: null }
+      const enabledPi = plan.pi.filter(pin => piProviderEnabled(pin.providerID, switches))
+      const goModel = enabledPi.find(pin => pin.providerID === "opencode-go")
+      const devinModel = enabledPi.find(pin => pin.providerID === "devin")
       let goAvailable = false, goIssue: string | null = null
       if (goModel && contributorModel(goModel.providerID, goModel.id) && !contributorAllowed(dir))
         goIssue = "Contributor models disallowed by repository or environment policy"
@@ -472,34 +496,32 @@ export function makeHybridBridge(api: PiAdapter, command = {
         try { goAvailable = (await api(goModel).modelCheck(dir)).available }
         catch (e) { goIssue = String(e) }
       }
-      if (goModel && !goAvailable && !goIssue) goIssue = await diagnoseGoModel(goModel)
-      const devinInfo = { available: false, issue: DEVIN_BRIDGE_DISABLED }
-      const goInfo = { available: goAvailable, issue: goIssue }
-      const piLane = { backend: "pi", model: firstPi,
-        available: firstPi.providerID === "devin" ? devinInfo.available : goInfo.available,
-        issue: firstPi.providerID === "devin" ? devinInfo.issue : goInfo.issue }
+      if (goModel && !goAvailable && !goIssue) goIssue = await diagnoseGoModel(goModel, switches)
+      const piLanes = enabledPi.map(model => ({ backend: "pi", model,
+        available: model.providerID === "devin" ? false : goAvailable,
+        issue: model.providerID === "devin" ? DEVIN_BRIDGE_DISABLED : goIssue }))
+      const piLane = piLanes[0] ?? null
+      const none = { backend: "none", model: null, available: false, issue: "No enabled routes for this tier in harnesses.json" }
+      const devin = devinModel ? { backend: "pi", model: devinModel, available: false, issue: DEVIN_BRIDGE_DISABLED } : null
       if (plan.kind === "pi-only") return {
-        primary: piLane,
-        fallback: null,
-        command_code: null,
-        codex: null,
-        pi_fallback: null,
-        opencode_go: null,
-        devin: devinModel ? { backend: "pi", model: devinModel, available: devinInfo.available, issue: devinInfo.issue } : null,
-        note: "The expert lane is pi-only: when the pinned Devin route is unavailable or exhausted, admission is blocked; there is no Command Code, Pi-Go, Codex or FX fallback.",
+        primary: piLane ?? none, fallback: null, command_code: null, codex: null,
+        pi_fallback: null, opencode_go: null, devin,
+        note: "The expert lane admits only its pinned provider; when it is disabled or unavailable, admission is blocked without fallback.",
       }
-      const commandLane = { backend: "command-code", ...plan.command, available: command.available() }
-      const codexLane = { backend: "codex", ...plan.codex, available: codex.available() }
+      const commandLane = harnessEnabled("command-code", switches)
+        ? { backend: "command-code", ...plan.command, available: targetAvailable({ executor: "command-code", selection: plan.command }) } : null
+      const codexLane = harnessEnabled("codex", switches)
+        ? { backend: "codex", ...plan.codex, available: targetAvailable({ executor: "codex", selection: plan.codex }) } : null
+      const fxLane = plan.kind === "fx-fallback" && harnessEnabled("fx", switches)
+        ? { backend: "fx", ...plan.fx, available: targetAvailable({ executor: "fx", selection: plan.fx }) } : null
+      const lanes = (plan.kind === "fx-fallback" ? [fxLane, codexLane, commandLane, ...piLanes]
+        : plan.kind === "codex-last" ? [commandLane, ...piLanes, codexLane] : [codexLane, commandLane, ...piLanes])
+        .filter(lane => lane !== null)
       return {
-        primary: plan.kind === "fx-fallback"
-          ? { backend: "fx", ...plan.fx, available: targetAvailable({ executor: "fx", selection: plan.fx }) }
-          : commandLane,
-        fallback: plan.kind === "fx-fallback" ? codexLane : piLane,
-        command_code: commandLane,
-        codex: codexLane,
-        pi_fallback: piLane,
-        opencode_go: goModel ? { backend: "pi", model: goModel, available: goInfo.available, issue: goInfo.issue } : null,
-        devin: devinModel ? { backend: "pi", model: devinModel, available: devinInfo.available, issue: devinInfo.issue } : null,
+        primary: lanes[0] ?? none, fallback: lanes[1] ?? null,
+        command_code: commandLane, codex: codexLane, pi_fallback: piLane,
+        opencode_go: goModel ? { backend: "pi", model: goModel, available: goAvailable, issue: goIssue } : null,
+        devin,
       }
     },
     async start(cwd: unknown, title: unknown, tierInput: unknown, scopeInput: unknown, brief: unknown) {
@@ -509,6 +531,7 @@ export function makeHybridBridge(api: PiAdapter, command = {
       const task = required(brief, "brief", 32000)
       const admitting_parent = admittingParentFrom(process.env)
       const plan = resolvePolicy(tierInput)
+      if (!planEnabled(plan)) throw new Error("No enabled routes for this tier in harnesses.json")
       if (plan.kind === "leaf") {
         if (activeWorktreeOwner(stateDir(dir), dir)) throw new Error("Worktree already has an active worker")
         const target: ProcessTarget = plan.target
@@ -545,6 +568,7 @@ export function makeHybridBridge(api: PiAdapter, command = {
         let selection: PiSelection | undefined
         for (const candidate of plan.pi) {
           const target = { executor: "pi" as const, selection: candidate }
+          if (!targetEnabled(target)) continue
           if (candidate.providerID === "devin") { blocked.push("devin/" + candidate.id + " (" + DEVIN_BRIDGE_DISABLED + ")"); continue }
           const exhausted = store.activeRoute(routeRef(target)!)
           if (exhausted) { blocked.push(exhaustionLabel(target, exhausted)); continue }
@@ -566,7 +590,7 @@ export function makeHybridBridge(api: PiAdapter, command = {
         }
         if (!selection)
           throw new Error("Expert admission blocked: the pinned Devin lane is unavailable or exhausted: " + blocked.join("; ") +
-            ". A pi-only expert lane never falls back to Command Code, OpenCode Go, Codex or FX; retry when the Devin lane recovers.")
+            ". This expert lane has no fallback; retry when its pinned provider recovers.")
         const admitted: PiSelection = selection
         const s: Session = { id: "usrw_" + randomUUID(), cwd: dir, tier: tierInput,
           title: required(title, "title", 100), scope: scopeFor(scopeInput, tierInput, dir),
@@ -614,7 +638,7 @@ export function makeHybridBridge(api: PiAdapter, command = {
         }
         const store = new ExhaustionStore(leaseDir)
         const skipped: string[] = []
-        const commandExhausted = store.activeRoute(routeRef(commandTarget)!)
+        const commandExhausted = targetEnabled(commandTarget) ? store.activeRoute(routeRef(commandTarget)!) : null
         if (commandExhausted) skipped.push(exhaustionLabel(commandTarget, commandExhausted))
         if (!commandExhausted && targetAvailable(commandTarget)) {
           activateProcess(s, commandTarget, launch(s, commandTarget, prompt(s)))
@@ -624,7 +648,7 @@ export function makeHybridBridge(api: PiAdapter, command = {
         }
         const reason = skipped.length
           ? "Exhausted routes skipped at admission: " + skipped.join("; ") + "."
-          : "Command Code CLI is unavailable; continued on an approved Pi provider."
+          : harnessEnabled("command-code", switches) ? "Command Code CLI is unavailable; continued on an approved Pi provider." : "Selected the first enabled route."
         await fallbackToPiThenCodex(s, plan, reason, skipped.length ? skipped.join("; ") : undefined, skipped)
         if (skipped.length) {
           const notice = "Exhausted routes skipped at admission: " + skipped.join("; ") + "."
@@ -672,8 +696,8 @@ export function makeHybridBridge(api: PiAdapter, command = {
         return admission(s)
       }
       await fallbackToPi(s, plan, fxTarget
-        ? "FX, Codex and Command Code are unavailable; continued on an approved Pi provider."
-        : "Command Code CLI is unavailable; continued on an approved Pi provider.")
+        ? "Earlier enabled routes are unavailable; continued on an approved Pi provider."
+        : "Selected an enabled Pi provider.")
       return admission(s)
     },
     async status(cwd: unknown, id: unknown) {
@@ -696,6 +720,7 @@ export function makeHybridBridge(api: PiAdapter, command = {
   }
   async function runResume(cwd: unknown, id: unknown, feedback: unknown, admitEffect?: OwnerEffectAdmit, extension?: { extend_attempts: number; extension_reason: string }) {
     return withSessionLock(cwd, id, async (s) => {
+      assertTargetEnabled(targetOf(s))
       const correction = required(feedback, "feedback", 32000)
       const added = extension?.extend_attempts ?? 0
       if (extension && (added !== 1 && added !== 2)) throw new Error("extend_attempts must be 1 or 2")
@@ -727,8 +752,8 @@ export function makeHybridBridge(api: PiAdapter, command = {
         const execution = s.execution
         const previous = observe(execution)
         if (previous.state === "running" || previous.state === "unknown_or_interrupted" || previous.state === "interrupted")
-          throw new Error("Command Code run not known complete")
-        if (!previous.result?.sessionId) throw new Error("No resumable Command Code session")
+          throw new Error("Worker run not known complete")
+        if (!previous.result?.sessionId) throw new Error("No resumable worker session")
         runnerFor(execution.executor)
         if (execution.executor === "fx") {
           if (!fx?.available(execution.selection)) throw new Error("Pinned FX runtime unavailable; cannot resume")
@@ -793,6 +818,7 @@ export function makeHybridBridge(api: PiAdapter, command = {
   }
   async function runSteer(cwd: unknown, id: unknown, note: unknown, admitEffect?: OwnerEffectAdmit) {
     return steerDeadline(() => withSessionLock(cwd, id, async (s) => {
+      assertTargetEnabled(targetOf(s))
       const steering = required(note, "note", 32000)
       if (s.pending_steer) throw new Error("A steer is already pending for this session")
       if (s.execution.kind === "transition" || s.fallback_blocked)
@@ -832,11 +858,11 @@ export function makeHybridBridge(api: PiAdapter, command = {
       const runner = runnerFor(backend)
       const previous = observe(execution)
       if (previous.state !== "running")
-        throw new Error("Command Code run is not running (state " + previous.state +
+        throw new Error("Worker run is not running (state " + previous.state +
           "); use worker_resume for a finished session")
       const sessionId = execution.executor === "fx" ? fx?.session(run, execution.selection) : backend === "command-code" ? commandSession(run) : codex.session(run)
       if (!sessionId)
-        throw new Error(execution.executor === "fx" ? "FX native session identity is not bound; steering is unavailable until it is recorded" : "Command Code session identity is not recorded; cannot restart after steering")
+        throw new Error(execution.executor === "fx" ? "FX native session identity is not bound; steering is unavailable until it is recorded" : "Worker session identity is not recorded; cannot restart after steering")
       if (execution.executor === "fx") fx?.preflightResume({ directory: s.cwd, logDirectory: stateDir(s.cwd), selection: execution.selection, access: accessFor(s), resume: sessionId })
       await beforeDeadline(admitEffect?.())
       ensureWorktree(stateDir(s.cwd), s.cwd, s.id)
@@ -845,7 +871,7 @@ export function makeHybridBridge(api: PiAdapter, command = {
       let plannedSaved = false, counted = false, planned: PlannedRun | undefined
       try {
       if (!runner.cancel(run, s.cwd))
-        throw new Error("Command Code run is not owned by this bridge process; refusing to signal an unverified PID")
+        throw new Error("Worker run is not owned by this bridge process; refusing to signal an unverified PID")
       let state = observe(execution).state
       const deadline = Date.now() + TERMINATION_WAIT_MS
       while (state === "running" && Date.now() < deadline) {
@@ -853,7 +879,7 @@ export function makeHybridBridge(api: PiAdapter, command = {
         state = observe(execution).state
       }
       if (state === "running")
-        throw new Error("Command Code process did not terminate after interruption; inspect it before retrying")
+        throw new Error("Worker process did not terminate after interruption; inspect it before retrying")
       s.pending_steer.phase = "relaunching"
       const target: ProcessTarget = processTarget(execution)
       const output = join(stateDir(s.cwd), randomUUID() + (target.executor === "fx" ? ".fx.json" : ".ndjson"))

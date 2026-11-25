@@ -7,7 +7,7 @@ import { join } from "node:path"
 import type { OpenCodePort } from "../src/bridge.ts"
 import { codexSession } from "../src/codex.ts"
 import type { LaunchRequest } from "../src/launch.ts"
-import { makeHybridBridge } from "../src/hybrid.ts"
+import { makeHybridBridge } from "./harness-fixtures.ts"
 import { inspectStored } from "../src/inspect.ts"
 import { Scratch, realDeps, runFor, writeLog, writeSession, type Repo } from "./worker-fixtures.ts"
 import {

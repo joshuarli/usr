@@ -1,0 +1,14 @@
+{
+  "claude": true,
+  "codex": true,
+  "command-code": false,
+  "pi": true,
+  "opencode": true,
+  "opencode-go": true,
+  "devin": true,
+  "antigravity": true,
+  "copilot": true,
+  "fx": true,
+  "muse": true,
+  "deepseek": false
+}

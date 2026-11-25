@@ -35,7 +35,7 @@ Ownership is split. The [`pi-build`](https://github.com/joshuarli/pi-build) chec
 
 - Run `TMPDIR="$PWD/.work/tmp" python3 -I tools/pi/test_release_install.py`, `TMPDIR="$PWD/.work/tmp" python3 -I tools/pi/test_offline.py`, the worker and installer tests, `tools/pi/test_sync_bridge_offline.py` in a disposable checkout, the bridge tests, and `sh sync check`. Clear `.work/cache/pi-releases` first so the runtime suite fetches and verifies the new pin.
 - Prove `sh sync tools pi` and `sh sync bridge` from a fresh HOME with an empty `~/.npm` and blocked npm registry. Only the pinned release assets may be downloaded. The Pi CLI must launch, the SDK must import, `pi-subagents` RPC spawn/resume/steer must work, the Muse provider must load, the intercom broker must send and receive, and the CLI and MCP entries must agree. An unchanged rerun must make no request.
-- Verify the nested equal-or-weaker one-generation cap, no God, Command Code leaf-only, unchanged HEAD/write boundary, sandbox assumptions, and supervisor messaging that cannot grant new scope.
+- Verify the nested equal-or-weaker one-generation cap, no God, leaf-only backends, unchanged HEAD/write boundary, sandbox assumptions, and supervisor messaging that cannot grant new scope.
 - Use dedicated disposable worktrees. Do not claim account or model access from unit tests. Run only the cheapest necessary online provider canaries.
 - Commit the `pi-build` sources, locks and tooling there. Commit the `usr` pin, version surfaces, tests and docs together. The previous pin stays in `usr` history and its release stays published, so reverting the pin commit is the rollback. If a required target, archive or gate is missing, do not publish or bump the pin; report the update as incomplete.
 

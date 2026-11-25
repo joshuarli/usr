@@ -2,14 +2,16 @@ import test from "node:test"
 import assert from "node:assert/strict"
 import {
   ANTIGRAVITY_DIRECT, BANNED_MODELS, CODEX_TIER_MODELS, COMMAND_TIER_MODELS,
-  NATIVE_FALLBACK, OPENCODE_NATIVE, POLICY, ROOT_PLANS, isBannedModel, routesOf,
+  NATIVE_FALLBACK, OPENCODE_NATIVE, POLICY, ROOT_PLANS, isBannedModel, routesOf, policyForHarnesses,
 } from "../src/policy.ts"
+import { HARNESS_SWITCHES } from "../src/harnesses.ts"
 import { GO_TIER_MODELS, PI_MODEL_ALLOWLIST, TIER_TOOLS, isTier, BRIDGE_TIERS } from "../src/tier-policy.ts"
 
 test("root admission keeps ordered lower-tier fallback and gives expert only the Devin max route", () => {
-  assert.deepEqual(routesOf(ROOT_PLANS.scout).map(route => route.executor), ["command-code", "pi", "codex"])
-  assert.deepEqual(routesOf(ROOT_PLANS.mechanic).map(route => route.executor), ["command-code", "pi", "codex"])
-  assert.deepEqual(routesOf(ROOT_PLANS.worker).map(route => route.executor), ["command-code", "pi", "codex"])
+  const enabled = { ...HARNESS_SWITCHES, "command-code": true }
+  assert.deepEqual(routesOf(ROOT_PLANS.scout, enabled).map(route => route.executor), ["command-code", "pi", "codex"])
+  assert.deepEqual(routesOf(ROOT_PLANS.mechanic, enabled).map(route => route.executor), ["command-code", "pi", "codex"])
+  assert.deepEqual(routesOf(ROOT_PLANS.worker, enabled).map(route => route.executor), ["command-code", "pi", "codex"])
   for (const tier of ["scout", "mechanic", "worker"] as const)
     assert.deepEqual(ROOT_PLANS[tier].pi.map(pin => pin.providerID), ["opencode-go"])
   assert.deepEqual(ROOT_PLANS.expert, { kind: "pi-only", pi: [{ providerID: "devin", id: "swe-2.1", variant: "max" }] })
@@ -19,6 +21,21 @@ test("root admission keeps ordered lower-tier fallback and gives expert only the
   for (const tier of ["scout", "mechanic", "worker"] as const) {
     assert.deepEqual(ROOT_PLANS[tier].codex, CODEX_TIER_MODELS[tier])
     assert.deepEqual(ROOT_PLANS[tier].command, COMMAND_TIER_MODELS[tier])
+  }
+})
+
+test("disabled routes disappear without losing configured pins or changing unrelated providers", () => {
+  for (const tier of ["scout", "mechanic", "worker"] as const) {
+    assert.deepEqual(POLICY.rootRoutes[tier].map(route => route.executor), ["pi", "codex"])
+    const restored = policyForHarnesses({ ...HARNESS_SWITCHES, "command-code": true })
+    assert.deepEqual(restored.rootRoutes[tier][0], { executor: "command-code", ...COMMAND_TIER_MODELS[tier] })
+    const nativeOpenCodeOff = policyForHarnesses({ ...HARNESS_SWITCHES, opencode: false })
+    assert.deepEqual(nativeOpenCodeOff.rootRoutes[tier], POLICY.rootRoutes[tier])
+    const goOff = policyForHarnesses({ ...HARNESS_SWITCHES, "opencode-go": false })
+    assert.deepEqual(goOff.rootRoutes[tier].map(route => route.executor), ["codex"])
+    const noExecutors = policyForHarnesses({ ...HARNESS_SWITCHES, pi: false, codex: false })
+    assert.deepEqual(noExecutors.rootRoutes[tier], [])
+    assert.deepEqual(noExecutors.rootRoutes.expert, [])
   }
 })
 

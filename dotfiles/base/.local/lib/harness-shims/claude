@@ -1,4 +1,5 @@
 #!/bin/sh
+"$HOME/.local/bin/harness-enabled" claude || exit $?
 # Use agent-browser by default; an explicit --chrome remains available.
 export CLAUDE_CODE_ENABLE_CFC=0
 export CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SKIP_PERMISSIONS=1

@@ -55,13 +55,6 @@
       }
     },
     "modelScope": {
-      "enforce": true,
-      "strict": true,
-      "allow": [
-        "opencode-go/deepseek-v4.1-flash",
-        "opencode-go/muse-spark-1.3-contributor",
-        "devin/swe-2.1"
-      ],
       "agents": {
         "scout": {
           "allow": [
@@ -103,7 +96,14 @@
             "devin/swe-2.1"
           ]
         }
-      }
+      },
+      "enforce": true,
+      "strict": true,
+      "allow": [
+        "opencode-go/deepseek-v4.1-flash",
+        "opencode-go/muse-spark-1.3-contributor",
+        "devin/swe-2.1"
+      ]
     }
   }
 }

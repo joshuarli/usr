@@ -2,6 +2,30 @@
 
 This repository installs my home configuration, personal commands, and machine setup. Clone it to `~/usr`.
 
+## Harness switches
+
+[`harnesses.json`](harnesses.json) is the single on/off configuration for every
+harness and provider. Change one boolean, then run `make generate` to refresh
+the checked-in agent instructions, routing summaries and visualization.
+`make check-generated` checks that they agree. Command Code is off; the
+previously disabled DeepSeek Harness also remains off.
+
+The bridge and managed launch shims read these switches before new work,
+including resume and steering. Disabled backends are omitted from route probes
+and login checks. Default installs omit their tools unless an enabled provider
+needs them. `sh sync plan` previews which owned harness
+configuration and native-agent links the next sync will remove or restore;
+credentials, transcripts and vendor binaries are retained. Start a fresh agent
+session after generation so its context uses the new instructions.
+
+Harnesses and subscription providers have separate switches: `opencode` controls
+the native CLI; `opencode-go` controls that provider through Pi, which also
+requires `pi`. An enabled Pi Go provider keeps OpenCode installed for credential
+export even when native OpenCode sessions are disabled. Turning a harness back
+on restores its existing model pins and
+instructions. See [policy generation](tools/policy/README.md) for ownership and
+verification.
+
 ## Install
 
 On macOS, preview setup with `./host/macos/setup-macos -n`. Run `./host/macos/setup-macos` to install Homebrew and its packages, configure Touch ID for `sudo`, and start Unbound. The script changes system settings and uses `sudo`. Unbound listens on loopback and forwards to Cloudflare over authenticated DNS-over-TLS. Its DNS step assigns `127.0.0.1` to every enabled network service, including Tailscale. System DNS then depends on Unbound, with no public fallback if it stops.

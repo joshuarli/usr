@@ -1,13 +1,15 @@
+import { makeHybridBridge as makeRuntimeBridge } from "../src/hybrid.ts"
+import { ALL_HARNESSES, NO_HARNESSES } from "./harness-fixtures.ts"
 import { piAdapter } from "../src/pi-adapter.ts"
 import test from "node:test"
 import assert from "node:assert/strict"
 import { execFileSync, spawn, spawnSync } from "node:child_process"
-import { appendFileSync, chmodSync, existsSync, mkdtempSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync, realpathSync } from "node:fs"
+import { appendFileSync, chmodSync, copyFileSync, existsSync, mkdtempSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync, realpathSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { fileURLToPath } from "node:url"
-import { makeHybridBridge, type Scope } from "../src/hybrid.ts"
-import { stateDir } from "../src/git.ts"
+import { makeHybridBridge, type Scope } from "./harness-fixtures.ts"
+import { stateDir, readStateDir } from "../src/git.ts"
 import { inspectStored } from "../src/inspect.ts"
 import { STEER_LIMIT, TURN_LIMIT_CONTINUATIONS } from "../src/session.ts"
 import { startCodex, codexResult, cancelCodex, codexSession } from "../src/codex.ts"
@@ -183,12 +185,19 @@ test("Command Code availability requires the executable behind a PATH shim", asy
   try {
     const m = fake(f.cwd), bridge = makeHybridBridge(piAdapter(m.api), undefined, noCodex)
     const shims = fileURLToPath(new URL("../../../dotfiles/base/.local/lib/harness-shims", import.meta.url))
+    const bin = join(f.root, ".local/bin"), checkout = join(f.root, "usr")
+    const checker = join(checkout, "dotfiles/base/.local/bin/harness-enabled")
+    mkdirSync(bin, { recursive: true })
+    mkdirSync(join(checkout, "dotfiles/base/.local/bin"), { recursive: true })
+    mkdirSync(join(checkout, "tools/sync"), { recursive: true })
+    writeFileSync(join(checkout, "harnesses.json"), JSON.stringify(ALL_HARNESSES))
+    copyFileSync(new URL("../../../dotfiles/base/.local/bin/harness-enabled", import.meta.url), checker)
+    copyFileSync(new URL("../../sync/harnesses.py", import.meta.url), join(checkout, "tools/sync/harnesses.py"))
+    symlinkSync(checker, join(bin, "harness-enabled"))
     process.env.HOME = f.root
     process.env.PATH = shims + ":" + previous.PATH
     assert.equal((await bridge.modelCheck(f.cwd, "scout")).command_code?.available, false)
 
-    const bin = join(f.root, ".local/bin")
-    mkdirSync(bin, { recursive: true })
     writeFileSync(join(bin, "cmd"), '#!/bin/sh\n[ "$#" -eq 1 ] && [ "$1" = --version ]\n', { mode: 0o755 })
     assert.equal((await bridge.modelCheck(f.cwd, "scout")).command_code?.available, true)
   } finally {
@@ -713,7 +722,7 @@ test("steer recovers when its caller exits immediately after spawning the replac
     const m = fake(f.cwd), { command } = steerable(f, m)
     const bridge = makeHybridBridge(piAdapter(m.api), command, noCodex)
     const task = await bridge.start(f.cwd, "one", "worker", f.scope, "Edit README")
-    const hybrid = new URL("../src/hybrid.ts", import.meta.url).href
+    const hybrid = new URL("./harness-fixtures.ts", import.meta.url).href
     const adapter = new URL("../src/pi-adapter.ts", import.meta.url).href
     const replacementCode = 'const fs=require("fs");fs.writeFileSync(process.argv[1],JSON.stringify({type:"event"})+"\\n");setInterval(()=>{},1000)'
     const script = `
@@ -764,7 +773,7 @@ test("a slow git phase cannot hold steer beyond its overall deadline", async () 
     const fakeGit = join(bin, "git")
     writeFileSync(fakeGit, '#!/bin/sh\n/bin/sleep 1\nexec ' + JSON.stringify(gitPath) + ' "$@"\n')
     chmodSync(fakeGit, 0o755)
-    const hybrid = new URL("../src/hybrid.ts", import.meta.url).href
+    const hybrid = new URL("./harness-fixtures.ts", import.meta.url).href
     const adapter = new URL("../src/pi-adapter.ts", import.meta.url).href
     const script = `import { makeHybridBridge } from ${JSON.stringify(hybrid)};
       import { piAdapter } from ${JSON.stringify(adapter)};
@@ -1622,5 +1631,121 @@ test("provider fallback remains blocked after an in-scope commit", async () => {
     assert.equal(status.state, "blocked_partial_work")
     assert.equal(status.head_on_lane, true)
     assert.equal(piCreates(m.calls).length, 0)
+  } finally { f.close() }
+})
+
+
+test("default configuration never probes or launches Command Code and selects Pi", async () => {
+  const f = fixture()
+  try {
+    const m = fake(f.cwd)
+    const denied = () => { throw new Error("Disabled Command Code was called") }
+    const command = { ...m.command, available: denied, start: denied }
+    const bridge = makeRuntimeBridge(piAdapter(m.api), command, recordingCodex(m))
+    const check = await bridge.modelCheck(f.cwd, "worker")
+    assert.equal(check.command_code, null)
+    assert.equal(check.primary.backend, "pi")
+    const started = await bridge.start(f.cwd, "enabled route", "worker", f.scope, "Provide proof")
+    assert.equal(started.backend, "pi")
+    assert.doesNotMatch(started.fallback_reason ?? "", /Command Code/i)
+    assert.equal(commandCalls(m.calls).length, 0)
+    assert.equal(piCreates(m.calls).length, 1)
+    m.failPi("provider quota exceeded")
+    const status = await bridge.status(f.cwd, started.session_id)
+    assert.equal(status.backend, "codex")
+    assert.equal(codexCalls(m.calls).length, 1)
+    assert.equal(commandCalls(m.calls).length, 0)
+  } finally { f.close() }
+})
+
+for (const disabled of ["pi", "opencode-go"] as const) {
+  test(`disabled ${disabled} never opens the Pi adapter; Codex remains available`, async () => {
+    const f = fixture()
+    try {
+      const m = fake(f.cwd)
+      const denied = () => { throw new Error("Disabled adapter was called") }
+      const switches = { ...ALL_HARNESSES, "command-code": false, [disabled]: false }
+      const bridge = makeRuntimeBridge(denied, { ...m.command, available: denied, start: denied }, recordingCodex(m), undefined, undefined, switches)
+      const check = await bridge.modelCheck(f.cwd, "worker")
+      assert.equal(check.pi_fallback, null)
+      assert.equal(check.primary.backend, "codex")
+      assert.equal((await bridge.start(f.cwd, "enabled route", "worker", f.scope, "Provide proof")).backend, "codex")
+      assert.equal(codexCalls(m.calls).length, 1)
+    } finally { f.close() }
+  })
+}
+
+test("disabling an admitted executor refuses resume and steer before effects but preserves observation and cancellation", async () => {
+  const f = fixture()
+  try {
+    const m = fake(f.cwd), switches = { ...ALL_HARNESSES }
+    let cancels = 0
+    const command = { ...m.command, cancel: () => { cancels++; return true } }
+    const bridge = makeRuntimeBridge(piAdapter(m.api), command, noCodex, undefined, undefined, switches)
+    const started = await bridge.start(f.cwd, "old session", "worker", f.scope, "Provide proof")
+    switches["command-code"] = false
+    const file = join(stateDir(f.cwd), started.session_id + ".json")
+    const before = readFileSync(file, "utf8")
+    await assert.rejects(bridge.steer(f.cwd, started.session_id, "Continue"), /disabled in harnesses.json/)
+    m.done()
+    await assert.rejects(bridge.resume(f.cwd, started.session_id, "Continue"), /disabled in harnesses.json/)
+    assert.equal(cancels, 0)
+    assert.equal(commandCalls(m.calls).length, 1)
+    assert.equal(readFileSync(file, "utf8"), before)
+    assert.equal((await bridge.status(f.cwd, started.session_id)).backend, "command-code")
+    assert.equal((await bridge.cancel(f.cwd, started.session_id)).interrupted, true)
+    assert.equal(cancels, 1)
+  } finally { f.close() }
+})
+
+test("all disabled routes fail before a provider probe or session lease is created", async () => {
+  const f = fixture()
+  try {
+    const m = fake(f.cwd), denied = () => { throw new Error("Disabled adapter was called") }
+    const bridge = makeRuntimeBridge(denied, { ...m.command, available: denied, start: denied },
+      { ...noCodex, available: denied, start: denied }, undefined, undefined, NO_HARNESSES)
+    assert.equal((await bridge.modelCheck(f.cwd, "worker")).primary.available, false)
+    await assert.rejects(bridge.start(f.cwd, "disabled", "worker", f.scope, "Provide proof"), /No enabled routes/)
+    assert.equal(existsSync(readStateDir(f.cwd)), false)
+  } finally { f.close() }
+})
+
+test("disabled Codex is neither probed nor used when an enabled Pi route fails", async () => {
+  const f = fixture()
+  try {
+    const m = fake(f.cwd), denied = () => { throw new Error("Disabled Codex was called") }
+    const switches = { ...ALL_HARNESSES, "command-code": false, codex: false }
+    const bridge = makeRuntimeBridge(piAdapter(m.api), m.command,
+      { ...noCodex, available: denied, start: denied }, undefined, undefined, switches)
+    assert.equal((await bridge.modelCheck(f.cwd, "worker")).codex, null)
+    const started = await bridge.start(f.cwd, "enabled Pi", "worker", f.scope, "Provide proof")
+    m.failPi("provider quota exceeded")
+    const status = await bridge.status(f.cwd, started.session_id)
+    assert.equal(status.backend, "pi")
+    assert.equal(codexCalls(m.calls).length, 0)
+    assert.equal(commandCalls(m.calls).length, 0)
+  } finally { f.close() }
+})
+
+
+test("legacy Pi failure cannot revive disabled Command Code and releases its terminal lease", async () => {
+  const f = fixture()
+  try {
+    const m = fake(f.cwd), state = stateDir(f.cwd)
+    const id = "usrw_01234567-89ab-cdef-0123-456789abcdef"
+    writeFileSync(join(state, id + ".json"), JSON.stringify({
+      id, cwd: f.cwd, tier: "worker", title: "Legacy Pi lane", task: "Edit README", scope: f.scope, backend: "pi", attempts: 1,
+      pi_id: "ses_fixture", primary_model: { providerID: "opencode-go", id: "deepseek-v4.1-flash", variant: "high" },
+      command_model: "deepseek/deepseek-v4.1-flash", command_effort: "high", remaining_pi: [],
+    }))
+    claimWorktree(state, f.cwd, id)
+    m.failPi("429 quota exhausted")
+    const denied = () => { throw new Error("Disabled Command Code was called") }
+    const bridge = makeRuntimeBridge(piAdapter(m.api), { ...m.command, available: denied, start: denied }, noCodex)
+    const status = await bridge.status(f.cwd, id)
+    assert.equal(status.backend, "pi")
+    assert.equal(status.state, "failed")
+    assert.equal(commandCalls(m.calls).length, 0)
+    assert.equal(activeWorktreeOwner(state, f.cwd), null)
   } finally { f.close() }
 })

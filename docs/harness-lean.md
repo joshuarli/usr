@@ -9,11 +9,40 @@ token, RSS and latency improvements need separate measurement.
 ## Launch shims
 
 The tracked shims live in `~/.local/lib/harness-shims`. The sh, ish and xshi
-configs put that directory before `~/.local/bin`. Each shim directly execs
+configs put that directory before `~/.local/bin`. Each shim checks the current
+root [`harnesses.json`](../harnesses.json) through `harness-enabled`, then execs
 the native launcher in `~/.local/bin`, so installers and vendor updates
 retain ownership of their launchers. No PATH search or binary renaming is
 needed. Programs launched with an absolute binary path, or from a GUI that
 does not inherit this PATH, bypass the shims.
+
+The switches cover `claude`, `codex`, `cmd`, `copilot`, `pi`, `opencode`,
+`devin`, `agy`, `fx`, `muse` and `dsh`. A disabled command exits before starting
+the client. Sync omits its default installation, login probes and managed
+configuration links; it preserves existing binaries, credentials and sessions.
+Re-enable its switch, run `make generate`, then use the normal sync workflow.
+
+Pi's `opencode-go` provider reuses OpenCode credentials independently of the
+native `opencode` harness. With Pi and OpenCode Go enabled, the OpenCode shim
+permits exactly `opencode auth export` and `opencode auth export opencode`
+even when native OpenCode is disabled. Other arguments still require the
+native switch. Sync retains the OpenCode executable as that provider's
+credential helper, while omitting native OpenCode configuration and login
+probes. No model call is made by these credential exports.
+
+The Pi shim also checks the selected subscription provider. A disabled default
+stops before Pi starts; choose an enabled provider explicitly with
+`pi --provider PROVIDER --model MODEL` or `pi --model PROVIDER/MODEL`.
+Arguments are forwarded unchanged, and no replacement model is selected.
+The native `provider-switches` extension rereads the root switches for prompts,
+model selections, custom turns and provider requests, including restored
+sessions. It aborts disabled routes and cancels their compaction/cache warming.
+While a Pi provider is disabled, `--no-extensions` is refused so the runtime
+guard remains active. Other custom Pi providers retain their native behavior.
+
+Disabling Pi does not remove Claude's bridge when Codex or Command Code is
+enabled. Sync registers that bridge in its existing `--core` mode using Node,
+without installing Pi or its SDK.
 
 | Command | Shim default | Explicit override |
 | --- | --- | --- |
@@ -37,7 +66,7 @@ in [Copilot setup](copilot-native.md); sync currently installs only its configur
 | OpenCode v2 | Native browser, web search/fetch, MCP and native subagents remain enabled under the existing permissions. |
 | Devin | `auto_update=false` stops automatic downloads/installation; update checks may still occur. Existing Claude/Cloud import opt-outs remain. |
 | DeepSeek Harness | Its existing launcher sets `DSH_TELEMETRY_DISABLED=1` for both TUI and headless paths. This disables OTel delivery, not the separate session-log contribution plugin. |
-| Pi | Existing offline package policy, four core coding tools and explicit extensions remain. No additional shim or browser toggle needed for this profile. |
+| Pi | Existing offline package policy, four core coding tools and explicit extensions remain. Its launch shim checks the central switch. |
 | Muse | Existing telemetry opt-out remains; the Notion and Sentry MCP servers were removed from the tracked settings. No browser/tool removal was verified. |
 | Antigravity CLI | Native settings remain upstream-owned. Its documented `/browser` is on demand; no supported persistent browser-off switch was verified. |
 | Vercel fx | Existing automatic-update and generated-title opt-outs remain. No additional browser automation integration was found in the reviewed profile. |

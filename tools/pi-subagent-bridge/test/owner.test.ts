@@ -4,16 +4,16 @@ import assert from "node:assert/strict"
 import { spawn, execFileSync, type ChildProcess } from "node:child_process"
 import { randomUUID } from "node:crypto"
 import {
-  chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync,
+  chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync,
   writeFileSync,
 } from "node:fs"
 import { tmpdir } from "node:os"
-import { dirname, join, relative, resolve } from "node:path"
-import { fileURLToPath } from "node:url"
+import { dirname, join, relative } from "node:path"
+import { pathToFileURL } from "node:url"
 import type { OpenCodePort } from "../src/bridge.ts"
 import type { CommandRun } from "../src/command.ts"
 import { readStateDir, stateDir } from "../src/git.ts"
-import { makeHybridBridge } from "../src/hybrid.ts"
+import { ALL_HARNESSES, makeHybridBridge } from "./harness-fixtures.ts"
 import { OwnerAbortedError, OwnerManager, RepoOwnerEndpoint, deriveRunId, ownerDirectoryFor } from "../src/owner.ts"
 import {
   listOwnerIds, ownerCommand, ownerHello, ownerInterrupt, ownerJobs, ownerResume, ownerStatus,
@@ -21,11 +21,8 @@ import {
 } from "../src/owner-client.ts"
 import { ROOT_PLANS, type RootPlan } from "../src/policy.ts"
 import { ADMITTING_PARENT_ENV, decodeSession, encodeSession, type Session } from "../src/session.ts"
-import { connect } from "../src/server.ts"
 import { worktreeLeasePath } from "../src/worktree-lease.ts"
 
-const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..")
-const CLI_PATH = join(ROOT, "src", "cli.ts")
 let repoCounter = 0
 
 function scopeFor(repo: string) {
@@ -459,7 +456,7 @@ test("c: owner loss mid-command reports uncertain via command and new owner does
   const ops1 = bridge1
   // Use OwnerManager-style resolver for bridge1 by wrapping or testing start via OwnerManager:
   const s = await (async () => {
-    const { hybridOwnerOps } = await import("../src/hybrid.ts")
+    const { hybridOwnerOps } = await import("./harness-fixtures.ts")
     hybridOwnerOps(ops1)?.setOwnerResolver(() => endpoint1.identity())
     return ops1.start(repo, "job-c", "worker", scopeFor(repo), "task c")
   })()
@@ -823,6 +820,13 @@ test("h: interrupt on blocked_partial_work returns rejected: not-running and pre
 
 test("CLI start never becomes an owner and MCP server + owner CLI work end-to-end with clean shutdown", async (t) => {
   const scratch = makeScratch(t)
+  // This lifecycle fixture explicitly enables its Command Code executable in an
+  // isolated checkout; production connect() and child CLI processes read that file.
+  const checkout = join(scratch, "usr"), ROOT = join(checkout, "tools/pi-subagent-bridge")
+  const CLI_PATH = join(ROOT, "src/cli.ts")
+  cpSync(new URL("../src", import.meta.url), join(ROOT, "src"), { recursive: true })
+  writeFileSync(join(checkout, "harnesses.json"), JSON.stringify(ALL_HARNESSES))
+  const fixtureServer: typeof import("../src/server.ts") = await import(pathToFileURL(join(ROOT, "src/server.ts")).href)
   const fakeBin = join(scratch, "bin")
   mkdirSync(fakeBin, { recursive: true })
   const fakeCmd = join(fakeBin, "cmd")
@@ -853,7 +857,7 @@ test("CLI start never becomes an owner and MCP server + owner CLI work end-to-en
   process.env.HOME = scratch
   let cliPid: number | undefined
   try {
-    const cliBridge = await connect()
+    const cliBridge = await fixtureServer.connect()
     const cliStarted = await cliBridge.start(cliRepo, "cli-job", "worker", scopeFor(cliRepo), "cli task")
     const cliRaw = JSON.parse(readFileSync(join(readStateDir(cliRepo), `${cliStarted.session_id}.json`), "utf8")) as Record<string, unknown>
     assert.equal(cliRaw.owner, undefined)

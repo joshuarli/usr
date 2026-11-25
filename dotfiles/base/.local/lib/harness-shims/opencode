@@ -1,0 +1,8 @@
+#!/bin/sh
+set -eu
+case "$#:${1-}:${2-}:${3-}" in
+    2:auth:export:|3:auth:export:opencode)
+        "$HOME/.local/bin/harness-enabled" opencode --auth-export || exit $? ;;
+    *) "$HOME/.local/bin/harness-enabled" opencode || exit $? ;;
+esac
+exec "$HOME/.local/bin/opencode" "$@"

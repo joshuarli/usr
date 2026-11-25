@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import shlex
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -12,7 +13,8 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 SHIMS = ROOT / "dotfiles/base/.local/lib/harness-shims"
-NAMES = ("codex", "claude", "cmd", "copilot")
+NAMES = ("codex", "claude", "cmd", "copilot", "pi", "opencode", "devin", "agy", "fx", "muse", "dsh")
+HARNESS_IDS = ("claude", "codex", "command-code", "pi", "opencode", "opencode-go", "devin", "antigravity", "copilot", "fx", "muse", "deepseek")
 POLICY_ENV = ("CLAUDE_CODE_ENABLE_CFC", "CMD_DISABLE_NOTICES", "COMMANDCODE_SKIP_UPDATES", "DO_NOT_TRACK")
 FAKE = """import json, os, sys
 from pathlib import Path
@@ -37,6 +39,21 @@ class HarnessLeanTests(unittest.TestCase):
         self.bin.mkdir(parents=True)
         self.shims.mkdir(parents=True)
         self.capture = self.home / "capture.json"
+        self.repo = self.home / "usr"
+        helper = self.repo / "dotfiles/base/.local/bin/harness-enabled"
+        helper.parent.mkdir(parents=True)
+        shutil.copy2(ROOT / "dotfiles/base/.local/bin/harness-enabled", helper)
+        reader = self.repo / "tools/sync/harnesses.py"
+        reader.parent.mkdir(parents=True)
+        shutil.copy2(ROOT / "tools/sync/harnesses.py", reader)
+        self.switches = dict.fromkeys(HARNESS_IDS, True)
+        self.config = self.repo / "harnesses.json"
+        self.config.write_text(json.dumps(self.switches))
+        self.pi_settings = self.home / ".pi/agent/settings.json"
+        self.pi_settings.parent.mkdir(parents=True)
+        self.pi_settings.write_text(json.dumps({"defaultProvider": "opencode-go", "defaultModel": "fixture"}))
+        (self.bin / "harness-enabled").symlink_to(helper)
+        (self.bin / "python3").symlink_to(sys.executable)
         fake = self.home / "fake.py"
         fake.write_text(FAKE)
         for name in NAMES:
@@ -89,7 +106,7 @@ class HarnessLeanTests(unittest.TestCase):
     def test_shared_shell_selects_shims_before_managed_binaries(self):
         config = ROOT / "dotfiles/base/.config/sh/config.sh"
         result = subprocess.run(
-            ["/bin/sh", "-c", '. "$1"; . "$1"; for name in codex claude cmd copilot; do command -v "$name"; done', "sh", str(config)],
+            ["/bin/sh", "-c", '. "$1"; . "$1"; shift; for name; do command -v "$name"; done', "sh", str(config), *NAMES],
             env={**self.env, "PATH": str(self.bin) + ":/usr/bin:/bin"},
             capture_output=True, text=True, check=True, timeout=5,
         )
@@ -156,6 +173,140 @@ class HarnessLeanTests(unittest.TestCase):
                 self.assertEqual(result.returncode, 127)
                 self.assertEqual(result.stdout, "")
                 self.assertIn(str(self.bin / name), result.stderr)
+
+    def test_each_disabled_harness_stops_before_the_client_and_can_be_restored(self):
+        aliases = {"cmd": "command-code", "agy": "antigravity", "dsh": "deepseek"}
+        for name in NAMES:
+            with self.subTest(name=name):
+                self.capture.unlink(missing_ok=True)
+                key = aliases.get(name, name)
+                self.switches[key] = False
+                self.config.write_text(json.dumps(self.switches))
+                result = subprocess.run([name, "prompt"], env=self.env, capture_output=True, text=True, timeout=5)
+                self.assertEqual(result.returncode, 1)
+                self.assertIn("is disabled", result.stderr)
+                self.assertFalse(self.capture.exists(), "disabled client was launched")
+                self.switches[key] = True
+                self.config.write_text(json.dumps(self.switches))
+                self.invoke(name, ("prompt",))
+
+    def test_missing_or_malformed_switchboard_fails_closed(self):
+        for data in (None, "{", '{"cmd": true}', json.dumps({**self.switches, "pi": "true"})):
+            with self.subTest(data=data):
+                if data is None:
+                    self.config.unlink()
+                else:
+                    self.config.write_text(data)
+                result = subprocess.run(["cmd", "prompt"], env=self.env, capture_output=True, text=True, timeout=5)
+                self.assertEqual(result.returncode, 2)
+                self.assertFalse(self.capture.exists())
+
+    def test_disabled_native_opencode_preserves_only_enabled_pi_go_auth_exports(self):
+        self.switches["opencode"] = False
+        self.config.write_text(json.dumps(self.switches))
+        for args in (("auth", "export"), ("auth", "export", "opencode")):
+            self.assertEqual(self.invoke("opencode", args)["argv"], list(args))
+        for args in (("auth", "export", "other"), ("auth", "export", "opencode", "--extra"),
+                     ("auth", "login"), ("auth", "export", ""), ("prompt",)):
+            self.capture.unlink(missing_ok=True)
+            result = subprocess.run(["opencode", *args], env=self.env, capture_output=True, text=True, timeout=5)
+            self.assertEqual(result.returncode, 1, str(args))
+            self.assertFalse(self.capture.exists())
+        for provider in ("pi", "opencode-go"):
+            self.switches[provider] = False
+            self.config.write_text(json.dumps(self.switches))
+            for args in (("auth", "export"), ("auth", "export", "opencode")):
+                result = subprocess.run(["opencode", *args], env=self.env, capture_output=True, text=True, timeout=5)
+                self.assertEqual(result.returncode, 1)
+                self.assertFalse(self.capture.exists())
+            self.switches[provider] = True
+
+    def test_pi_disabled_default_stops_before_native_start_and_accepts_explicit_enabled_provider(self):
+        self.switches["opencode-go"] = False
+        self.config.write_text(json.dumps(self.switches))
+        for args in ((), ("prompt",), ("--model", "fixture"), ("--", "--provider", "devin", "--model", "fixture"),
+                     ("--system-prompt", "--provider", "devin", "--model", "fixture")):
+            result = subprocess.run(["pi", *args], env=self.env, capture_output=True, text=True, timeout=5)
+            self.assertEqual(result.returncode, 1, str(args))
+            self.assertIn("default provider 'opencode-go' is disabled", result.stderr)
+            self.assertIn("--provider with --model", result.stderr)
+            self.assertFalse(self.capture.exists())
+        for args in (("--provider", "devin", "--model", "fixture", "prompt"),
+                     ("--model", "devin/fixture:high", "prompt"),
+                     ("--provider", "opencode-go", "--provider", "devin", "--model", "fixture"),
+                     ("--help",), ("--version",), ("--list-models",), ("auth", "login")):
+            self.assertEqual(self.invoke("pi", args)["argv"], list(args))
+
+    def test_pi_disabled_explicit_provider_and_extension_bypass_are_refused(self):
+        self.switches["devin"] = False
+        self.config.write_text(json.dumps(self.switches))
+        for args in (("--provider", "devin", "--model", "fixture"),
+                     ("--model", "devin/fixture:high"),
+                     ("--provider", "opencode-go", "--provider", "DEVIN", "--model", "fixture"),
+                     ("--provider", "opencode-go", "--model", "devin/fixture"),
+                     ("--no-extensions",), ("-ne", "--model", "opencode-go/fixture")):
+            result = subprocess.run(["pi", *args], env=self.env, capture_output=True, text=True, timeout=5)
+            self.assertEqual(result.returncode, 1, str(args))
+            self.assertFalse(self.capture.exists())
+        self.assertEqual(self.invoke("pi", ("prompt",))["argv"], ["prompt"])
+
+    def test_pi_reads_current_settings_without_an_environment_enable_override(self):
+        self.switches["devin"] = False
+        self.config.write_text(json.dumps(self.switches))
+        self.pi_settings.write_text(json.dumps({"defaultProvider": "devin", "defaultModel": "fixture"}))
+        result = subprocess.run(["pi", "prompt"], env={**self.env, "USR_ENABLE_DEVIN": "1"},
+                                capture_output=True, text=True, timeout=5)
+        self.assertEqual(result.returncode, 1)
+        self.assertFalse(self.capture.exists())
+        self.switches["devin"] = True
+        self.config.write_text(json.dumps(self.switches))
+        self.assertEqual(self.invoke("pi", ("prompt",))["argv"], ["prompt"])
+
+    def test_switch_helper_bare_and_harness_help_share_full_config_independent_help(self):
+        self.config.unlink()
+        outputs = []
+        for args in ((), ("-h",), ("--help",), ("cmd", "-h"), ("pi", "--help"), ("--auth-export", "-h")):
+            result = subprocess.run(["harness-enabled", *args], env=self.env, capture_output=True, text=True, timeout=5)
+            self.assertEqual((result.returncode, result.stderr), (0, ""), str(args))
+            outputs.append(result.stdout)
+        self.assertTrue(all(output == outputs[0] for output in outputs))
+        for detail in ("--auth-export", "--launch", "--version", "cmd = command-code", "agy = antigravity", "dsh = deepseek",
+                       "Exit status:", "Examples:", "HOME", "PI_CODING_AGENT_DIR", "harnesses.json", ".pi/settings.json"):
+            self.assertIn(detail, outputs[0])
+        result = subprocess.run(["harness-enabled", "--version"], env=self.env, capture_output=True, text=True, timeout=5)
+        self.assertEqual((result.returncode, result.stdout, result.stderr), (0, "harness-enabled 1.0\n", ""))
+
+    def test_switch_helper_parser_rejects_usage_errors_and_preserves_launch_help(self):
+        for args in (("missing",), ("--auth-export",), ("cmd", "--launch"), ("pi", "--auth-export"),
+                     ("opencode", "--auth-export", "extra"), ("pi", "--la"), ("pi", "--bad", "--launch", "--")):
+            result = subprocess.run(["harness-enabled", *args], env=self.env, capture_output=True, text=True, timeout=5)
+            self.assertEqual(result.returncode, 2, str(args))
+            self.assertIn("usage: harness-enabled", result.stderr)
+        self.switches["pi"] = False
+        self.config.write_text(json.dumps(self.switches))
+        for flag in ("--help", "-h", "--version"):
+            result = subprocess.run(["harness-enabled", "pi", "--launch", flag], env=self.env,
+                                    capture_output=True, text=True, timeout=5)
+            self.assertEqual((result.returncode, result.stdout), (1, ""), flag)
+            self.assertIn("pi is disabled", result.stderr)
+
+    def test_switch_helper_aliases_keep_guard_and_configuration_exit_statuses(self):
+        for alias, canonical in (("cmd", "command-code"), ("agy", "antigravity"), ("dsh", "deepseek")):
+            self.switches[canonical] = False
+            self.config.write_text(json.dumps(self.switches))
+            for name in (alias, canonical):
+                result = subprocess.run(["harness-enabled", name], env=self.env, capture_output=True, text=True, timeout=5)
+                self.assertEqual(result.returncode, 1, name)
+                self.assertIn(f"enable {canonical!r}", result.stderr)
+        for data in (None, "not JSON"):
+            if data is None:
+                self.config.unlink()
+            else:
+                self.config.write_text(data)
+            result = subprocess.run(["harness-enabled", "pi", "--launch", "--help"], env=self.env,
+                                    capture_output=True, text=True, timeout=5)
+            self.assertEqual((result.returncode, result.stdout), (2, ""))
+        self.assertFalse(self.capture.exists(), "helper checks must never launch a client")
 
 
 if __name__ == "__main__":

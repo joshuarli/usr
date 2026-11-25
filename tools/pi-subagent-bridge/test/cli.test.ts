@@ -24,10 +24,11 @@ test("relative non-worktree errors name the resolved path", () => {
 test("policy CLI needs only pure sources and makes no cwd, home or provider calls", () => {
   const root = mkdtempSync(join(tmpdir(), "usr-policy-cli-"))
   try {
-    const source = join(root, "src"), cwd = join(root, "empty")
-    mkdirSync(source)
+    const source = join(root, "tools/pi-subagent-bridge/src"), cwd = join(root, "empty")
+    mkdirSync(source, { recursive: true })
+    copyFileSync(new URL("../../../harnesses.json", import.meta.url), join(root, "harnesses.json"))
     mkdirSync(cwd)
-    for (const file of ["cli.ts", "policy.ts", "tier-policy.ts", "scope.ts"]) {
+    for (const file of ["cli.ts", "policy.ts", "tier-policy.ts", "scope.ts", "harnesses.ts"]) {
       copyFileSync(fileURLToPath(new URL("../src/" + file, import.meta.url)), join(source, file))
     }
     // server.ts, provider adapters, package.json and all dependency trees are absent.

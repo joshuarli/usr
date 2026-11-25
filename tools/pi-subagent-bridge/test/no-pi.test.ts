@@ -11,6 +11,7 @@ test("public Codex lifecycle works with a physically Pi-free bridge", async () =
   try {
     const source = join(root, "tools", "pi-subagent-bridge", "src"), bin = join(root, "bin"), home = join(root, "home")
     cpSync(new URL("../src", import.meta.url), source, { recursive: true })
+    cpSync(new URL("../../../harnesses.json", import.meta.url), join(root, "harnesses.json"))
     mkdirSync(bin); mkdirSync(home)
     symlinkSync(process.execPath, join(bin, "node"))
     cpSync(new URL("../../sync", import.meta.url), join(root, "tools/sync"), { recursive: true })
@@ -123,13 +124,13 @@ printf '%s\\n' '{"type":"item.completed","item":{"type":"agent_message","text":"
       for (let i = 0; i < 100 && !output.includes("\n"); i++) await new Promise(resolve => setTimeout(resolve, 50))
       assert.ok(output.includes("\n"), errors)
       const response = JSON.parse(output.trim().split("\n")[0])
-      assert.equal(response.result.isError, undefined)
+      assert.equal(response.result.isError, undefined, JSON.stringify(response))
       assert.doesNotMatch(output + errors, /TRAPPED/)
       writeFileSync(join(root, "hold"), "hold")
       child.stdin.write(JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "worker_start", arguments: { cwd, title: "owned fixture", tier: "worker", scope: JSON.parse(readFileSync(scope, "utf8")), brief: "Perform fixture task" } } }) + "\n")
       for (let i = 0; i < 100 && output.trim().split("\n").length < 2; i++) await new Promise(resolve => setTimeout(resolve, 50))
       const admitted = JSON.parse(output.trim().split("\n")[1])
-      assert.equal(admitted.result.isError, undefined)
+      assert.equal(admitted.result.isError, undefined, JSON.stringify(admitted))
       const job = JSON.parse(admitted.result.content[0].text)
       const ownerDir = join(root, ".work/worker-bridge/owner")
       const ownerFile = readdirSync(ownerDir).find(name => name.endsWith(".json") && name !== "generation.json")!

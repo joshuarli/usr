@@ -1,5 +1,6 @@
 """Graph construction and scoped action selection without real installs."""
 from pathlib import Path
+import json
 import sys
 import tempfile
 import unittest
@@ -14,6 +15,8 @@ class MainTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         root = Path(self.tmp.name).resolve()
+        self.switches = main.read_switches()
+        (root / "harnesses.json").write_text(json.dumps(self.switches))
         self.ctx = main.Context(root, root / "home", "darwin", "desktop", {"HOME": str(root / "home")})
         self.ctx.home.mkdir()
 
@@ -74,6 +77,49 @@ class MainTests(unittest.TestCase):
         dag = main.graph(self.ctx, [], setup=True).select(["opencode-mcp"])
         names = {task.name for task in dag.order()}
         self.assertEqual(names, {"links", "opencode-mcp"})
+
+    def test_disabled_pi_does_not_get_reinstalled_through_bridge_dependencies(self):
+        self.switches["pi"] = False
+        (self.ctx.root / "harnesses.json").write_text(json.dumps(self.switches))
+        goals = main.default_goals(self.ctx)
+        names = {task.name for task in main.graph(self.ctx, main.tool_list(self.ctx), setup=True).select(goals).order()}
+        self.assertNotIn("tool:pi", names)
+        self.assertFalse({"pi-auth", "pi-mcp", "pi-extensions"} & names)
+        self.assertIn("claude-mcp", names)
+
+    def test_claude_bridge_without_pi_registers_core_using_only_links_and_node(self):
+        self.switches["pi"] = False
+        (self.ctx.root / "harnesses.json").write_text(json.dumps(self.switches))
+        dag = main.graph(self.ctx, [], setup=True).select(["claude-mcp"])
+        self.assertEqual({task.name for task in dag.order()}, {"links", "tool:nodejs", "claude-mcp"})
+        with patch.object(main, "command") as run:
+            run.return_value.returncode = 0
+            self.assertTrue(main.bridge_status(self.ctx).current)
+            main.bridge_apply(self.ctx)
+        self.assertEqual([call.args[4:] for call in run.call_args_list], [("check", "--core"), ("install", "--core")])
+
+    def test_claude_bridge_requires_an_enabled_parent_and_leaf(self):
+        self.switches.update({"pi": False, "codex": False, "command-code": False})
+        (self.ctx.root / "harnesses.json").write_text(json.dumps(self.switches))
+        self.assertNotIn("claude-mcp", main.bridge_goals(self.ctx))
+        self.switches["command-code"] = True
+        (self.ctx.root / "harnesses.json").write_text(json.dumps(self.switches))
+        self.assertIn("claude-mcp", main.bridge_goals(self.ctx))
+        self.switches["claude"] = False
+        (self.ctx.root / "harnesses.json").write_text(json.dumps(self.switches))
+        self.assertNotIn("claude-mcp", main.bridge_goals(self.ctx))
+
+    def test_all_harnesses_disabled_keeps_only_unrelated_setup(self):
+        (self.ctx.root / "harnesses.json").write_text(json.dumps(dict.fromkeys(self.switches, False)))
+        self.assertEqual(main.bridge_goals(self.ctx), [])
+        self.assertNotIn("tool:cmd", main.default_goals(self.ctx))
+        self.assertFalse({"codex", "claude", "devin", "opencode", "pi", "cmd"} & set(main.tool_list(self.ctx)))
+
+    def test_disabled_explicit_install_stops_before_dependencies(self):
+        with patch.object(main, "context", return_value=self.ctx), \
+                patch.object(main, "graph", side_effect=AssertionError("constructed install graph")):
+            with self.assertRaisesRegex(main.GraphError, "disabled in harnesses.json: cmd"):
+                main.main(["tools", "cmd"])
 
     def test_alternate_target_links_never_touch_home(self):
         target = self.ctx.root / "fixture-home"

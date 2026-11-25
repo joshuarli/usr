@@ -1,3 +1,4 @@
+import { assertHarnessEnabled } from "./harnesses.ts"
 import { spawn, execFileSync } from "node:child_process"
 import { appendFileSync, closeSync, openSync, readFileSync, readSync, statSync, writeFileSync } from "node:fs"
 import { exhaustionWatcher, secretEnvironment, writeReceipt, type ExhaustionWatch } from "./fx-supervision.ts"
@@ -14,7 +15,6 @@ type Reason = "end_turn" | "step_limit" | "refused" | "max_tokens" | "max_turn_r
 const job = JSON.parse(readFileSync(process.argv[2]!, "utf8")) as AcpJob
 const MAX_LINE = 8_388_608, MAX_FINAL = 1_048_576, MAX_EVENTS = 16_777_216, MAX_STDERR = 65_536
 const CANCEL_WAIT_MS = 5000, EXIT_WAIT_MS = 2000
-const errorFd = openSync(job.errors, "wx", 0o600)
 let reason: Reason | null = null, stopReason: string | null = null, sessionId: string | null = null
 let finalText = "", usage: unknown = null, stderr = "", eventBytes = 0, permissionRequests = 0, finished = false
 let policyViolation: string | null = null
@@ -24,6 +24,11 @@ function receipt(termination: "verified" | "unverified", childPid: number | null
     reason, stop_reason: stopReason, final_text: finalText, usage, termination, permission_requests: permissionRequests, policy_violation: policyViolation, stderr: stderr.slice(-4096) })
 }
 
+try { assertHarnessEnabled("fx") } catch (error) {
+  reason = "spawn"; stderr = String(error)
+  receipt("verified", null); process.exit(1)
+}
+const errorFd = openSync(job.errors, "wx", 0o600)
 let env: NodeJS.ProcessEnv
 try { env = secretEnvironment(job.env, job.env_files) } catch (error) {
   reason = "spawn"; stderr = String(error)

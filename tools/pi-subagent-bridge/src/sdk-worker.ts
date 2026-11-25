@@ -1,3 +1,4 @@
+import { piProviderEnabled } from "./harnesses.ts"
 import { randomUUID } from "node:crypto"
 import { appendFileSync, readFileSync } from "node:fs"
 import { join } from "node:path"
@@ -85,6 +86,7 @@ function drainSteering(controlPath: string, receiptPath: string, offset: number,
 }
 
 async function run(job: Job, started: (admission: Admission) => void, dispatching: () => void): Promise<Result> {
+  if (!piProviderEnabled(job.model.providerID)) throw new Error(`Pi provider ${job.model.providerID} is disabled in harnesses.json`)
   stripIntercomEnvironment(process.env)
   process.env.USR_SCOPED_WORKER = "1"
   // Children inherit a no-package-network environment even when the worktree

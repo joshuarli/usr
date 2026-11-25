@@ -6,7 +6,7 @@ import { join } from "node:path"
 import test from "node:test"
 import { stripIntercomEnvironment, workerEnvironment, contributorAllowed, contributorModel } from "../src/worker-env.ts"
 import { startCodex } from "../src/codex.ts"
-import { startCommand } from "../src/command.ts"
+import { startCommand } from "./harness-fixtures.ts"
 import { ADMITTING_PARENT_ENV, admittingParentFrom } from "../src/session.ts"
 
 test("a scoped worker process receives provider settings but no coordinator authority", () => {
