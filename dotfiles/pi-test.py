@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """Pi installation and profile tests; none may invoke npm or contact a registry."""
+import ast
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 import tempfile
@@ -12,11 +14,95 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools/pi"))
 from release_cache import seed  # noqa: E402
 PROFILE = ROOT / "dotfiles/base/.pi/agent"
-MODEL = "opencode-go/muse-spark-1.3-contributor"
-GO = "opencode-go/deepseek-v4.1-flash"
-DEVIN = "devin/swe-2.1"
-SCOUT_TOOLS = ["read", "grep", "find", "ls", "subagent", "subagent_supervisor"]
-WRITER_TOOLS = ["read", "bash", "edit", "write", "grep", "find", "ls", "subagent", "subagent_supervisor"]
+POLICY = json.loads((ROOT / "tools/policy/policy.generated.json").read_text())
+NATIVE_PI = POLICY["nativePi"]
+
+
+def parse_blocks(text: str) -> dict[str, str]:
+    marker = re.compile(r"^# policy:(begin|end) ([a-z0-9-]+)$", re.MULTILINE)
+    candidates = [line for line in text.splitlines() if "# policy:" in line]
+    matches = list(marker.finditer(text))
+    if len(candidates) != len(matches):
+        raise ValueError("malformed generated policy marker")
+    blocks = {}
+    active = None
+    start = None
+    for match in matches:
+        kind, name = match.groups()
+        if kind == "begin":
+            if active is not None or name in blocks:
+                raise ValueError("duplicate or nested generated policy block: " + name)
+            active = name
+            start = match.end()
+        else:
+            if active != name:
+                raise ValueError("unmatched generated policy block: " + name)
+            blocks[name] = text[start:match.start()]
+            active = None
+    if active is not None:
+        raise ValueError("unclosed generated policy block: " + active)
+    return blocks
+
+
+def yaml_fields(block: str) -> dict[str, str | list[str]]:
+    fields = {}
+    current = None
+    for line in block.strip().splitlines():
+        if not line.strip() or line.startswith("# Generated"):
+            continue
+        if line.startswith("  - "):
+            if current is None:
+                raise ValueError("generated YAML list item without a key")
+            fields[current].append(line[4:].strip())
+            continue
+        if line.startswith(" "):
+            raise ValueError("unexpected generated YAML indentation: " + line)
+        key, separator, value = line.partition(":")
+        if not separator:
+            raise ValueError("malformed generated YAML line: " + line)
+        key = key.strip()
+        value = value.strip()
+        if value:
+            fields[key] = value
+            current = None
+        else:
+            fields[key] = []
+            current = key
+    return fields
+
+
+def policy_model(pin: dict[str, str]) -> str:
+    return pin["providerID"] + "/" + pin["id"]
+
+
+def arithmetic_value(node: ast.AST) -> int:
+    if isinstance(node, ast.Constant) and isinstance(node.value, int):
+        return node.value
+    if isinstance(node, ast.Expression):
+        return arithmetic_value(node.body)
+    if isinstance(node, ast.BinOp) and isinstance(node.op, (ast.Mult, ast.Add)):
+        value = arithmetic_value(node.left)
+        right = arithmetic_value(node.right)
+        return value * right if isinstance(node.op, ast.Mult) else value + right
+    raise ValueError("unsupported arithmetic in Pi deadline constant")
+
+
+def pi_run_deadline() -> int:
+    source = (ROOT / "tools/pi-subagent-bridge/src/tier-policy.ts").read_text()
+    match = re.search(r"PI_RUN_DEADLINE_MS:\s*number\s*=\s*([^\n]+)", source)
+    if not match:
+        raise ValueError("missing PI_RUN_DEADLINE_MS")
+    return arithmetic_value(ast.parse(match.group(1).strip(), mode="eval"))
+
+
+def expected_profiles() -> dict[str, tuple[dict[str, str], list[str], list[str]]]:
+    expected = {}
+    for tier, pin in NATIVE_PI["goModels"].items():
+        expected[tier] = (pin, NATIVE_PI["delegation"][tier], NATIVE_PI["tools"][tier])
+    for tier, pin in NATIVE_PI["devinModels"].items():
+        name = NATIVE_PI["devinAgentNames"][tier]
+        expected[name] = (pin, NATIVE_PI["devinDelegation"][tier], NATIVE_PI["tools"][tier])
+    return expected
 
 
 
@@ -44,12 +130,12 @@ class PiTests(unittest.TestCase):
         # Deliberately poison npm: a runtime install MUST NOT use it.
         self.script("npm", '#!/bin/sh\necho unexpected-npm-call >&2\nexit 99\n')
 
-    def script(self, name, body):
+    def script(self, name: str, body: str) -> None:
         f = self.bin / name
         f.write_text(body)
         f.chmod(0o755)
 
-    def sync_tools(self, success=True):
+    def sync_tools(self, success: bool = True) -> subprocess.CompletedProcess[str]:
         result = subprocess.run(
             [sys.executable, "-I", str(ROOT / "tools/sync/installer.py"), "pi"],
             cwd=ROOT, env=self.env, text=True, capture_output=True, timeout=90
@@ -127,42 +213,47 @@ class PiTests(unittest.TestCase):
 
     def test_profile_and_orchestration_agree(self):
         settings = json.loads((PROFILE / "settings.json").read_text())
-        self.assertEqual(settings["defaultProvider"] + "/" + settings["defaultModel"], "opencode-go/deepseek-v4.1-flash")
-        self.assertEqual(settings["defaultThinkingLevel"], "high")
+        worker_pin = NATIVE_PI["goModels"]["worker"]
+        self.assertEqual(settings["defaultProvider"], worker_pin["providerID"])
+        self.assertEqual(settings["defaultModel"], worker_pin["id"])
+        self.assertEqual(settings["defaultThinkingLevel"], worker_pin["variant"])
         self.assertEqual(settings["packages"], [])
         self.assertEqual(settings["skills"], ["~/.agents/skills"])
         sub = settings["subagents"]
         self.assertEqual(sub["maxThinking"], "max")
         depth_settings = json.loads((PROFILE / "extensions/subagent/config.json").read_text())
-        self.assertEqual(depth_settings["maxSubagentDepth"], 2)
+        self.assertEqual(depth_settings["maxSubagentDepth"], NATIVE_PI["maxSubagentDepth"])
+        self.assertTrue(sub["modelScope"]["enforce"])
         self.assertTrue(sub["modelScope"]["strict"])
-        self.assertEqual(set(sub["modelScope"]["allow"]), {GO, MODEL, DEVIN})
-        expected = {
-            "scout": (MODEL, "medium", ["scout"], SCOUT_TOOLS),
-            "mechanic": (MODEL, "high", ["scout", "mechanic"], WRITER_TOOLS),
-            "worker": (GO, "high", ["scout", "mechanic", "worker"], WRITER_TOOLS),
-            "expert": (GO, "max", ["scout", "mechanic", "worker", "expert"], WRITER_TOOLS),
-            "devin-scout": (DEVIN, "low", ["devin-scout"], SCOUT_TOOLS),
-            "devin-mechanic": (DEVIN, "medium", ["scout", "devin-mechanic"], WRITER_TOOLS),
-            "devin-worker": (DEVIN, "high", ["scout", "mechanic", "devin-worker"], WRITER_TOOLS),
-            "devin-expert": (DEVIN, "max", ["scout", "mechanic", "worker", "devin-expert"], WRITER_TOOLS),
-        }
-        for name, (model, effort, children, tools) in expected.items():
-            self.assertEqual(sub["agentOverrides"][name], {"model": model, "thinking": effort})
+        self.assertEqual(sub["modelScope"]["allow"], NATIVE_PI["modelAllowlist"])
+        self.assertEqual(len(set(NATIVE_PI["modelAllowlist"])), len(NATIVE_PI["modelAllowlist"]))
+        approved_models = {policy_model(pin) for pin in NATIVE_PI["goModels"].values()}
+        approved_models.update(policy_model(pin) for pin in NATIVE_PI["devinModels"].values())
+        self.assertEqual(set(NATIVE_PI["modelAllowlist"]), approved_models)
+        expected = expected_profiles()
+        self.assertEqual(set(sub["agentOverrides"]), set(expected))
+        self.assertEqual(set(sub["modelScope"]["agents"]), set(expected))
+        for name, (pin, children, tools) in expected.items():
+            model = policy_model(pin)
+            self.assertEqual(sub["agentOverrides"][name], {"model": model, "thinking": pin["variant"]})
             self.assertEqual(sub["modelScope"]["agents"][name]["allow"], [model])
             agent = (PROFILE / "agents" / (name + ".md")).read_text()
-            self.assertIn("name: " + name, agent)
-            block = "\n".join([
-                "model: " + model, "thinking: " + effort, "tools:", *["  - " + tool for tool in tools],
-                "allowNestedSubagents: true", "maxSubagentDepth: 2", "timeoutMs: 14400000", "allowedAgents:",
-                *["  - " + child for child in children],
-            ])
-            self.assertIn(block + "\n# policy:end native-profile", agent)
-            self.assertNotIn("  - god\n", agent)
+            self.assertRegex(agent, r"(?m)^name: " + re.escape(name) + r"$")
+            blocks = parse_blocks(agent)
+            self.assertEqual(set(blocks), {"native-profile"})
+            self.assertEqual(yaml_fields(blocks["native-profile"]), {
+                "model": model,
+                "thinking": pin["variant"],
+                "tools": tools,
+                "allowNestedSubagents": "true",
+                "maxSubagentDepth": str(NATIVE_PI["maxSubagentDepth"]),
+                "timeoutMs": str(pi_run_deadline()),
+                "allowedAgents": children,
+            })
+            self.assertNotIn("god", yaml_fields(blocks["native-profile"])["allowedAgents"])
         self.assertFalse((PROFILE / "agents/muse-worker.md").exists(), "Muse worker profile is retired")
         self.assertFalse((PROFILE / "models.json").exists(),
                          "No custom OpenCode Zen catalog is permitted for delegated workers")
-        self.assertTrue(all(name.startswith(("opencode-go/", "devin/")) for name in sub["modelScope"]["allow"]))
         self.assertNotIn("god", sub["agentOverrides"])
         self.assertFalse((PROFILE / "agents/god.md").exists())
         self.assertEqual(os.readlink(PROFILE / "AGENTS.md"), "../../.codex/AGENTS.md")
