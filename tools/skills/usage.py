@@ -86,7 +86,8 @@ def claude_sessions(home: Path, cutoff: float) -> Iterator[Session]:
                     if not isinstance(c, dict) or c.get("type") != "tool_use": continue
                     if c.get("name") == "Skill":
                         session.loads.add(str((c.get("input") or {}).get("skill", "")))
-                    command = (c.get("input") or {}).get("command")
+                    tool_input = c.get("input")
+                    command = tool_input.get("command") if isinstance(tool_input, dict) else None
                     if isinstance(command, str): session.commands.append(command)
                 if text := text_of(content).strip(): session.turns.append(("assistant", text))
             elif record.get("type") == "user" and record.get("toolUseResult") is None:

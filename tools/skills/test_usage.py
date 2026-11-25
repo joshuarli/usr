@@ -59,7 +59,9 @@ class UsageTest(unittest.TestCase):
               user("<command-message>yea</command-message>\n<command-name>/yea</command-name>"),
               assistant("Done."))
         jsonl(self.home / ".claude/projects/p/a/subagents/agent-1.jsonl", assistant(skill="do"), user("<command-name>/yea</command-name>"))
-        jsonl(self.home / ".claude/projects/p/b.jsonl", user("What does this do?"), assistant("It parses."), user("continue"))
+        malformed = assistant("It parses.")
+        malformed["message"]["content"].append({"type": "tool_use", "name": "Bash", "input": "not-a-mapping"})
+        jsonl(self.home / ".claude/projects/p/b.jsonl", user("What does this do?"), malformed, user("continue"))
         jsonl(self.home / ".codex/sessions/2026/11/16/rollout-1.jsonl", *codex("/r", listing, codex_user("$sleep then fix"),
               {"type": "function_call", "name": "exec", "arguments": json.dumps({"cmd": "cat ~/.agents/skills/review/SKILL.md"})},
               {"type": "custom_tool_call", "name": "exec", "input": 'const r=await tools.exec_command({cmd:"fastermod --literal \'a\' \'b\' t.py --apply",workdir:"/r"})'},
