@@ -111,7 +111,7 @@ Every touched workflow and action passes `pinact lint` (the `default` profile) w
 
 ## Adoption
 
-Apply these only when bringing a whole repository up to this standard, not at the completion gate.
+Apply these only when bringing a whole repository up to this standard with `/standardize`, not at the completion gate.
 
 - Run `pinact` over every workflow and action, and add `pinact --check` and `pinact lint` to a workflow the repository already runs.
 - Move each shell step's logic into `actions/github-script` modules or stdlib Python scripts, one workflow per change.

@@ -98,7 +98,7 @@ In the fix, `printf` cannot fail on its own, so the `grep` status decides the re
 
 ## Adoption
 
-Apply these only when bringing a whole repository up to this standard, not at the completion gate.
+Apply these only when bringing a whole repository up to this standard with `/standardize`, not at the completion gate.
 
 - Port existing bash and zsh scripts to POSIX `sh`, one script per change, verifying each under dash.
 - Move inline shell out of every pipeline and workflow step into scripts on disk.

@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
+import signal
 import subprocess
 import sys
 import tomllib
@@ -410,7 +412,7 @@ def render_list(standards: Sequence[Standard], as_json: bool) -> str:
 def parser() -> argparse.ArgumentParser:
     top = argparse.ArgumentParser(
         prog="standards", description="Select the coding standards that apply to a change or a tree.",
-        epilog="Exit status: 0 success (selecting nothing is success), 1 invalid standards from check, 2 usage or operational error, 130 interrupted.\n"
+        epilog="Exit status: 0 success (selecting nothing is success), 1 invalid standards from check, 2 usage or operational error, killed by SIGINT when interrupted (130 in a shell).\n"
                f"Ctrl-C stops at once; standards writes nothing, so re-running is always safe.\n\n{FOOTER}",
         formatter_class=argparse.RawDescriptionHelpFormatter)
     top.add_argument("--dir", type=Path, default=DEFAULT_DIR, help=f"standards directory (default: {DEFAULT_DIR})")
@@ -467,6 +469,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 2
     except KeyboardInterrupt:
         print("standards: interrupted", file=sys.stderr)
+        signal.signal(signal.SIGINT, signal.SIG_DFL)
+        os.kill(os.getpid(), signal.SIGINT)
         return 130
 
 

@@ -126,7 +126,7 @@ Keep platform rules scoped:
 
 
 
-Complete applicable changes throughout scope. Do not add traits, newtypes, crates, generics, dependencies, or compatibility wrappers merely for the checklist. Keep useful application slices/vectors, justified shared ownership, short iterator chains, and established third-party preludes.
+Complete applicable changes throughout scope. Do not add traits, newtypes, crates, generics, dependencies, or compatibility wrappers merely for this standard. Keep useful application slices/vectors, justified shared ownership, short iterator chains, and established third-party preludes.
 
 ### Verify
 

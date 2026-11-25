@@ -123,11 +123,11 @@ Target these majors: TypeScript 7, Vite 8, Solid 2, Effect 4, and Vitest 5. For 
 
 For version-sensitive work, use installed declarations/exports and official versioned guidance. Check releases before changing pins; unversioned examples may target another major. If upstream is unavailable, use installed evidence and identify uncertainty. Do not invent APIs or upgrade blindly.
 
-This carries the existing stack decisions into the refactoring workflow. Apply only layers needed by the product. Tool facts were checked on 2026-11-11; resolve exact releases, peer compatibility, and version-specific APIs again when changing dependencies. Stable language rules do not require a package upgrade on every invocation.
+Apply only layers needed by the product. Tool facts were checked on 2026-11-11; resolve exact releases, peer compatibility, and version-specific APIs again when changing dependencies. Stable language rules do not require a package upgrade on every invocation.
 
 ### Migration passes
 
-When in scope, migrate packages and commands using the stack reference. Replace each old responsibility with its new owner before deleting the old implementation. Do not retain duplicate frameworks, validators, or orchestration without an actual compatibility need.
+When in scope, migrate packages and commands using the sections below. Replace each old responsibility with its new owner before deleting the old implementation. Do not retain duplicate frameworks, validators, or orchestration without an actual compatibility need.
 
 ### Package and runtime ownership
 
@@ -180,6 +180,6 @@ Read active instructions, working changes, package manifests/lockfile, runtime t
 4. Write native Solid: tracked props and derivations, two-phase effects, native async boundaries, teardown, and isolated request state. Keep the Solid/Effect seam explicit.
 5. Update affected callers, public documentation, and existing tests together. Complete the requested scope, not only the first easy file.
 
-The migration passes above run as step 5 when a stack migration is in scope.
+When a stack migration is in scope, run it after pass 4 and before pass 5.
 
 **Report:** stack changes and removed dependencies or layers; source and version uncertainty.

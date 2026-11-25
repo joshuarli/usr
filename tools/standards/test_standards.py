@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -193,6 +194,24 @@ class SelectTests(unittest.TestCase):
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertIn("  cli-interrupt trigger 2: misses (paths no match, content \\bSIG(INT|TERM)\\b)\n", result.stdout)
         self.assertIn("  shell trigger 1: misses (paths no match)\n", result.stdout)
+
+
+class InterruptTests(unittest.TestCase):
+    def test_interrupt_dies_by_sigint_after_notice(self):
+        with scratch() as tmp:
+            script = Path(tmp) / "interrupt.py"
+            script.write_text(
+                "import sys\n"
+                f"sys.path.insert(0, {str(Path(standards.__file__).parent)!r})\n"
+                "import standards\n"
+                "def interrupted(directory):\n"
+                "    raise KeyboardInterrupt\n"
+                "standards.load = interrupted\n"
+                "sys.exit(standards.main(['list']))\n")
+            result = subprocess.run((sys.executable, "-I", str(script)), capture_output=True, text=True)
+        self.assertEqual(-signal.SIGINT, result.returncode, result.stderr)
+        self.assertEqual("standards: interrupted\n", result.stderr)
+        self.assertEqual("", result.stdout)
 
 
 class CheckTests(unittest.TestCase):

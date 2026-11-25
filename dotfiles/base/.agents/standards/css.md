@@ -87,7 +87,7 @@ Write no CSS comments except a genuine external-platform quirk stated as the con
 
 ### Verify
 
-Run the affected builds, type checks, and tests. Add invariant geometry tests for the defects fixed, run the goldens against the baseline, and check the result in a real browser at the widths in the verification reference. Run the dead-selector sweep both ways with `rg`. Separate baseline failures from regressions.
+Run the affected builds, type checks, and tests. Add invariant geometry tests for the defects fixed, run the goldens against the baseline, and check the result in a real browser at the widths under Geometry invariants. Run the dead-selector sweep both ways with `rg`. Separate baseline failures from regressions.
 
 Review the final diff and rescan for remaining overrides, duplicate selectors, magic numbers, and orphaned classes. Stale goldens, skipped viewports, and unrun browser checks are not passes; state any missing proof as a specific gap.
 
