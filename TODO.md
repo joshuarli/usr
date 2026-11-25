@@ -118,15 +118,6 @@ Next: 153
 - **Fix with:** none
 - **Effort:** M
 
-### USR-151 · P2 · worker_cancel leaves a Pi-backed run alive
-
-- **Area:** pi-subagent-bridge
-- **Where:** tools/pi-subagent-bridge/src/hybrid.ts runCancel; Pi SDK runner process
-- **Problem:** worker_cancel on a Pi/Devin session returned interrupted true, but the pi-runtime runner (cwd the lane worktree) kept editing files for 20 minutes until killed by PID; worker_status meanwhile reported changed_paths [] while the worktree had edits
-- **Recommendation:** Make cancel signal and verify the Pi runner process tree, report not-terminated when it survives, and refresh changed_paths from git on every status
-- **Fix with:** A test that cancels a Pi fixture whose runner ignores the first interrupt and asserts status reports it alive and its edits
-- **Effort:** M
-
 ### USR-75 · P3 · clang plus mold host links intermittently segfault and leave truncated artifacts
 
 - **Area:** rust toolchain
