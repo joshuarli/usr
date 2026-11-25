@@ -51,23 +51,23 @@
       "assets": {
         "aarch64-apple-darwin": {
           "name": "git-2.56.0-aarch64-apple-darwin.tar.xz",
-          "sha256": "5fa1d383a5e9f31caed67bd05ed534527baa5586a091e74a715038dc5653caa8",
-          "size": 1860620
+          "sha256": "916dcd510d4abfec17e20f61289da81a8f81d85ab32fa0c13ec6c7acd7d22de2",
+          "size": 1983688
         },
         "aarch64-unknown-linux-musl": {
           "name": "git-2.56.0-aarch64-unknown-linux-musl.tar.xz",
-          "sha256": "c087065de6dfea245871142912731768c09e3448ecb67f80e354a90e4d3d82b5",
-          "size": 2219520
+          "sha256": "f7f10037244f5f9f5e122eaab96be9d4bc08b5492a5b81966be1549190c6a5ca",
+          "size": 2361548
         },
         "x86_64-unknown-linux-musl": {
           "name": "git-2.56.0-x86_64-unknown-linux-musl.tar.xz",
-          "sha256": "edbf56085c660dc57ff2d19ca733f71b248d6b68fe7c19d9d2e98ced565117d3",
-          "size": 2569924
+          "sha256": "127290726c9a8ce789b2154c37922def9021ba451bf4d69fc43fe77501370118",
+          "size": 2717496
         }
       },
       "product": "git",
       "repository": "laputa-systems/git-build",
-      "tag": "release-ddbfc32f5dba3256f31381d658ebaa791286673b",
+      "tag": "release-eb59d7194a243c5ccaeca0e8dff58031527dfaf3",
       "version": "2.56.0"
     },
     "gluon": {
