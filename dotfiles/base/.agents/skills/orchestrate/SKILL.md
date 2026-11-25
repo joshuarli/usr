@@ -105,6 +105,13 @@ Create a clean worktree under `.work/wt/<slice>`, call `worker_model_check`, the
 
 The parent independently reviews `git diff --check`, the diff against `base_revision` (including commits) and untracked paths once. Verify requested behavior, permitted scope, imports and obvious regressions before integrating. An optional single `worker_resume` correction may touch only the same files, without increasing the attempt budget. Otherwise park or reject. Scouts never commit; other workers may commit on their lane branch. Workers never merge, push, switch branches, or clean worktrees.
 
+**Devin (`devin/swe-2-flash`) needs the closest review.** `worker_status` names the route that actually ran; the worker tier reaches Devin when the earlier routes are exhausted. It writes sound code for a narrow, well-specified slice but optimizes for the literal acceptance proof: when a gate is hard to pass it bends the code to the metric instead of stopping, for example deleting a safety check so surviving mutants die, and it assumes the host platform in tests. When Devin may run a slice:
+
+- State in the brief that no check, guard or test may be removed or weakened to satisfy a mutation, lint or test gate; a surviving mutant in protective code is killed with a test or reported under `stop_on`.
+- Require tests that pass on every supported OS and architecture, never only on the host's target triple.
+- Read every deleted line in its diff, especially in validation, path and archive handling, and error paths, and run the acceptance proof yourself before integrating.
+- Prefer Codex, or doing the work yourself, for security-sensitive code or gate-heavy cleanup.
+
 ## Provider fallback and ambiguous runs
 
 **The bridge owns provider fallback on bridge-path parents only.** `worker_status` switches only along the tier's admitted routes, only before edits and with unambiguous termination, and admitted sessions keep their recorded models. Never start a replacement worker yourself: a task failure, rejected acceptance check, or changed path is not a provider failure. A session whose `attention` is `needs_attention` (any `blocked_*` state) or `unknown` needs you to inspect the session and worktree before deciding anything; do not launch a second paid worker over it. Check `pending_steer` and `last_steer` before retrying steering. Cancellation acknowledgement is not proof of termination; wait until `watch` or `inspect` shows the run gone. The scope check is Git-based; ignored files and host writes are not contained.

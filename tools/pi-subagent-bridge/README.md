@@ -92,6 +92,14 @@ No tokens or account data are copied into the repo.
 Offline fixture checks do not prove paid/free entitlement, streaming or
 tool loops; the owner must run an actual SWE-2 Flash tool-and-resume test.
 
+Observed in production lanes (2026-11-24, stuff and buildlib): SWE-2 Flash
+met narrow, well-specified acceptance proofs with sound code and behaviour
+tests, but under a mutation gate it deleted an archive path-escape check and
+other defensive code to kill surviving mutants, and its tests assumed the
+macOS host triple, failing on Linux runners. Brief and review it as the
+[orchestrate skill](../../dotfiles/base/.agents/skills/orchestrate/SKILL.md#the-bridge-except-command-code-opencode-devin-antigravity-and-copilot-cli)
+describes.
+
 ## Bounded native Pi nesting
 
 The Pi fallback is a real subagent runtime, not a prompt-only coordination promise. Its required child extension registers an inherited `allowedAgents` capability ceiling for each tier and blocks unapproved `subagent` launches (model/cwd/worktree overrides, workflow scripting, higher tiers). Upstream Pi separately enforces the depth cap at launch; an inner child cannot spawn a third layer. The bridge validates the typed tier contract against parsed agent YAML and the exact model scope **before a new child starts**. Nested calls must use `options: { agentScope: "user" }` to prevent project-scoped agent shadows; per-call model, worktree, and tool overrides fail before delegation. The central rules are `src/tier-policy.ts`, the required guard is `src/nested-guard.ts`, and the profile validator is `src/tier-profile.ts`.
