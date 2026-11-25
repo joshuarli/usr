@@ -137,25 +137,25 @@
     "node": {
       "assets": {
         "aarch64-apple-darwin": {
-          "name": "node-26.12.1-aarch64-apple-darwin.tar.xz",
-          "sha256": "47c0e900a765eb8189839ea82ac96709f74a1dda8b951de8bea754cbcd8411e9",
-          "size": 22159684
+          "name": "node-26.13.1-aarch64-apple-darwin.tar.xz",
+          "sha256": "19f928140075eec1bac38ec53a1cee7492abfbd4d94536f5f541498c93a7c0ff",
+          "size": 22101796
         },
         "aarch64-unknown-linux-musl": {
-          "name": "node-26.12.1-aarch64-unknown-linux-musl.tar.xz",
-          "sha256": "9e122d75163bad7a7bdad829b38a2c7ca808d3f6c0ba39e76887d05b710a6509",
-          "size": 26906220
+          "name": "node-26.13.1-aarch64-unknown-linux-musl.tar.xz",
+          "sha256": "fd3546321a9d0d14fc947d1f88d3acab96ec557f30b809e3cee3e8209e8c475d",
+          "size": 26912540
         },
         "x86_64-unknown-linux-musl": {
-          "name": "node-26.12.1-x86_64-unknown-linux-musl.tar.xz",
-          "sha256": "9ac4889c758acffc064ba452aef9f10e6fb7e59546dbfcc949abc5d8a9948e62",
-          "size": 28971196
+          "name": "node-26.13.1-x86_64-unknown-linux-musl.tar.xz",
+          "sha256": "c695dc34a73b6918989250c6d8bf778c7e6b1f9a81badb29e7a64067e0db5e3b",
+          "size": 28979528
         }
       },
       "product": "node",
       "repository": "laputa-systems/node-build",
-      "tag": "release-167fa66215b5b93ad8ac6634cc5b83b382ad0f07",
-      "version": "26.12.1"
+      "tag": "release-218265ba0c51e2c002a18c96685441bc318d0102",
+      "version": "26.13.1"
     },
     "rg": {
       "assets": {
