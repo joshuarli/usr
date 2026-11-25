@@ -6,7 +6,7 @@ Joshua builds and runs his own stack, and every repository is meant to run on it
 
 The loop: a consumer finds a problem or missing feature, files or fixes it in the producer (below), the producer releases, and consumers move to the new release. Where to look:
 
-- Does an owned producer ship this? `which.py COMMAND --json` (below) gives its `repository`; stuff's `docs/fleet.md#owned-tools-first` lists the substitutions, the acquisition path and the only allowed reasons to keep an upstream tool.
+- Does an owned producer ship this? `which.py COMMAND --json` (below) gives its `repository` for a command; for a package, setup action, download URL or tool name, `uv run --project ~/repos/laputa-systems/stuff repomod tools substitute NAME` names the producer that replaces it. stuff's `docs/fleet.md#owned-tools-first` lists the substitutions, the acquisition path and the only allowed reasons to keep an upstream tool.
 - Which repositories exist and what they are: stuff's `fleet/catalog.toml`; producers and commands: `fleet/policy/owned-tools.toml`.
 - Enforcement: repomod lint (`owned-tool-substitution`, `buildlib-usage`, the registry audit) fails a repository that bypasses an owned producer without a recorded reason.
 
