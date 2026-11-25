@@ -180,41 +180,27 @@ sys.exit(1)
     def state(self, name):
         return (self.home / ".local/state/dl" / name).read_text().strip()
 
-    def test_cargo_mutants_builds_and_preserves_previous_on_failure(self):
-        tool, version = "cargo-mutants", "27.1.0"
-        inst = self.make()
-        calls = []
-
-        def run(argv, **kwargs):
-            calls.append(argv)
-            self.assertTrue(kwargs.get("check"))
-            root = Path(argv[argv.index("--root") + 1])
-            self.assertEqual(root.parent, inst.dest)
-            self.assertEqual(argv[1:4], ["install", "--locked", "--root"])
-            self.assertEqual(argv[-1], f"{tool}@{version}")
-            (root / "bin").mkdir()
-            (root / "bin" / tool).write_text("new binary")
-            return subprocess.CompletedProcess(argv, 0)
-
-        with patch.object(inst, "which", return_value="/fake/cargo"), patch.object(inst, "run", side_effect=run):
-            inst.install(tool)
-            self.assertEqual(self.dest_path(tool).read_text(), "new binary")
-            self.assertEqual(self.state(tool), version)
-            inst.install(tool)
-            self.assertEqual(len(calls), 1)
-        (inst.state / tool).write_text("old\n")
-        with patch.object(inst, "which", return_value="/fake/cargo"), patch.object(inst, "run", side_effect=installer.InstallError("build failed")):
-            with self.assertRaises(installer.InstallError):
-                inst.install(tool)
-        self.assertEqual(self.dest_path(tool).read_text(), "new binary")
-        self.assertEqual(self.state(tool), "old")
-
-    def test_cargo_mutants_skips_without_cargo(self):
-        inst = self.make()
-        with patch.object(inst, "which", return_value=None):
-            with self.assertRaises(SkipInstall) as error:
+    def test_cargo_mutants_installs_fork_prerelease(self):
+        import hashlib
+        for os_name, arch, target in (
+            ("linux", "x86_64", "x86_64-unknown-linux-musl-static"),
+            ("darwin", "x86_64", "x86_64-apple-darwin"),
+        ):
+            with self.subTest(os_name=os_name, arch=arch), tempfile.TemporaryDirectory(dir=self.root) as home:
+                self.home = Path(home)
+                payload = make_tar({f"cargo-mutants-{target}": b"binary"}, mode="w:xz")
+                tag = "release-" + "a" * 40
+                base = f"https://github.com/{installer.CARGO_MUTANTS_REPO}/releases/download/{tag}"
+                asset = f"cargo-mutants-{target}.tar.xz"
+                routes = {
+                    f"https://github.com/{installer.CARGO_MUTANTS_REPO}/releases.atom": atom([("2026-01-01", tag)]),
+                    f"{base}/{asset}": (payload, {"ETag": "etag"}),
+                    f"{base}/SHA256SUMS": f"{hashlib.sha256(payload).hexdigest()}  {asset}\n".encode(),
+                }
+                inst = self.make(routes, os_name=os_name, arch=arch)
                 inst.install("cargo-mutants")
-        self.assertIn("cargo", error.exception.reason)
+                self.assertEqual(self.dest_path("cargo-mutants").read_bytes(), b"binary")
+                self.assertEqual(self.state("cargo-mutants"), f"{tag}:etag")
 
     def test_cargo_llvm_cov_installs_release_binary(self):
         import hashlib
@@ -257,17 +243,6 @@ sys.exit(1)
             inst.install("cargo-llvm-cov")
         self.assertIn("no release binary", error.exception.reason)
         self.assertFalse(self.dest_path("cargo-llvm-cov").exists())
-
-    def test_cargo_tool_uses_home_cargo_when_not_on_path(self):
-        cargo = self.home / ".cargo/bin/cargo"
-        cargo.parent.mkdir(parents=True)
-        cargo.write_text("#!/bin/sh\n")
-        cargo.chmod(0o755)
-        inst = self.make()
-        with patch.object(inst, "which", return_value=None), patch.object(inst, "run", side_effect=installer.InstallError("stopped")) as run:
-            with self.assertRaises(installer.InstallError):
-                inst.install("cargo-mutants")
-        self.assertEqual(run.call_args.args[0][0], str(cargo))
 
     def test_cargo_test_tools_default_gating(self):
         tools = {"cargo-mutants", "cargo-llvm-cov"}

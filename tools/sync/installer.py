@@ -41,8 +41,6 @@ HTTP_TIMEOUT = 30
 NODE_MINIMUM = "26.12.0"
 PYTHON_SMOKE = 'import sqlite3, ssl, subprocess; subprocess.run(["/bin/sh", "-c", ":"], check=True)'
 PYTHON_VERSION = "3.15"
-# Matches stuff's fleet/policy/rust-tools.toml.
-CARGO_MUTANTS_VERSION = "27.1.0"
 CARGO_LLVM_COV_VERSION = "0.9.2"
 CARGO_LLVM_COV_REPO = "taiki-e/cargo-llvm-cov"
 CARGO_LLVM_COV_RELEASES = {
@@ -51,6 +49,11 @@ CARGO_LLVM_COV_RELEASES = {
     ("linux", "aarch64"): ("aarch64-unknown-linux-musl", "dab1bfd1f25f7fcd3d6fc6abf9d71b40217a7a103e1da88c1a23111960aa4a40"),
     ("linux", "x86_64"): ("x86_64-unknown-linux-musl", "8d863ab2df1fb53d4f41052b3fa4627ac003d00c46a6388ce037d17472c504ef"),
 }
+CARGO_MUTANTS_REPO = "laputa-systems/cargo-mutants"
+CARGO_MUTANTS_PLATFORMS = (
+    ("darwin", "aarch64"), ("darwin", "x86_64"),
+    ("linux", "x86_64"), ("linux", "aarch64"),
+)
 _UV_INSTALL_LOCK = threading.Lock()
 NODEJS_VERSION = "26.13.1"
 MIRROR_BASE = "https://mirror.17166969.xyz/current"
@@ -663,8 +666,10 @@ class Installer:
             self.skip(name, "download failed")
         self.install_binary(name, staged, record)
 
-    def install_sha_prerelease(self, tool: str, repo: str, install_name: str) -> None:
-        if (self.os_name, self.arch) not in (("darwin", "aarch64"), ("linux", "x86_64"), ("linux", "aarch64")):
+    def install_sha_prerelease(self, tool: str, repo: str, install_name: str,
+                               platforms: tuple[tuple[str, str], ...] | None = None) -> None:
+        supported = platforms or (("darwin", "aarch64"), ("linux", "x86_64"), ("linux", "aarch64"))
+        if (self.os_name, self.arch) not in supported:
             self.skip(tool, f"no release for {self.os_name}/{self.arch}")
             return
         tag = self.latest_tag(f"https://github.com/{repo}/releases.atom", prefix="release-")
@@ -942,21 +947,6 @@ class Installer:
         else:
             target = f"{self.arch}-apple-darwin"
         self.install_direct("jaq", f"https://github.com/01mf02/jaq/releases/latest/download/jaq-{target}")
-
-    def install_cargo_tool(self, name: str, version: str) -> None:
-        if self.is_current(name, version):
-            self.current(f"{name} is current ({version})")
-            return
-        cargo = self.which("cargo")
-        fallback = self.home / ".cargo/bin/cargo"
-        if not cargo and os.access(fallback, os.X_OK):
-            cargo = str(fallback)
-        if not cargo:
-            self.skip(name, "cargo is required; install Rust with rustup")
-        with tempfile.TemporaryDirectory(prefix=f".{name}.", dir=self.dest) as directory:
-            root = Path(directory)
-            self.run([cargo, "install", "--locked", "--root", str(root), f"{name}@{version}"], check=True)
-            self.install_binary(name, root / "bin" / name, version)
 
     def install_cargo_llvm_cov(self) -> None:
         name = "cargo-llvm-cov"
@@ -3337,7 +3327,8 @@ class Installer:
             "play": self.install_player, "player": self.install_player,
             "jaq": self.install_jaq, "mold": self.install_mold, "nodejs": self.install_nodejs,
             "python3": self.install_python3, "uv": self.install_uv, "node-build": self.install_nodebuild,
-            "cargo-mutants": lambda: self.install_cargo_tool("cargo-mutants", CARGO_MUTANTS_VERSION),
+            "cargo-mutants": lambda: self.install_sha_prerelease(
+                "cargo-mutants", CARGO_MUTANTS_REPO, "cargo-mutants", CARGO_MUTANTS_PLATFORMS),
             "cargo-llvm-cov": self.install_cargo_llvm_cov,
             "git": self.install_git, "ffmpeg": self.install_ffmpeg, "ssh": self.install_ssh,
             "oxish": self.install_oxish, "zzz": self.install_zzz, "gluon": self.install_gluon, "bctl": self.install_bctl,
