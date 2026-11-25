@@ -85,7 +85,7 @@ Use `jaq --from FORMAT` and `--to FORMAT` for XML, TOML, CSV, and TSV instead of
 
 ## Renaming
 
-Use `fastermod` to rename text or symbols across a tree instead of scripted `sed`/`perl`. `--rename` is binding-aware and fails closed on unresolved references; `--ident` rewrites identifier tokens syntactically; `-S` adapts the replacement's casing to each match. On a non-TTY it previews diffs and writes nothing without `--apply`; `--check` exits 1 when edits are pending, and `--json` emits a machine-readable result. See `~/.agents/instructions/fastermod.md` for worked examples.
+Use `fastermod` to rename text or symbols across a tree instead of scripted `sed`/`perl`. `--rename` is binding-aware and fails closed on unresolved references; `--ident` rewrites identifier tokens syntactically; `-S` adapts the replacement's casing to each match; `-F`/`--fixed-strings` matches literal text (alias `--literal`). On a non-TTY it previews diffs and writes nothing without `--apply`; `--check` exits 1 when edits are pending, and `--json` emits a machine-readable result. See `~/.agents/instructions/fastermod.md` for worked examples.
 
 ## Working files
 
