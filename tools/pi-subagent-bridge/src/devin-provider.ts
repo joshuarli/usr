@@ -3,7 +3,7 @@ import { existsSync, readFileSync, statSync } from "node:fs"
 import { createRequire } from "node:module"
 import { homedir } from "node:os"
 import { dirname, isAbsolute, join } from "node:path"
-import { DEVIN_TIER_MODELS } from "./tier-policy.ts"
+import { DEVIN_AGENT_NAMES, DEVIN_TIER_MODELS } from "./tier-policy.ts"
 
 const require = createRequire(import.meta.url)
 export const DEVIN_PROVIDER = "devin" as const
@@ -25,6 +25,46 @@ export function devinExtensionPath(): string {
 export function devinCatalogPath(env: NodeJS.ProcessEnv = process.env, home = homedir()): string {
   const xdg = env.XDG_CACHE_HOME
   return join(xdg && isAbsolute(xdg) ? xdg : join(home, ".cache"), "pi-devin", "models.json")
+}
+
+/** Resolve the Pi agent dir the way the Pi runtime does: PI_CODING_AGENT_DIR (tilde-expanded), else ~/.pi/agent. */
+export function piAgentDir(env: NodeJS.ProcessEnv = process.env, home = homedir()): string {
+  const envDir = env.PI_CODING_AGENT_DIR
+  if (envDir) {
+    if (envDir === "~") return home
+    if (envDir.startsWith("~/")) return join(home, envDir.slice(2))
+    return envDir
+  }
+  return join(home, ".pi", "agent")
+}
+
+/**
+ * The Pi runtime loads every agent override named in settings, so an override
+ * synced into settings.json before its profile is linked into agents/ fails
+ * every Devin worker at start. Never throws: unreadable or malformed settings
+ * carry no overrides, and assertTierProfiles validates the synced layout.
+ */
+function missingDevinProfiles(env: NodeJS.ProcessEnv, home: string): string[] {
+  const agentDir = piAgentDir(env, home)
+  let settings: unknown
+  try { settings = JSON.parse(readFileSync(join(agentDir, "settings.json"), "utf8")) }
+  catch { return [] }
+  if (!settings || typeof settings !== "object" || Array.isArray(settings)) return []
+  const subagents = (settings as { subagents?: unknown }).subagents
+  if (!subagents || typeof subagents !== "object" || Array.isArray(subagents)) return []
+  const overrides = (subagents as { agentOverrides?: unknown }).agentOverrides
+  if (!overrides || typeof overrides !== "object" || Array.isArray(overrides)) return []
+  const devinNames: readonly string[] = Object.values(DEVIN_AGENT_NAMES)
+  const missing: string[] = []
+  for (const name of Object.keys(overrides as Record<string, unknown>)) {
+    if (!devinNames.includes(name)) continue
+    try {
+      if (!statSync(join(agentDir, "agents", name + ".md")).isFile()) missing.push(name)
+    } catch {
+      missing.push(name)
+    }
+  }
+  return missing
 }
 
 export function devinPreflight(
@@ -53,6 +93,9 @@ export function devinPreflight(
         PINNED_MODEL_UIDS.every(uid => variants.some(variant => variant.model_uid === uid))
     })
     if (!family) throw new Error("SWE-2.1 pinned variants absent")
+    const missing = missingDevinProfiles(env, home)
+    if (missing.length)
+      return { available: false, issue: missing.map(name => `Pi profile ${name}.md is not installed; run sh sync`).join("; ") }
     return { available: true, issue: null }
   } catch {
     return { available: false, issue: "SWE-2.1 model catalog absent; run /devin-refresh in an authenticated Pi session" }

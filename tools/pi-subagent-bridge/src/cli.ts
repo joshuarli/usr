@@ -55,7 +55,8 @@ async function printHelp(selected?: string): Promise<void> {
   const { COMMAND_NAMES, COMMANDS, usage } = await import("./commands.ts")
   const entries: Record<string, Help> = { ...help }
   for (const name of COMMAND_NAMES) {
-    const command = COMMANDS[name], line = usage(name).replace("usage: pi-subagent-bridge ", "")
+    const command = COMMANDS[name], plain = usage(name).replace("usage: pi-subagent-bridge ", "")
+    const line = command.cli + "|" + command.tool + plain.slice(command.cli.length)
     entries[command.cli] = { usage: line, description: command.description,
       details: command.fields.map(field => ({ cwd: "CWD", title: "TITLE", tier: "TIER", scope: "SCOPE_JSON_FILE", brief: "BRIEF_FILE", session_id: "SESSION_ID", feedback: "FEEDBACK_FILE", note: "NOTE_FILE" })[field]).map(label => label + "  " + fieldHelp[label]).concat(name === "resume" ? ["--extend-attempts N --reason TEXT  Add one or two reviewed attempts, with a reason."] : []), example: commandExamples[command.cli] }
   }
@@ -132,7 +133,12 @@ async function main(args: string[]): Promise<void> {
   }
   if (args.length === 1 && (op === "--help" || op === "-h")) return printHelp()
   if (op && rest.length && (rest.at(-1) === "-h" || rest.at(-1) === "--help")) {
-    const selected = [op, ...rest.slice(0, -1)].join(" ")
+    let selected = [op, ...rest.slice(0, -1)].join(" ")
+    if (!(selected in help) && !Object.hasOwn(commandExamples, selected)) {
+      const { COMMAND_NAMES, COMMANDS } = await import("./commands.ts")
+      const aliased = COMMAND_NAMES.find(candidate => COMMANDS[candidate].tool === selected)
+      if (aliased) selected = COMMANDS[aliased].cli
+    }
     if (selected in help || selected === "campaign" || selected === "owner" || Object.hasOwn(commandExamples, selected)) {
       return printHelp(selected)
     }
@@ -186,7 +192,7 @@ async function main(args: string[]): Promise<void> {
   if (op === "campaign") return runCampaign(rest)
   if (op === "owner") return (await import("./owner-client.ts")).runOwnerCli(rest)
   const { COMMAND_NAMES, COMMANDS, cliArguments, decodeCommand } = await import("./commands.ts")
-  const name = COMMAND_NAMES.find(candidate => COMMANDS[candidate].cli === op)
+  const name = COMMAND_NAMES.find(candidate => COMMANDS[candidate].cli === op || COMMANDS[candidate].tool === op)
   if (!name) throw new Error("usage: pi-subagent-bridge {policy|mcp|model-check|start|status|resume|cancel|steer|scope-check|inspect|watch|campaign|owner}")
   const command = decodeCommand(name, cliArguments(name, rest, path => readFileSync(path, "utf8")))
   const { connect, dispatch } = await import("./server.ts")

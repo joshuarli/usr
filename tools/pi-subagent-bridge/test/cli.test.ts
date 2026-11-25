@@ -188,3 +188,57 @@ test("native lane registration and campaign listing retain the last scope check"
     assert.deepEqual(lane.last_scope_check.changed_paths, ["file", "scope.json"])
   } finally { rmSync(root, { recursive: true, force: true }) }
 })
+
+test("MCP tool names alias their CLI commands, and help lists both names", () => {
+  const root = mkdtempSync(join(tmpdir(), "usr-cli-alias-"))
+  try {
+    const cli = fileURLToPath(new URL("../src/cli.ts", import.meta.url))
+    const scope = join(root, "scope.json")
+    writeFileSync(scope, JSON.stringify({
+      base_revision: "0000000000000000000000000000000000000000", writable_paths: ["src"],
+      acceptance_proof: "npm test", attempt_limit: 1, stop_on: "stop",
+    }))
+    const brief = join(root, "brief.txt")
+    writeFileSync(brief, "brief\n")
+    const id = "usrw_00000000-0000-0000-0000-000000000000"
+    const pairs: Array<[string, string, string[]]> = [
+      ["model-check", "worker_model_check", ["missing-worktree", "worker"]],
+      ["start", "worker_start", ["missing-worktree", "title", "worker", scope, brief]],
+      ["status", "worker_status", ["missing-worktree", id]],
+      ["resume", "worker_resume", ["missing-worktree", id, brief]],
+      ["steer", "worker_steer", ["missing-worktree", id, brief]],
+      ["cancel", "worker_cancel", ["missing-worktree", id]],
+    ]
+    const run = (args: string[]) => spawnSync(process.execPath,
+      ["--experimental-strip-types", cli, ...args], { encoding: "utf8", timeout: 20000 })
+    for (const [cliName, toolName, probe] of pairs) {
+      // No arguments: both names reach the same command decoder and fail with its canonical usage.
+      const plain = run([cliName]), aliased = run([toolName])
+      assert.equal(plain.status, 1, plain.stderr)
+      assert.equal(aliased.status, 1, aliased.stderr)
+      assert.equal(aliased.stderr, plain.stderr)
+      assert.equal(aliased.stdout, "")
+      assert.match(aliased.stderr, new RegExp("usage: pi-subagent-bridge " + cliName + " "))
+      // Fully decoded arguments: both names dispatch the same command, failing identically at worktree validation.
+      const plainDeep = run([cliName, ...probe]), aliasedDeep = run([toolName, ...probe])
+      assert.equal(aliasedDeep.status, plainDeep.status)
+      assert.equal(aliasedDeep.stderr, plainDeep.stderr)
+      assert.equal(aliasedDeep.stdout, plainDeep.stdout)
+      assert.match(aliasedDeep.stderr, /not a Git worktree/)
+      // Per-command help is available under both names and shows both.
+      for (const name of [cliName, toolName]) {
+        const helpResult = run([name, "--help"])
+        assert.equal(helpResult.status, 0, name + ": " + helpResult.stderr)
+        assert.match(helpResult.stdout, new RegExp("usage: pi-subagent-bridge " + cliName + "\\|" + toolName + " "))
+      }
+    }
+    // The full reference lists each CLI name alongside its MCP tool alias.
+    const full = run(["--help"])
+    assert.equal(full.status, 0, full.stderr)
+    for (const [cliName, toolName] of pairs) {
+      assert.ok(full.stdout.includes("usage: pi-subagent-bridge " + cliName + "|" + toolName + " "), cliName + "|" + toolName)
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
