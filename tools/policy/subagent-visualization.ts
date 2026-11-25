@@ -261,9 +261,9 @@ function laneMap(): string {
       cell({ kind: "native", title: "native tier agent", model: opencode.model, effort: opencode.efforts[tier] }),
       cell({ kind: "native", title: devin.name, model: devin.model, effort: devin.effort }),
       cell({ kind: "native", title: command[tier].name, model: command[tier].model, effort: commandEffort(tier), detail: commandEffort(tier) ? undefined : "model default" }),
-      cell({ kind: "primary", title: "bridge", model: modelOf(bridge), effort: bridge.effort, detail: `${tier} ladder` }),
-      cell({ kind: "primary", title: "bridge", model: modelOf(bridge), effort: bridge.effort, detail: `${tier} ladder` }),
-      cell({ kind: "primary", title: "bridge", model: modelOf(bridge), effort: bridge.effort, detail: `${tier} ladder` }),
+      cell({ kind: "primary", title: "bridge", model: modelOf(bridge), effort: bridge.effort, detail: tier === "expert" ? "expert; no fallback" : `${tier} ladder` }),
+      cell({ kind: "primary", title: "bridge", model: modelOf(bridge), effort: bridge.effort, detail: tier === "expert" ? "expert; no fallback" : `${tier} ladder` }),
+      cell({ kind: "primary", title: "bridge", model: modelOf(bridge), effort: bridge.effort, detail: tier === "expert" ? "expert; no fallback" : `${tier} ladder` }),
       cell({ kind: "native", title: agyTier.name, model: agyTier.model, effort: agyTier.effort, detail: `selector ${agyTier.selector}; verify` }),
       cell({ kind: "pilot", title: copilot[tier].name, model: copilot[tier].model, effort: copilot[tier].effort, detail: "candidate; attest first" }),
     ].join("") + "</tr>")

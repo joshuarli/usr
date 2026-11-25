@@ -50,6 +50,7 @@ function fake(cwd: string) {
   const calls: unknown[] = []
   let piState = "succeeded", piError: unknown = null
   let variants = ["low", "medium", "high", "xhigh", "max"]
+  let devin = false
   let commandAvailable = true, commandDone = false, commandFailure: string | null = null
   let commandFinalText: string | null = null
   let model = { providerID: "opencode-go", id: "deepseek-v4.1-flash", variant: "high" }
@@ -77,6 +78,7 @@ function fake(cwd: string) {
     models: async () => ({ data: [
       { id: "muse-spark-1.3-contributor", providerID: "opencode-go" },
       { id: "deepseek-v4.1-flash", providerID: "opencode-go" },
+      ...(devin ? [{ id: "swe-2.1", providerID: "devin" }] : []),
     ].map(({ id, providerID }) => ({
       id, providerID, variants: variants.map((variant) => ({ id: variant })),
       enabled: true, status: "active",
@@ -102,6 +104,7 @@ function fake(cwd: string) {
     failPi: (error: string) => { piState = "failed"; piError = { code: 429, message: error } },
     setPiState: (state: string) => { piState = state },
     omitGo: () => { variants = [] },
+    withDevin: () => { devin = true },
     noCommand: () => { commandAvailable = false },
     failCommand: (error: string, finalText?: string) => {
       commandFailure = error; commandFinalText = finalText ?? null
@@ -143,7 +146,6 @@ test("model check reports Command Code primary, its pins, and Codex as the final
       ["scout", "meta/muse-ember", "medium"],
       ["mechanic", "meta/muse-ember", "xhigh"],
       ["worker", "deepseek/deepseek-v4.1-flash", "high"],
-      ["expert", "tencent/hy4", "high"],
     ] as const
     for (const [tier, model, effort] of expected) {
       const status = await bridge.modelCheck(f.cwd, tier)
@@ -155,6 +157,38 @@ test("model check reports Command Code primary, its pins, and Codex as the final
       assert.equal(status.command_code.effort, effort)
       assert.equal(status.command_code.available, true)
     }
+  } finally { f.close() }
+})
+
+test("expert admits only on Devin SWE-2.1 max and is blocked, never substituted, when Devin is unavailable", async () => {
+  const devinMax = { providerID: "devin", id: "swe-2.1", variant: "max" }
+  const f = fixture()
+  try {
+    const m = fake(f.cwd), bridge = makeHybridBridge(piAdapter(m.api), m.command, noCodex)
+    const blocked = await bridge.modelCheck(f.cwd, "expert")
+    assert.equal(blocked.primary.backend, "pi")
+    assert.deepEqual(blocked.primary.model, devinMax)
+    assert.equal(blocked.primary.available, false)
+    assert.equal(blocked.fallback, null)
+    assert.equal(blocked.command_code, null)
+    assert.equal(blocked.codex, null)
+    await assert.rejects(bridge.start(f.cwd, "escalate", "expert", f.scope, "Work"), /blocked.*devin\/swe-2\.1.*max/s)
+    assert.equal(m.calls.some(call => (call as { command?: boolean }).command === true), false)
+    assert.equal(m.calls.length, 0)
+    m.withDevin()
+    const ready = await bridge.modelCheck(f.cwd, "expert")
+    assert.equal(ready.primary.available, true)
+    const admitted = await bridge.start(f.cwd, "escalate", "expert", f.scope, "Work")
+    assert.equal(admitted.backend, "pi")
+    assert.equal(admitted.fallback_reason, null)
+    const created = m.calls.find(call => (call as { model?: unknown }).model !== undefined) as { model: unknown }
+    assert.deepEqual(created.model, devinMax)
+    m.failPi("usage limit reached")
+    const failed = await bridge.status(f.cwd, admitted.session_id)
+    assert.equal(failed.backend, "pi")
+    assert.deepEqual(failed.model, devinMax)
+    assert.equal(failed.fallback_reason, null)
+    assert.equal(m.calls.some(call => (call as { command?: boolean }).command === true), false)
   } finally { f.close() }
 })
 

@@ -38,7 +38,7 @@ Proactive cleanup uses [disk-pressure events](agent-disk-pressure.md) and runs o
 
 <!-- policy:begin routing-summary -->
 <!-- Generated from tools/pi-subagent-bridge/src/policy.ts; run make generate. -->
-Bridge tiers: `scout`, `mechanic`, `worker`, `expert`. There is no `god` tier. The model families `gemini-3.8` and `gemini-4-argon` and `gemini-4-carbon` and `gpt-6-astra` and `gpt-6.1-astra` and `gpt-6.2-astra` and `claude-fable` and `fable` are prohibited, including every effort variant.
+Bridge tiers: `scout`, `mechanic`, `worker`, `expert`. The `expert` tier has one route, Pi `devin/swe-2.1` (`max`), and no fallback: when that route is unavailable or exhausted the expert lane is blocked, never moved to another model. Top-level OpenCode, Devin, Command Code, Antigravity and Copilot CLI parents keep their native expert agents (below). There is no `god` tier. The model families `gemini-3.8` and `gemini-4-argon` and `gemini-4-carbon` and `gpt-6-astra` and `gpt-6.1-astra` and `gpt-6.2-astra` and `claude-fable` and `fable` are prohibited, including every effort variant.
 <!-- policy:end routing-summary -->
 
 After updating `usr`, review `sh sync plan`, then use `sh sync` and `sh sync doctor` to apply and inspect home configuration.

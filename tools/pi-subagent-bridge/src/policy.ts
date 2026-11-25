@@ -23,6 +23,19 @@ export type RootPlan = {
   readonly codex: CliPin
 }
 
+/**
+ * A pi-only plan admits exactly its ordered Pi destinations and nothing else:
+ * no Command Code, Codex or FX route exists, so an unavailable provider blocks
+ * admission and an execution-time provider failure never falls back.
+ */
+export type PiOnlyPlan = {
+  readonly kind: "pi-only"
+  readonly pi: PiDestinations
+}
+export type AdmissionPlan = RootPlan | PiOnlyPlan
+/** Tiers whose root plan is the codex-last CLI/Pi ladder. Expert is pi-only and has no ladder. */
+export type LadderTier = Exclude<BridgeTier, "expert">
+
 /** Antigravity CLI native target allocation. The custom-agent schema only admits flash/pro tier hints. */
 export const ANTIGRAVITY_DIRECT = {
   models: ["gemini-4-neon-high", "gemini-4-neon-xhigh", "gemini-4-neon-low", "gemini-4-hydrogen-low"],
@@ -43,8 +56,7 @@ export const CODEX_TIER_MODELS = {
   scout: { model: codexModels.small, effort: "medium" },
   mechanic: { model: codexModels.small, effort: "high" },
   worker: { model: codexModels.coding, effort: "high" },
-  expert: { model: codexModels.coding, effort: "max" },
-} as const satisfies Record<BridgeTier, CliPin>
+} as const satisfies Record<LadderTier, CliPin>
 
 /** Native Command Code parent agents; HY4 medium is an explicit comparison lane. */
 export const COMMAND_NATIVE = {
@@ -80,10 +92,13 @@ export const COMMAND_TIER_MODELS = {
   scout: { model: COMMAND_EMBER_MODEL, effort: "medium" },
   mechanic: { model: COMMAND_EMBER_MODEL, effort: "xhigh" },
   worker: { model: COMMAND_MODEL, effort: "high" },
-  expert: { model: COMMAND_NATIVE.expert.model, effort: COMMAND_NATIVE.expert.effort },
-} as const satisfies Record<BridgeTier, CliPin>
+} as const satisfies Record<LadderTier, CliPin>
 
-/** Ordered admission plan per admitted bridge tier. */
+/**
+ * Ordered admission plan per admitted bridge tier. The lower tiers climb the
+ * codex-last ladder; expert is pi-only on the pinned Devin SWE-2.1 max lane
+ * and fails closed when that lane is unavailable or exhausted.
+ */
 export const ROOT_PLANS = {
   scout: {
     kind: "codex-last", command: COMMAND_TIER_MODELS.scout,
@@ -97,16 +112,14 @@ export const ROOT_PLANS = {
     kind: "codex-last", command: COMMAND_TIER_MODELS.worker,
     pi: [GO_TIER_MODELS.worker, DEVIN_TIER_MODELS.worker], codex: CODEX_TIER_MODELS.worker,
   },
-  expert: {
-    kind: "codex-last", command: COMMAND_TIER_MODELS.expert,
-    pi: [GO_TIER_MODELS.expert, DEVIN_TIER_MODELS.expert], codex: CODEX_TIER_MODELS.expert,
-  },
-} as const satisfies Record<BridgeTier, RootPlan>
+  expert: { kind: "pi-only", pi: [DEVIN_TIER_MODELS.expert] },
+} as const satisfies Record<BridgeTier, AdmissionPlan>
 
 function piRoute(pin: PiSelection) {
   return { executor: "pi", providerID: pin.providerID, model: pin.id, effort: pin.variant } as const
 }
-export function routesOf(plan: RootPlan): readonly [Route, ...Route[]] {
+export function routesOf(plan: AdmissionPlan): readonly [Route, ...Route[]] {
+  if (plan.kind === "pi-only") return [piRoute(plan.pi[0]), ...plan.pi.slice(1).map(piRoute)]
   return [
     { executor: "command-code", ...plan.command },
     ...plan.pi.map(piRoute),
@@ -121,7 +134,6 @@ export const OPENCODE_NATIVE = {
 export const NATIVE_FALLBACK = {
   tiers: ["scout", "mechanic", "worker"],
   claudeModels: { scout: "haiku", mechanic: "sonnet", worker: "sonnet" },
-  claudeEffort: {},
 } as const
 /** Family prefixes are prohibited, including all effort-suffixed variants. */
 export const BANNED_MODELS = [

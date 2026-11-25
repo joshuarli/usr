@@ -214,7 +214,7 @@ type MutablePolicy = {
   commandNative: Record<string, { name: string; model: string; effort?: string }>
   devinNative: Record<string, { name: string; model: string; effort: string }>
   copilotNative: Record<string, { name: string; model: string; effort: string }>
-  nativeFallback: { tiers: string[]; claudeModels: Record<string, string>; claudeEffort: Record<string, string> }
+  nativeFallback: { tiers: string[]; claudeModels: Record<string, string> }
   antigravityDirect: { models: string[]; main: { model: string; effort: string }; god: { model: string; effort: string }; tiers: Record<string, { name: string; model: string; effort: string; selector: string }>; manualCarbon: string; retired: string[] }
   bannedModels: string[]
 }
@@ -239,12 +239,8 @@ const dimensions: Dimension[] = [
   { name: "pi worker second effort", mutate: p => { p.rootRoutes.worker[2].effort = "low" } },
   { name: "pi worker order", mutate: p => { p.rootRoutes.worker.splice(2, 0, ...p.rootRoutes.worker.splice(1, 1)) } },
   { name: "pi worker list length", mutate: p => { p.rootRoutes.worker.splice(1, 1) } },
-  { name: "command expert model", mutate: p => { p.rootRoutes.expert[0].model = FIXTURE_MODEL } },
-  { name: "command expert effort", mutate: p => { p.rootRoutes.expert[0].effort = "medium" } },
-  { name: "pi expert model", mutate: p => { p.rootRoutes.expert[1].model = FIXTURE_MODEL } },
-  { name: "pi expert Devin effort", mutate: p => { p.rootRoutes.expert[2].effort = "high" } },
-  { name: "codex expert model", mutate: p => { p.rootRoutes.expert.at(-1)!.model = FIXTURE_MODEL } },
-  { name: "codex expert effort", mutate: p => { p.rootRoutes.expert.at(-1)!.effort = "high" } },
+  { name: "expert Devin route model", mutate: p => { p.rootRoutes.expert[0].model = FIXTURE_MODEL } },
+  { name: "expert Devin route effort", mutate: p => { p.rootRoutes.expert[0].effort = "xhigh" } },
 
   { name: "codex scout model", mutate: p => { p.rootRoutes.scout.at(-1)!.model = FIXTURE_MODEL } },
   { name: "codex scout effort", mutate: p => { p.rootRoutes.scout.at(-1)!.effort = "xhigh" } },

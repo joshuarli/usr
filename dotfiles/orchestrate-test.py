@@ -20,7 +20,8 @@ class OrchestrateTests(unittest.TestCase):
 
     def test_generated_policy_has_distinct_root_and_native_domains(self):
         self.assertEqual(POLICY["tiers"], ["scout", "mechanic", "worker", "expert"])
-        self.assertIn("expert", POLICY["rootRoutes"])
+        self.assertEqual(POLICY["rootRoutes"]["expert"],
+                         [{"executor": "pi", "providerID": "devin", "model": "swe-2.1", "effort": "max"}])
         self.assertNotIn("antigravity", [route["executor"] for routes in POLICY["rootRoutes"].values() for route in routes])
         self.assertIn("expert", POLICY["nativePi"]["goModels"])
         self.assertNotIn("god", POLICY["rootRoutes"])
@@ -55,10 +56,11 @@ class OrchestrateTests(unittest.TestCase):
         self.assertNotIn("usr-opencode-worker", json.dumps(opencode))
 
     def test_native_subagents_cover_claude_code(self):
-        self.assertIn("Codex's native subagents", self.text)
         for harness in ("OpenCode", "Devin", "Codex", "Pi", "Claude Code"):
             self.assertIn(harness, self.text)
         self.assertIn("Claude Code native subagents:", self.text)
+        self.assertIn("`expert` assignments go through the bridge's `expert` tier, never a native subagent;", self.text)
+        self.assertIn("Never substitute a weaker model for a blocked expert lane.", self.text)
         self.assertIn("pi-subagent-bridge scope-check CWD SCOPE_JSON_FILE BRANCH --register TITLE", self.text)
         self.assertIn("pi-subagent-bridge scope-check --lane ID", self.text)
         self.assertIn("No hook gates native subagents.", self.text)

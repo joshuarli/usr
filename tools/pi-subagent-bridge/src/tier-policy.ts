@@ -4,7 +4,7 @@
  */
 export const TIERS = ["scout", "mechanic", "worker", "expert"] as const
 export type Tier = (typeof TIERS)[number]
-/** The bridge admits every tier; no god tier exists. */
+/** The bridge admits only these tiers. Expert is pi-only: its single route is the pinned Devin max lane. */
 export const BRIDGE_TIERS = ["scout", "mechanic", "worker", "expert"] as const
 export type BridgeTier = (typeof BRIDGE_TIERS)[number]
 export type Effort = "low" | "medium" | "high" | "xhigh" | "max"

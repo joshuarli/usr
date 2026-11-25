@@ -81,25 +81,9 @@
     ],
     "expert": [
       {
-        "executor": "command-code",
-        "model": "tencent/hy4",
-        "effort": "high"
-      },
-      {
-        "executor": "pi",
-        "providerID": "opencode-go",
-        "model": "deepseek-v4.1-flash",
-        "effort": "max"
-      },
-      {
         "executor": "pi",
         "providerID": "devin",
         "model": "swe-2.1",
-        "effort": "max"
-      },
-      {
-        "executor": "codex",
-        "model": "gpt-6.1-terra",
         "effort": "max"
       }
     ]
@@ -334,8 +318,7 @@
       "scout": "haiku",
       "mechanic": "sonnet",
       "worker": "sonnet"
-    },
-    "claudeEffort": {}
+    }
   },
   "antigravityDirect": {
     "models": [

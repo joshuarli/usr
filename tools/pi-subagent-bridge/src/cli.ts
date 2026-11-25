@@ -42,7 +42,7 @@ for (const [name, description, extra, suffix] of [
 }
 const fieldHelp: Record<string, string> = {
   CWD: "Existing clean, separate worktree root (required).", TITLE: "Short task title (required).",
-  TIER: "Routing tier: scout, mechanic, or worker. Expert work uses harness-native subagents (required).", SCOPE_JSON_FILE: "Path to scope JSON file (required).",
+  TIER: "Routing tier: scout, mechanic, worker or expert. Expert admits only to the pinned Devin SWE-2.1 max lane and never falls back (required).", SCOPE_JSON_FILE: "Path to scope JSON file (required).",
   BRIEF_FILE: "Path to task brief text file (required).", SESSION_ID: "Worker session ID (required).",
   FEEDBACK_FILE: "Path to feedback text file (required).", NOTE_FILE: "Path to steering note text file (required).",
 }

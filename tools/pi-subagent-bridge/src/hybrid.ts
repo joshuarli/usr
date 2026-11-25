@@ -484,6 +484,16 @@ export function makeHybridBridge(api: PiAdapter, command = {
       const piLane = { backend: "pi", model: firstPi,
         available: firstPi.providerID === "devin" ? devinInfo.available : goInfo.available,
         issue: firstPi.providerID === "devin" ? devinInfo.issue : goInfo.issue }
+      if (plan.kind === "pi-only") return {
+        primary: piLane,
+        fallback: null,
+        command_code: null,
+        codex: null,
+        pi_fallback: null,
+        opencode_go: null,
+        devin: devinModel ? { backend: "pi", model: devinModel, available: devinInfo.available, issue: devinInfo.issue } : null,
+        note: "The expert lane is pi-only: when the pinned Devin route is unavailable or exhausted, admission is blocked; there is no Command Code, Pi-Go, Codex or FX fallback.",
+      }
       const commandLane = { backend: "command-code", ...plan.command, available: command.available() }
       const codexLane = { backend: "codex", ...plan.codex, available: codex.available() }
       return {
@@ -528,6 +538,66 @@ export function makeHybridBridge(api: PiAdapter, command = {
         activateProcess(s, target, launch(s, target, prompt(s)))
         s.attempts = 1
         save(s)
+        return admission(s)
+      }
+      if (plan.kind === "pi-only") {
+        // The expert lane admits exactly its pinned Pi destinations and nothing else.
+        // An unavailable or exhausted provider blocks admission outright: there is no
+        // Command Code, OpenCode Go, Codex or FX route to fall back to, before or after edits.
+        const leaseDir = stateDir(dir)
+        if (activeWorktreeOwner(leaseDir, dir)) throw new Error("Worktree already has an active worker")
+        const store = new ExhaustionStore(leaseDir)
+        const blocked: string[] = []
+        let selection: PiSelection | undefined
+        for (const candidate of plan.pi) {
+          const target = { executor: "pi" as const, selection: candidate }
+          const exhausted = store.active(routeKey(routeRef(target)!))
+          if (exhausted) { blocked.push(exhaustionLabel(target, exhausted)); continue }
+          if (contributorModel(candidate.providerID, candidate.id) && !contributorAllowed(dir)) {
+            blocked.push(candidate.providerID + "/" + candidate.id + " (contributor models disallowed by repository or environment policy)")
+            continue
+          }
+          let available = false, issue: string | null = null
+          try { available = (await api(candidate).modelCheck(dir)).available }
+          catch (error) { issue = String(error) }
+          if (!available && !issue && candidate.providerID === "devin")
+            issue = devinPreflight().issue ?? "Devin SWE-2.1 is not authenticated in the Pi SDK"
+          if (!available) {
+            blocked.push(candidate.providerID + "/" + candidate.id + " variant " + candidate.variant + (issue ? " (" + issue + ")" : " (pinned Pi provider/model unavailable)"))
+            continue
+          }
+          selection = candidate
+          break
+        }
+        if (!selection)
+          throw new Error("Expert admission blocked: the pinned Devin lane is unavailable or exhausted: " + blocked.join("; ") +
+            ". A pi-only expert lane never falls back to Command Code, OpenCode Go, Codex or FX; retry when the Devin lane recovers.")
+        const admitted: PiSelection = selection
+        const s: Session = { id: "usrw_" + randomUUID(), cwd: dir, tier: tierInput,
+          title: required(title, "title", 100), scope: scopeFor(scopeInput, tierInput, dir),
+          task, lane_branch: currentBranch(dir), plan, execution: { kind: "transition", to: { executor: "pi", selection: admitted } }, attempts: 0,
+          ...(admitting_parent === undefined ? {} : { admitting_parent }) }
+        await settleHolder(leaseDir, dir)
+        claimWorktree(leaseDir, dir, s.id)
+        try {
+          const owner = await ownerResolver?.(leaseDir)
+          if (owner) s.owner = owner
+          save(s)
+        } catch (error) {
+          releaseWorktree(leaseDir, dir, s.id)
+          throw error
+        }
+        try {
+          const started = await api(admitted).start(s.cwd, s.title, prompt(s), s.tier === "scout")
+          activatePi(s, admitted, started.session_id)
+          s.attempts = 1
+          save(s)
+        } catch (error) {
+          if (String(error).includes("created but prompt admission failed"))
+            throw new Error(String(error) + "; worktree lease retained for session " + s.id)
+          releaseWorktree(leaseDir, dir, s.id)
+          throw error
+        }
         return admission(s)
       }
       if (plan.kind === "codex-last") {

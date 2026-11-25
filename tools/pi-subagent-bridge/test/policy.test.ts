@@ -6,22 +6,27 @@ import {
 } from "../src/policy.ts"
 import { GO_TIER_MODELS, PI_MODEL_ALLOWLIST, TIER_TOOLS, isTier, BRIDGE_TIERS } from "../src/tier-policy.ts"
 
-test("root admission keeps the ordered fallback ladder for every tier", () => {
-  for (const tier of BRIDGE_TIERS) {
-    assert.deepEqual(routesOf(ROOT_PLANS[tier]).map(route => route.executor), ["command-code", "pi", "pi", "codex"])
+test("root admission keeps ordered lower-tier fallback and gives expert only the Devin max route", () => {
+  assert.deepEqual(routesOf(ROOT_PLANS.scout).map(route => route.executor), ["command-code", "pi", "pi", "codex"])
+  assert.deepEqual(routesOf(ROOT_PLANS.mechanic).map(route => route.executor), ["command-code", "pi", "pi", "codex"])
+  assert.deepEqual(routesOf(ROOT_PLANS.worker).map(route => route.executor), ["command-code", "pi", "pi", "codex"])
+  for (const tier of ["scout", "mechanic", "worker"] as const)
     assert.deepEqual(ROOT_PLANS[tier].pi.map(pin => pin.providerID), ["opencode-go", "devin"])
+  assert.deepEqual(ROOT_PLANS.expert, { kind: "pi-only", pi: [{ providerID: "devin", id: "swe-2.1", variant: "max" }] })
+  assert.deepEqual(POLICY.rootRoutes.expert, [{ executor: "pi", providerID: "devin", model: "swe-2.1", effort: "max" }])
+  assert.equal(isTier("god"), false)
+  assert.deepEqual([...BRIDGE_TIERS], ["scout", "mechanic", "worker", "expert"])
+  for (const tier of ["scout", "mechanic", "worker"] as const) {
     assert.deepEqual(ROOT_PLANS[tier].codex, CODEX_TIER_MODELS[tier])
     assert.deepEqual(ROOT_PLANS[tier].command, COMMAND_TIER_MODELS[tier])
   }
-  assert.equal(isTier("god"), false)
-  assert.deepEqual([...BRIDGE_TIERS], ["scout", "mechanic", "worker", "expert"])
 })
 
-test("native expert paths remain first-class outside the bridge", () => {
+test("native fallback covers only the lower tiers: an expert lane never falls back to a native subagent", () => {
   assert.equal(GO_TIER_MODELS.expert.providerID, "opencode-go")
   assert.deepEqual(NATIVE_FALLBACK.tiers, ["scout", "mechanic", "worker"])
   assert.deepEqual(NATIVE_FALLBACK.claudeModels, { scout: "haiku", mechanic: "sonnet", worker: "sonnet" })
-  assert.deepEqual(NATIVE_FALLBACK.claudeEffort, {})
+  assert.equal("claudeEffort" in NATIVE_FALLBACK, false)
   assert.ok(OPENCODE_NATIVE.model.endsWith("-free"))
   assert.deepEqual(OPENCODE_NATIVE.efforts, { scout: "high", mechanic: "high", worker: "high", expert: "high" })
 })

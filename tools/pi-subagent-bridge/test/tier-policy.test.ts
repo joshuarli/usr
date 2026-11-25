@@ -138,6 +138,8 @@ test("real YAML profiles are validated as runtime policy; drift fails before spa
     assert.throws(() => assertTierProfile(tier,
       profile(tier, "devin").replace("thinking: " + DEVIN_TIER_MODELS[tier].variant, "thinking: xhigh"), "devin"), /Unapproved/)
   }
+  assert.deepEqual(Object.keys(DEVIN_TIER_MODELS), ["scout", "mechanic", "worker", "expert"])
+  assert.throws(() => assertTierProfile("expert", profile("expert"), "devin"), /Unapproved/)
 })
 
 test("profile checks enforce one exact pinned scope and one max depth", () => {
@@ -196,8 +198,16 @@ test("Devin pins SWE-2.1 thinking by tier; escapes fail closed", () => {
     const pin = DEVIN_TIER_MODELS[tier]
     assert.equal(tierForModel(pin, tier === "scout"), tier)
     assert.throws(() => tierForModel(pin, tier !== "scout"), /Unapproved/)
-    for (const variant of ["off", "minimal", "xhigh"])
-      assert.throws(() => tierForModel({ ...pin, variant }, tier === "scout"), /Unapproved/)
+    const pinned = Object.values(DEVIN_TIER_MODELS).map(other => other.variant as string)
+    for (const variant of ["off", "minimal", "low", "medium", "high", "xhigh", "max"].filter(v => v !== pin.variant)) {
+      const readOnly = tier === "scout"
+      const owner = (Object.keys(DEVIN_TIER_MODELS) as (keyof typeof DEVIN_TIER_MODELS)[])
+        .find(other => DEVIN_TIER_MODELS[other].variant === variant && (other === "scout") === readOnly)
+      if (!pinned.includes(variant) || !owner)
+        assert.throws(() => tierForModel({ ...pin, variant }, readOnly), /Unapproved/)
+      else
+        assert.equal(tierForModel({ ...pin, variant }, readOnly), owner)
+    }
     assert.equal(nestedCallRefusal(tier, "subagent", {
       agent: DEVIN_AGENT_NAMES[tier], task: "Implement", options: { agentScope: "user" },
     }, "devin"), undefined)

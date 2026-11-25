@@ -43,7 +43,10 @@ export function routingTable(policy: Policy): string {
 }
 
 function summary(policy: Policy): string {
-  return `Bridge tiers: ${policy.tiers.map(code).join(", ")}. ` +
+  const [expert] = policy.rootRoutes.expert
+  return `Bridge tiers: ${policy.tiers.map(code).join(", ")}. The ${code("expert")} tier has one route, ${routeLabel(expert)}, and no fallback: ` +
+    "when that route is unavailable or exhausted the expert lane is blocked, never moved to another model. " +
+    "Top-level OpenCode, Devin, Command Code, Antigravity and Copilot CLI parents keep their native expert agents (below). " +
     `There is no ${code("god")} tier. ` +
     `The model families ${policy.bannedModels.map(code).join(" and ")} are prohibited, including every effort variant.`
 }
@@ -90,14 +93,18 @@ function copilot(policy: Policy): string {
 function nativeFallback(policy: Policy): string {
   const tiers = policy.nativeFallback.tiers.join("/")
   const mappings = policy.nativeFallback.tiers.map(tier => `${tier}: ${code(policy.nativeFallback.claudeModels[tier])}`).join("; ")
-  return `**Claude Code native subagents:** When no approved bridge backend can run because it is unavailable or exhausted, ${tiers} use tier-matched native subagents with the same brief, worktree, scope, and independent verification: ${mappings}. ` +
+  return `**Claude Code native subagents:** ${code("expert")} assignments go through the bridge's ${code("expert")} tier, never a native subagent; ` +
+    "when that tier is blocked, the expert lane is blocked. " +
+    `When no approved bridge backend can run because it is unavailable or exhausted, ${tiers} use tier-matched native subagents with the same brief, worktree, scope, and independent verification: ${mappings}. ` +
     "A host or session whose environment sets `USR_DELEGATION=native`, such as a cloud environment without bridge providers, uses these native subagents directly and does not start the bridge. " +
     "Preserve partial work before relaunch. Register native lanes with `scope-check --register` and record their final check with `scope-check --lane`. No hook gates native subagents. Return to the bridge when capacity recovers, unless `USR_DELEGATION=native` is set."
 }
 
 function delegation(policy: Policy, lean: boolean): string {
   const head = lean ? "- Before delegation, read `orchestrate`; use native `usr-*` agents for top-level Command Code and `pi-subagent-bridge` for other scout/mechanic/worker/expert parents except OpenCode, Devin, Antigravity and Copilot CLI." :
-    "- All scout/mechanic/worker/expert coding subagents, in every harness and skill, MUST launch through `pi-subagent-bridge` MCP tools or its CLI shim except top-level Command Code, OpenCode, Devin, Antigravity and Copilot CLI parents; follow `orchestrate`. Native-parent expert assignments use harness-native subagents (including Command Code `usr-expert`, OpenCode's `expert` agent, Devin's `usr-expert` profile and Copilot's attested `usr-expert`)."
+    "- All scout/mechanic/worker/expert coding subagents, in every harness and skill, MUST launch through `pi-subagent-bridge` MCP tools or its CLI shim except top-level Command Code, OpenCode, Devin, Antigravity and Copilot CLI parents; follow `orchestrate`. " +
+    `The bridge's expert tier runs only ${routeLabel(policy.rootRoutes.expert[0]!)} and is blocked rather than substituted; ` +
+    "native-parent expert assignments use harness-native subagents (including Command Code `usr-expert`, OpenCode's `expert` agent, Devin's `usr-expert` profile and Copilot's attested `usr-expert`)."
   return head + " A top-level OpenCode session delegates only through OpenCode native subagents; free top-level models require free tier models. " +
     "A top-level Devin session delegates only through Devin native subagents. " +
     "A top-level Command Code session delegates only through native pinned `usr-*` subagents (HY4-medium worker is opt-in). " +
@@ -249,7 +256,6 @@ function validatePolicy(policy: Policy): void {
     code(pin.effort)
   }
   for (const value of Object.values(policy.nativeFallback.claudeModels)) validateModel(value)
-  for (const value of Object.values(policy.nativeFallback.claudeEffort)) code(value)
 }
 
 function destination(root: string, path: string): string {

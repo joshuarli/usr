@@ -3,7 +3,7 @@ import type { FxSelection } from "./fx.ts"
 import type { CommandRun, Effort } from "./command.ts"
 import type { PlannedRun } from "./launch.ts"
 import {
-  isBannedModel, type CliExecutor, type CliPin, type Executor, type PiDestinations, type PiSelection,
+  isBannedModel, type CliExecutor, type CliPin, type Executor, type PiDestinations, type PiOnlyPlan, type PiSelection,
   type RootPlan,
 } from "./policy.ts"
 import { isRecord, parseScope, requiredText, type Scope } from "./scope.ts"
@@ -32,7 +32,7 @@ export type FxFallbackPlan = {
 }
 /** The earlier root plan: Codex first, then Command Code, then the Pi ladder. Records admitted under it keep it. */
 export type FallbackPlan = { readonly kind: "fallback"; readonly codex: CliPin; readonly command: CliPin; readonly pi: PiDestinations }
-export type ExecutionPlan = RootPlan | LeafPlan | FxFallbackPlan
+export type ExecutionPlan = RootPlan | LeafPlan | FxFallbackPlan | PiOnlyPlan
 /** `admitting` is the historical Pi admission state; only legacy records carry it. */
 export type PiTarget = { readonly executor: "pi"; readonly selection: PiSelection; readonly admitting?: true }
 export type Target = ProcessTarget | PiTarget
@@ -155,7 +155,7 @@ export function admittedEffort(s: Session): Effort {
 
 /** Flat watcher fields stay as derived projections; decoding ignores them. */
 export function encodeSession(s: Session) {
-  return { schema_version: s.plan.kind === "codex-last" ? SESSION_VERSION : s.plan.kind === "leaf" || s.plan.kind === "fx-fallback" ? 3 : 2, ...s, backend: backendOf(s), command_run: processRun(s), pi_id: piId(s) }
+  return { schema_version: s.plan.kind === "codex-last" || s.plan.kind === "pi-only" ? SESSION_VERSION : s.plan.kind === "leaf" || s.plan.kind === "fx-fallback" ? 3 : 2, ...s, backend: backendOf(s), command_run: processRun(s), pi_id: piId(s) }
 }
 
 function optionalText(value: unknown, name: string): string | undefined {
@@ -227,6 +227,8 @@ function coherent(plan: AdmittedPlan, to: Target): boolean {
       return to.executor === "codex" ? samePin(to.selection, plan.codex) :
         to.executor === "command-code" ? samePin(to.selection, plan.command) :
         to.executor === "pi" && plan.pi.some(candidate => samePi(candidate, to.selection))
+    case "pi-only":
+      return to.executor === "pi" && plan.pi.some(candidate => samePi(candidate, to.selection))
     case "codex-last":
     case "fallback":
       return to.executor === "codex" ? samePin(to.selection, plan.codex) :
@@ -258,6 +260,8 @@ function decodePlan(value: unknown): AdmittedPlan {
     }
     case "codex-last":
       return { kind: "codex-last", command: pin(value.command), pi: piList(piSelections(value.pi)), codex: pin(value.codex) }
+    case "pi-only":
+      return { kind: "pi-only", pi: piList(piSelections(value.pi)) }
     case "fallback":
       return { kind: "fallback", codex: pin(value.codex), command: pin(value.command), pi: piList(piSelections(value.pi)) }
     case "fallback-unresolved-pi": return { kind: "fallback-unresolved-pi", codex: pin(value.codex), command: pin(value.command) }
@@ -394,6 +398,9 @@ export function decodeSession(value: unknown, cwd: string, id: string): Session 
   if (typeof value.cwd !== "string" || !sameDirectory(value.cwd, cwd)) throw new Error("Persisted worker session belongs to a different worktree; manual reconciliation required")
   if (value.id !== id) throw new Error("Persisted worker session id does not match; manual reconciliation required")
   if (!isBridgeTier(value.tier)) throw new Error("Unsupported persisted worker tier; manual reconciliation required")
+  // Expert admission is pi-only and begins at schema 4; older record shapes predate it.
+  if (value.tier === "expert" && version !== SESSION_VERSION)
+    throw new Error("Unsupported persisted worker tier; manual reconciliation required")
   const { plan, execution } = (version === SESSION_VERSION || version === 3 || version === 2) ? decodeCurrent(value) : decodeLegacy(value)
   if (version === 2 && (plan.kind === "leaf" || plan.kind === "fx-fallback" || destinationOf(execution).executor === "fx"))
     throw new Error("FX/leaf routes require session schema 3; manual reconciliation required")
