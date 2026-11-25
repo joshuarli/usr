@@ -12,17 +12,19 @@ content = ['\b(reconnect|retry|backoff|retry_loop)\b']
 
 [[trigger]]
 paths = ["*.rs"]
-content = ['\b(accept|listener|serve)\s*\(', '\bloop\s*\{']
+content = ['\b(accept|incoming|listener|serve)\s*\(']
 
 [examples]
 match = [{ path = "src/daemon/mod.rs", text = "std::thread::spawn(move || listener.serve(daemon));\n" }, { path = "src/daemon/server.rs", text = "loop { let (stream, _) = listener.accept()?; }\n" }]
-skip = [{ path = "src/math.rs", text = "fn add(a: u32, b: u32) -> u32 { a + b }\n" }, { path = "README.md", text = "thread::spawn\n" }]
+skip = [{ path = "src/math.rs", text = "fn add(a: u32, b: u32) -> u32 { a + b }\n" }, { path = "src/count.rs", text = "loop { i += 1; if i > 9 { break; } }\n" }, { path = "README.md", text = "thread::spawn\n" }]
 +++
 
 # Owned Concurrency
 
 A thread outliving its owner is a resource leak, not a style issue. If a run
 can end, every task it started must end with it.
+
+This extends the `lifecycle-concurrency` standard, which owns task ownership, cancellation, shutdown order, signal policy, and retry bounds, with the Rust thread, listener, and test-server rules below.
 
 ## Code
 
