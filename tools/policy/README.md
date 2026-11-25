@@ -67,12 +67,66 @@ that snapshot. Remove the retired entries explicitly and regenerate. Malformed
 snapshots fail before any output is changed.
 
 `check-generated` is read-only and reports stale paths. Both `sh sync check` and
-the dedicated policy workflow run it. The focused regression command is:
+the dedicated policy workflow run it. It never consults the policy claim and is
+never blocked by one. The focused regression command is:
 
 ```
 node --test tools/policy/generate.test.ts
+node --test tools/policy/claim.test.ts
 python3 -I dotfiles/orchestrate-test.py
 ```
+
+## The shared policy claim
+
+Two sessions once edited the model policy concurrently in different worktrees
+of this checkout; the collision surfaced only when a push was rejected, after
+both had built and tested, and a seventeen-file rebase followed. The policy
+claim exists so the second session learns at the start of policy work, not at
+push, that another live session holds the area.
+
+The claim is one JSON record at `<checkout root>/.work/policy-claim/claim.json`,
+where the checkout root is the parent of the Git common dir
+(`git rev-parse --git-common-dir`), so every worktree of the checkout resolves
+to the same file. It sits beside the bridge's shared state under the ignored
+`.work/` tree. The record names the owner (the first agent/session identifier
+found in the environment — `USR_SESSION_ID`, then the Claude, Pi, Codex,
+OpenCode, Devin or generic agent session variables — else `user@host`), the
+branch, the worktree path, the session process id and the start time. The pid
+is chosen by walking the ancestor chain past transient `sh -c` command shells
+and `make` to the long-lived harness or interactive shell. The age bound is
+the final guard in both directions: no claim can be taken over within it
+whatever the guess, and an abandoned claim is always recoverable after it. Sessions on other machines or in other
+clones are out of scope: the file is local to this checkout, and a record
+whose host differs cannot have its process verified, so the age bound alone
+decides those.
+
+A claim is stale only when its recorded process is gone (or unverifiable
+across hosts) **and** its age exceeds twelve hours — never on one signal
+alone. A live process keeps its claim indefinitely; a young claim outlives a
+racy or mis-recorded pid. Nothing expires silently: every takeover or removal
+reports the prior record, the liveness reading and the age comparison. A
+corrupt claim file blocks with instructions until it ages past the bound.
+
+Enforcement sits where policy edits become real. Write-mode generation
+(`make generate`, `tools/policy/generate.ts`) refuses to run while another
+live session holds the claim, naming the holder's branch, owner and start time
+plus the commands to inspect or break it; a stale claim is reported and taken
+over for the calling worktree. `--check` and `--json` never consult the claim.
+The management commands are:
+
+```
+make policy-claim     # claim the area before editing model policy
+make policy-claims    # show the current claim and its staleness reading
+make policy-release   # release this worktree's claim when policy work is done
+```
+
+`node tools/policy/claim.ts break` force-removes a claim after coordinating
+with its owner; it prints the removed record. Generation without any claim
+still proceeds — the claim is an advisory contract between sessions, kept
+lightweight so agents and humans actually follow it — but no write-mode
+generation ever runs over another live session's claim. Mutations are
+serialized by a lock directory with an abandoned-lock bound, so concurrent
+claimants cannot silently overwrite each other.
 
 The generator tests prove reproduction, ownership and propagation. One
 hand-written list names every remaining policy dimension (Codex and

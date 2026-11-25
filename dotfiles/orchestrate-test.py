@@ -169,5 +169,11 @@ class OrchestrateTests(unittest.TestCase):
         self.assertIn("in every harness and skill", contract)
         self.assertIn("pi-subagent-bridge", contract)
 
+    def test_policy_claim_guidance(self):
+        self.assertIn("make policy-claim", self.text)
+        self.assertIn("make policy-release", self.text)
+        self.assertIn("make policy-claims", self.text)
+        self.assertIn("Before editing model policy", self.text)
+
 if __name__ == "__main__":
     unittest.main()

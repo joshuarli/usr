@@ -102,6 +102,8 @@ After changing Markdown, choose the `mdtool` check that matches the edit: use `l
 
 ## Conventions
 
+Model policy edits (`tools/pi-subagent-bridge/src/policy.ts`, `tier-policy.ts` and their projections) are serialized across every worktree of the checkout by a lightweight shared claim: run `make policy-claim` before editing, `make policy-claims` to inspect the holder, and `make policy-release` when done. Write-mode `make generate` refuses to run over another live session's claim; see `tools/policy/README.md` for the claim design. `make check-generated` is read-only and never blocked.
+
 Keep shell scripts compatible with macOS `/bin/sh` and dash. Python scripts use only the standard library. Add a failing numbered case to `tools/sync/test_links.py` before modifying link reconciliation; run the Python suite and the scratch-home integration tests.
 
 Use `TODO.md` for deferred work and create an RFC under `docs/rfc/` when a design needs a decision. The `todo` skill owns both formats.

@@ -86,6 +86,8 @@ The parent supplies the native lane worktree, scope registration, acceptance pro
 **Claude Code native subagents:** `expert` assignments go through the bridge's `expert` tier, never a native subagent; when that tier is blocked, the expert lane is blocked. When no approved bridge backend can run because it is unavailable or exhausted, scout/mechanic/worker use tier-matched native subagents with the same brief, worktree, scope, and independent verification: scout: `haiku`; mechanic: `sonnet`; worker: `sonnet`. A host or session whose environment sets `USR_DELEGATION=native`, such as a cloud environment without bridge providers, uses these native subagents directly and does not start the bridge. Preserve partial work before relaunch. Register native lanes with `scope-check --register` and record their final check with `scope-check --lane`. No hook gates native subagents. Return to the bridge when capacity recovers, unless `USR_DELEGATION=native` is set.
 <!-- policy:end native-fallback -->
 
+Before editing model policy (`tools/pi-subagent-bridge/src/policy.ts` or `tier-policy.ts`) or regenerating its projections, claim the shared checkout-wide policy area with `make policy-claim`, inspect holders with `make policy-claims`, and release it with `make policy-release` when policy work is done.
+
 The parent keeps task framing, orchestration, integration, and independent verification. Delegate only when context isolation, cost, parallelism, or independent scrutiny beats the overhead. No worker may broaden its scope.
 
 ## Pinned tiers

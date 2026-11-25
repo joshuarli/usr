@@ -3,6 +3,7 @@ import { dirname, join, resolve } from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
 import { POLICY, isBannedModel, type Route } from "../pi-subagent-bridge/src/policy.ts"
 import { isTier, PI_RUN_DEADLINE_MS, type Tier, type BridgeTier } from "../pi-subagent-bridge/src/tier-policy.ts"
+import { gateGenerate } from "./claim.ts"
 
 export type Policy = Omit<typeof POLICY, "rootRoutes" | "tiers"> & {
   readonly tiers: readonly BridgeTier[]
@@ -441,6 +442,17 @@ export function main(args: readonly string[], root = ROOT): number {
   if (args[0] === "--json") {
     process.stdout.write(JSON.stringify(POLICY, null, 2) + "\n")
     return 0
+  }
+  if (args[0] !== "--check") {
+    // Write mode is where policy edits become real: refuse to regenerate while
+    // another live session holds the checkout-wide policy claim. Check mode is
+    // read-only and never blocked.
+    const gate = gateGenerate(root)
+    if (!gate.proceed) {
+      process.stderr.write(gate.message + "\n")
+      return 1
+    }
+    for (const notice of gate.notices) process.stderr.write(`policy generation: ${notice}\n`)
   }
   const outputs = renderOutputs(root)
   const changed = outputs.filter(output => output.content !== output.previous)

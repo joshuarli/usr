@@ -4,7 +4,7 @@ SHELL := /bin/sh
 CF ?= cf
 NODE ?= node
 
-.PHONY: help deploy-setup.sh generate check-generated policy subagent-visualization skills-check skills-generate test lint bench
+.PHONY: help deploy-setup.sh generate check-generated policy policy-claim policy-release policy-claims subagent-visualization skills-check skills-generate test lint bench
 
 help: ## List targets
 	@awk 'BEGIN {FS = ":.*## "} /^[a-z][a-z0-9.-]*:.*## / {printf "%-16s %s\n", $$1, $$2}' $(MAKEFILE_LIST) | sort
@@ -21,6 +21,15 @@ check-generated: ## Check policy projections without changing files
 
 policy: ## Export approved model policy as JSON without provider probes
 	@$(NODE) tools/policy/generate.ts --json
+
+policy-claim: ## Claim the checkout-wide model-policy edit area for this worktree
+	@$(NODE) tools/policy/claim.ts claim
+
+policy-release: ## Release this worktree's model-policy claim
+	@$(NODE) tools/policy/claim.ts release
+
+policy-claims: ## Show the checkout-wide model-policy claim state
+	@$(NODE) tools/policy/claim.ts status
 
 subagent-visualization: ## Render docs/subagents.html from the typed policy
 	@$(NODE) tools/policy/subagent-visualization.ts
@@ -40,6 +49,7 @@ test: ## Run the repository and policy test suites
 	@sh -n dotfiles/base/.local/bin/pk
 	@python3 -I dotfiles/pk-test.py
 	@$(NODE) --test tools/policy/generate.test.ts
+	@$(NODE) --test tools/policy/claim.test.ts
 	@$(NODE) --test tools/policy/subagent-visualization.test.ts
 	@$(NODE) --experimental-strip-types --test tools/pi-subagent-bridge/test/devin-provider.test.ts
 	@python3 -I tools/pi/test_runtime_profiles.py
