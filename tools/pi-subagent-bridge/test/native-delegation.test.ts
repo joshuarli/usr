@@ -160,3 +160,46 @@ test("USR-39: timeout recovery cannot inherit an old worker's proof", async () =
     assert.equal(JSON.parse(readFileSync(current.resultPath, "utf8")).runId, "new")
   } finally { rmSync(dir, { recursive: true, force: true }) }
 })
+
+test("a run that ends early keeps the tail of its transcript notes; a success does not", async () => {
+  const { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } = await import("node:fs")
+  const { tmpdir } = await import("node:os")
+  const { join } = await import("node:path")
+  const { executeJob } = await import("../src/native-delegation.ts")
+  const dir = mkdtempSync(join(tmpdir(), "partial-"))
+  try {
+    const artifacts = join(dir, "subagent-artifacts")
+    mkdirSync(artifacts, { recursive: true })
+    const message = (content: unknown[]) => JSON.stringify({ recordType: "message", role: "assistant", message: { role: "assistant", content } })
+    writeFileSync(join(artifacts, "run-p_devin-expert_transcript.jsonl"), [
+      message([{ type: "thinking", thinking: "Finding 1: recvfrom keeps a bad buffer" }, { type: "toolCall", name: "bash" }]),
+      JSON.stringify({ recordType: "message", role: "toolResult", text: "tool output is not a finding" }),
+      message([{ type: "text", text: "Finding 2: addrlen is written on error" }]),
+      message([]),
+      "not json",
+    ].join("\n"))
+    const limited = "Reached free model rate limit. Please switch to a different model. Your limit will reset in 2 seconds (at 22:23 UTC)."
+    const failed = { ...job("swe-2.1", "max", false, "devin"), sessionDir: dir, resultPath: join(dir, "failed.json") }
+    await executeJob(failed, async () => ({ state: "failed", error: limited, text: "Subagent run failed before producing output.", sessionFile: null, runId: "run-p", usage: null }))
+    const kept = JSON.parse(readFileSync(failed.resultPath, "utf8")) as { state: string; text: string }
+    assert.equal(kept.state, "failed")
+    assert.match(kept.text, /^Subagent run failed before producing output\./)
+    assert.match(kept.text, /Partial work before the run ended \(2 assistant turns;/)
+    assert.ok(kept.text.indexOf("Finding 1") < kept.text.indexOf("Finding 2"))
+    assert.doesNotMatch(kept.text, /tool output is not a finding/)
+
+    const ok = { ...failed, resultPath: join(dir, "ok.json") }
+    await executeJob(ok, async () => ({ state: "succeeded", error: null, text: "ACCEPTANCE: met", sessionFile: null, runId: "run-p", usage: null }))
+    assert.equal((JSON.parse(readFileSync(ok.resultPath, "utf8")) as { text: string }).text, "ACCEPTANCE: met")
+  } finally { rmSync(dir, { recursive: true, force: true }) }
+})
+
+test("partial notes keep the newest notes within the limit", async () => {
+  const { partialFindings } = await import("../src/native-delegation.ts")
+  const line = (text: string) => JSON.stringify({ recordType: "message", role: "assistant", message: { content: [{ type: "text", text }] } })
+  const found = partialFindings([line("old ".repeat(10)), line("new ".repeat(10))].join("\n"), 50)
+  assert.equal(found?.turns, 2)
+  assert.match(found?.notes ?? "", /new/)
+  assert.doesNotMatch(found?.notes ?? "", /old/)
+  assert.equal(partialFindings(line("x".repeat(100)), 10)?.notes, "…" + "x".repeat(10))
+})

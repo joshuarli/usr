@@ -147,6 +147,55 @@ export function dispatchParams(job: Job): Record<string, unknown> {
 }
 
 export type Admission = { runId: string; asyncDir: string | null; sessionFile: string }
+const PARTIAL_NOTES_LIMIT = 6000
+
+/**
+ * The tail of a child transcript's assistant notes (text and thinking), so a
+ * run that ends before its proof record still hands back what it found.
+ */
+export function partialFindings(transcript: string, limit = PARTIAL_NOTES_LIMIT): { turns: number; notes: string } | null {
+  const notes: string[] = []
+  let turns = 0
+  for (const line of transcript.split("\n")) {
+    let entry: Record<string, unknown> | null = null
+    try { entry = record(JSON.parse(line)) } catch { continue }
+    if (!entry || entry.recordType !== "message" || entry.role !== "assistant") continue
+    const content = record(entry.message)?.content
+    if (!Array.isArray(content) || content.length === 0) continue
+    turns++
+    const parts = content.map(part => record(part)).flatMap(part =>
+      part?.type === "text" && typeof part.text === "string" ? [part.text]
+        : part?.type === "thinking" && typeof part.thinking === "string" ? [part.thinking] : [])
+      .map(part => part.trim()).filter(Boolean)
+    if (parts.length) notes.push(parts.join("\n"))
+  }
+  if (!notes.length) return null
+  const kept: string[] = []
+  let size = 0
+  for (const note of notes.reverse()) {
+    if (size + note.length > limit) {
+      if (!kept.length) kept.push("…" + note.slice(note.length - limit))
+      break
+    }
+    kept.push(note); size += note.length + 1
+  }
+  return { turns, notes: kept.reverse().join("\n\n") }
+}
+
+export function withPartialFindings(sessionDir: string, result: Result): Result {
+  if (result.state === "succeeded" || !result.runId || !/^[a-zA-Z0-9._-]+$/.test(result.runId)) return result
+  const root = join(sessionDir, "subagent-artifacts")
+  let name: string | undefined
+  try { name = readdirSync(root).find(f => f.startsWith(result.runId + "_") && f.endsWith("_transcript.jsonl")) } catch { return result }
+  if (!name) return result
+  let found: ReturnType<typeof partialFindings> = null
+  try { found = partialFindings(readFileSync(join(root, name), "utf8")) } catch { return result }
+  if (!found) return result
+  const digest = "Partial work before the run ended (" + found.turns + " assistant turns; transcript " + join(root, name) +
+    "). Last notes, oldest first:\n\n" + found.notes
+  return { ...result, text: (result.text ? result.text + "\n\n" : "") + digest }
+}
+
 export async function executeJob(job: Job, run: (
   job: Job, started: (admission: Admission) => void, dispatching: () => void,
 ) => Promise<Result>): Promise<boolean> {
@@ -154,17 +203,17 @@ export async function executeJob(job: Job, run: (
   let dispatched = false
   try {
     const result = await run(job, (value) => { admission = value }, () => { dispatched = true })
-    persist(job.resultPath, result)
+    persist(job.resultPath, withPartialFindings(job.sessionDir, result))
     return false
   } catch (error) {
     const owned = admission as Admission | null
     const recovered = owned && artifactResult(job.sessionDir, owned.asyncDir, owned.runId, owned.sessionFile)
-    persist(job.resultPath, recovered ?? {
+    persist(job.resultPath, withPartialFindings(job.sessionDir, recovered ?? {
       state: dispatched ? "unknown_or_interrupted" : "failed", text: null,
       sessionFile: owned?.sessionFile ?? job.priorSessionFile ?? null,
       runId: owned?.runId ?? null,
       error: error instanceof Error ? error.message : String(error), usage: null,
-    })
+    }))
     return true
   }
 }
