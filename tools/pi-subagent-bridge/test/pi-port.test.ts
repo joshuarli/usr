@@ -63,6 +63,12 @@ async function fixturePids(repo: Repo, id: string): Promise<{ parent: number; gr
 }
 
 function alive(pid: number): boolean {
+  try {
+    if (process.platform === "linux") {
+      const stat = readFileSync("/proc/" + pid + "/stat", "utf8")
+      if (stat.slice(stat.lastIndexOf(")") + 1).trim().split(/\s+/)[0] === "Z") return false
+    } else if (execFileSync("ps", ["-o", "stat=", "-p", String(pid)], { encoding: "utf8" }).trim().startsWith("Z")) return false
+  } catch { /* the process may already be gone; kill(0) below is authoritative */ }
   try { process.kill(pid, 0); return true }
   catch (error) { return (error as NodeJS.ErrnoException).code === "EPERM" }
 }
@@ -85,6 +91,10 @@ function killTree(parent: number, grandchild?: number): void {
 }
 
 function pgid(pid: number): number {
+  if (process.platform === "linux") {
+    const stat = readFileSync("/proc/" + pid + "/stat", "utf8")
+    return Number(stat.slice(stat.lastIndexOf(")") + 1).trim().split(/\s+/)[2])
+  }
   return Number(execFileSync("ps", ["-o", "pgid=", "-p", String(pid)], { encoding: "utf8" }).trim())
 }
 

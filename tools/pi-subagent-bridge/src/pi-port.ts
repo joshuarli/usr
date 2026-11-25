@@ -57,8 +57,28 @@ const TERM_GRACE_MS = 500
 const KILL_VERIFY_MS = 500
 const POLL_MS = 25
 
+function linuxProcesses(): PiProcessRow[] | null {
+  try {
+    const rows: PiProcessRow[] = []
+    for (const name of readdirSync("/proc")) {
+      if (!/^\d+$/.test(name)) continue
+      try {
+        const stat = readFileSync("/proc/" + name + "/stat", "utf8")
+        const end = stat.lastIndexOf(")")
+        if (end < 0) continue
+        const fields = stat.slice(end + 1).trim().split(/\s+/)
+        const ppid = Number(fields[1]), pgid = Number(fields[2])
+        if (!Number.isSafeInteger(ppid) || !Number.isSafeInteger(pgid) || !fields[0]) continue
+        rows.push({ pid: Number(name), ppid, pgid, stat: fields[0] })
+      } catch { /* the process exited during enumeration */ }
+    }
+    return rows
+  } catch { return null }
+}
+
 function posixProcesses(): PiProcessRow[] | null {
   if (process.platform === "win32") return null
+  if (process.platform === "linux") return linuxProcesses()
   try {
     const output = execFileSync("ps", ["-axo", "pid=,ppid=,pgid=,stat="], {
       encoding: "utf8", timeout: 1000, maxBuffer: 8 * 1024 * 1024,
