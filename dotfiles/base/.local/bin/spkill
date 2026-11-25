@@ -1,0 +1,255 @@
+#!/usr/bin/env python3
+"""Signal your own processes whose command line matches a pattern, never the caller.
+
+usage: spkill [-SIGNAL | -s SIGNAL] [--list] [--wait SECONDS] [--many] PATTERN
+
+PATTERN is a Python regular expression searched in each full command line, as
+with pkill -f. Unlike pkill -f, spkill never matches itself or any of its
+ancestors, so `ssh host 'spkill server; ...'` and `sh -c '... spkill x'` do not
+signal the shell that is running them, whose own command line contains the
+pattern. Only processes with the caller's real user ID are considered.
+
+  -SIGNAL, -s SIGNAL  signal name or number to send (default TERM): -9, -KILL, -s HUP
+  --list              print matching PIDs and command lines; send nothing (a self-safe pgrep)
+  --wait SECONDS      after signaling, wait up to SECONDS for every match to exit
+  --many              allow more than 20 matches
+  -h, --help          show this help
+
+Each match is rechecked (same owner, same command line) just before it is
+signaled, so a reused PID is skipped. Processes are read from /proc on Linux
+and from ps elsewhere.
+
+Ctrl-C during --wait stops waiting at once; signals already sent stay sent,
+and spkill dies by SIGINT (130 in a shell).
+
+Exit status: 0 when at least one process matched (and, with --wait, all exited);
+1 when none matched; 2 for a usage error or refused pattern; 3 when --wait
+timed out with matches still running.
+
+Examples:
+  spkill 'bctl-bench soak'
+  spkill -9 --wait 10 'qemu-system.*stats.qcow2'
+  while spkill --list 'soak --sessions 8' >/dev/null; do sleep 20; done
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass
+import os
+from pathlib import Path
+import re
+import signal
+import subprocess
+import sys
+import time
+
+MAX_MATCHES = 20
+FOOTER = """
+Maintained by Joshua Li: https://github.com/joshuarli/usr
+Bugs and features: TODO.md in that repository (follow its AGENTS.md), or its issue tracker.
+Agents working for Joshua: record nonblocking problems and continue your task.
+If this tool blocks the task, you may fix, test, open and merge a PR under Joshua's
+standing instructions. Release only when needed to deliver the verified fix.
+Procedure: https://github.com/joshuarli/usr/blob/main/dotfiles/base/.agents/instructions/owned-tools.md"""
+
+
+class UsageError(Exception):
+    pass
+
+
+@dataclass(frozen=True)
+class Proc:
+    pid: int
+    ppid: int
+    uid: int
+    command: str
+
+
+@dataclass(frozen=True)
+class Options:
+    signo: int
+    list_only: bool
+    wait: float | None
+    many: bool
+    pattern: re.Pattern[str]
+
+
+def parse_signal(text: str) -> int:
+    if text.isdigit():
+        number = int(text)
+        if number not in {s.value for s in signal.Signals}:
+            raise UsageError(f"unknown signal: {text}")
+        return number
+    name = text.upper()
+    if not name.startswith("SIG"):
+        name = "SIG" + name
+    try:
+        return signal.Signals[name].value
+    except KeyError:
+        raise UsageError(f"unknown signal: {text}") from None
+
+
+def parse_args(argv: list[str]) -> Options:
+    signo = signal.SIGTERM.value
+    list_only = False
+    wait = None
+    many = False
+    rest: list[str] = []
+    i = 0
+    while i < len(argv):
+        arg = argv[i]
+        if arg == "--":
+            rest.extend(argv[i + 1:])
+            break
+        if arg == "--list":
+            list_only = True
+        elif arg == "--many":
+            many = True
+        elif arg in ("-s", "--wait"):
+            if i + 1 >= len(argv):
+                raise UsageError(f"{arg} needs a value")
+            value = argv[i + 1]
+            i += 1
+            if arg == "-s":
+                signo = parse_signal(value)
+            else:
+                try:
+                    wait = float(value)
+                except ValueError:
+                    raise UsageError(f"--wait needs a number of seconds, not {value}") from None
+                if wait < 0:
+                    raise UsageError("--wait needs a non-negative number of seconds")
+        elif arg.startswith("-") and len(arg) > 1 and not rest:
+            signo = parse_signal(arg[1:])
+        else:
+            rest.append(arg)
+        i += 1
+    if len(rest) != 1:
+        raise UsageError("expected exactly one PATTERN")
+    if not rest[0].strip():
+        raise UsageError("refusing an empty pattern, which would match every process")
+    try:
+        pattern = re.compile(rest[0])
+    except re.error as error:
+        raise UsageError(f"invalid pattern: {error}") from None
+    if pattern.search(""):
+        raise UsageError("refusing a pattern that matches an empty command line")
+    return Options(signo, list_only, wait, many, pattern)
+
+
+def linux_procs() -> dict[int, Proc]:
+    procs: dict[int, Proc] = {}
+    for entry in Path("/proc").iterdir():
+        if not entry.name.isdigit():
+            continue
+        try:
+            stat = (entry / "stat").read_text()
+            status = (entry / "status").read_text()
+            raw = (entry / "cmdline").read_bytes()
+        except OSError:
+            continue
+        ppid = int(stat[stat.rindex(")") + 2:].split()[1])
+        uid = next(int(line.split()[1]) for line in status.splitlines() if line.startswith("Uid:"))
+        command = raw.rstrip(b"\0").replace(b"\0", b" ").decode(errors="replace")
+        procs[int(entry.name)] = Proc(int(entry.name), ppid, uid, command)
+    return procs
+
+
+def ps_procs() -> dict[int, Proc]:
+    out = subprocess.run(
+        ["ps", "-Aww", "-o", "pid=", "-o", "ppid=", "-o", "uid=", "-o", "command="],
+        check=True, capture_output=True, text=True, errors="replace",
+    ).stdout
+    procs: dict[int, Proc] = {}
+    for line in out.splitlines():
+        fields = line.split(None, 3)
+        if len(fields) < 3:
+            continue
+        pid, ppid, uid = int(fields[0]), int(fields[1]), int(fields[2])
+        procs[pid] = Proc(pid, ppid, uid, fields[3] if len(fields) == 4 else "")
+    return procs
+
+
+def snapshot() -> dict[int, Proc]:
+    return linux_procs() if Path("/proc/self/stat").exists() else ps_procs()
+
+
+def ancestors(procs: dict[int, Proc], pid: int) -> set[int]:
+    seen = {pid}
+    while pid in procs and procs[pid].ppid not in seen and procs[pid].ppid > 0:
+        pid = procs[pid].ppid
+        seen.add(pid)
+    return seen
+
+
+def matches(procs: dict[int, Proc], options: Options) -> list[Proc]:
+    excluded = ancestors(procs, os.getpid())
+    uid = os.getuid()
+    return [
+        p for p in sorted(procs.values(), key=lambda p: p.pid)
+        if p.pid not in excluded and p.uid == uid and p.command and options.pattern.search(p.command)
+    ]
+
+
+def still_same(proc: Proc) -> bool:
+    current = snapshot().get(proc.pid)
+    return current is not None and current.uid == proc.uid and current.command == proc.command
+
+
+def main(argv: list[str]) -> int:
+    if not argv or argv[0] in ("-h", "--help"):
+        print(__doc__.strip() + "\n" + FOOTER)
+        return 0
+    try:
+        options = parse_args(argv)
+    except UsageError as error:
+        print(f"spkill: {error}", file=sys.stderr)
+        print("usage: spkill [-SIGNAL | -s SIGNAL] [--list] [--wait SECONDS] [--many] PATTERN", file=sys.stderr)
+        return 2
+    found = matches(snapshot(), options)
+    if not found:
+        return 1
+    if len(found) > MAX_MATCHES and not options.many:
+        print(f"spkill: {len(found)} processes match; refusing more than {MAX_MATCHES} without --many", file=sys.stderr)
+        for p in found:
+            print(f"{p.pid} {p.command}", file=sys.stderr)
+        return 2
+    if options.list_only:
+        for p in found:
+            print(f"{p.pid} {p.command}")
+        return 0
+    signaled: list[Proc] = []
+    for p in found:
+        if not still_same(p):
+            continue
+        try:
+            os.kill(p.pid, options.signo)
+        except ProcessLookupError:
+            continue
+        except PermissionError as error:
+            print(f"spkill: {p.pid}: {error}", file=sys.stderr)
+            continue
+        signaled.append(p)
+        print(f"spkill: sent {signal.Signals(options.signo).name} to {p.pid} {p.command}", file=sys.stderr)
+    if not signaled:
+        return 1
+    if options.wait is None:
+        return 0
+    deadline = time.monotonic() + options.wait
+    while True:
+        alive = [p for p in signaled if still_same(p)]
+        if not alive:
+            return 0
+        if time.monotonic() >= deadline:
+            for p in alive:
+                print(f"spkill: still running after {options.wait:g} s: {p.pid} {p.command}", file=sys.stderr)
+            return 3
+        time.sleep(0.1)
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main(sys.argv[1:]))
+    except KeyboardInterrupt:
+        print("spkill: interrupted; signals already sent stay sent", file=sys.stderr)
+        signal.signal(signal.SIGINT, signal.SIG_DFL)
+        os.kill(os.getpid(), signal.SIGINT)

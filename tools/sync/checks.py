@@ -72,6 +72,7 @@ KACHE = Area("`kache` setup")
 PINACT = Area("`pinact` and workflow pins")
 YTDLP = Area("`yt-dlp` shim")
 PK = Area("`pk` process picker")
+SPKILL = Area("`spkill` safe pkill")
 DSH = Area("DeepSeek launcher")
 CLAUDE_API = Area("Claude API launcher")
 HARNESS_SHIMS = Area("Lean harness launchers and shell PATH")
@@ -197,6 +198,7 @@ REGISTRY: tuple[Check, ...] = (
     Check("yt-dlp-shellcheck", (YTDLP,), ("shellcheck", "-s", "sh", "dotfiles/base/.local/bin/yt-dlp", "dotfiles/yt-dlp-shim-test.sh"), ("dotfiles/base/.local/bin/yt-dlp", "dotfiles/yt-dlp-shim-test.sh"), needs=("shellcheck",)),
     Check("cleanup-sessions", (CLEANUP_SESSIONS,), py("dotfiles/cleanup-sessions-test.py"), ("dotfiles/base/.local/bin/cleanup-sessions", "dotfiles/cleanup-sessions-test.py"), tmpdir=True),
     Check("pk", (PK,), py("dotfiles/pk-test.py"), ("dotfiles/base/.local/bin/pk", "dotfiles/pk-test.py")),
+    Check("spkill", (SPKILL,), py("dotfiles/spkill-test.py"), ("dotfiles/base/.local/bin/spkill", "dotfiles/spkill-test.py")),
     Check("pk-sh-syntax", (PK,), ("sh", "-n", "dotfiles/base/.local/bin/pk"), ("dotfiles/base/.local/bin/pk",)),
     Check("pk-dash-syntax", (PK,), ("dash", "-n", "dotfiles/base/.local/bin/pk"), ("dotfiles/base/.local/bin/pk",), needs=("dash",)),
     Check("pk-shellcheck", (PK,), ("shellcheck", "-s", "sh", "dotfiles/base/.local/bin/pk"), ("dotfiles/base/.local/bin/pk",), needs=("shellcheck",)),

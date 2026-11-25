@@ -38,6 +38,7 @@ Local tests cover CLI and filesystem behavior with fixtures. Network services, p
 | `yt-dlp` shim | `sh dotfiles/yt-dlp-shim-test.sh` and `shellcheck -s sh dotfiles/base/.local/bin/yt-dlp dotfiles/yt-dlp-shim-test.sh` |
 | `cleanup-sessions` | `TMPDIR="$PWD/.work/tmp" python3 -I dotfiles/cleanup-sessions-test.py` |
 | `pk` process picker | `python3 -I dotfiles/pk-test.py`, `sh -n dotfiles/base/.local/bin/pk`, `dash -n dotfiles/base/.local/bin/pk`, and `shellcheck -s sh dotfiles/base/.local/bin/pk` |
+| `spkill` safe pkill | `python3 -I dotfiles/spkill-test.py` |
 | DeepSeek launcher | `sh dotfiles/dsh-launcher-test.sh` and `shellcheck -s sh dotfiles/base/.local/bin/dsh dotfiles/dsh-launcher-test.sh` |
 | Claude API launcher | `sh dotfiles/claude-api-test.sh` and `shellcheck -s sh dotfiles/base/.local/bin/claude-api dotfiles/claude-api-test.sh` |
 | Lean harness launchers and shell PATH | `python3 -I dotfiles/harness-lean-test.py` and `shellcheck -s sh FILE` for each changed match |
