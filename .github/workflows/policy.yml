@@ -23,9 +23,10 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      - uses: laputa-systems/buildlib/setup@4ed2e0a1e0a5d23911ffccdd97349d30a7885f01 # v0.3.2
         with:
-          node-version: '26.13.1'
+          tools: node
+          lock: tools/sync/tools.lock.json
       - name: Check deterministic projections
         run: |
           make check-generated

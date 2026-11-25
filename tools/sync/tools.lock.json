@@ -134,6 +134,29 @@
       "tag": "mold-musl-3.0.0-5d3f385",
       "version": "3.0.0"
     },
+    "node": {
+      "assets": {
+        "aarch64-apple-darwin": {
+          "name": "node-26.12.1-aarch64-apple-darwin.tar.xz",
+          "sha256": "47c0e900a765eb8189839ea82ac96709f74a1dda8b951de8bea754cbcd8411e9",
+          "size": 22159684
+        },
+        "aarch64-unknown-linux-musl": {
+          "name": "node-26.12.1-aarch64-unknown-linux-musl.tar.xz",
+          "sha256": "9e122d75163bad7a7bdad829b38a2c7ca808d3f6c0ba39e76887d05b710a6509",
+          "size": 26906220
+        },
+        "x86_64-unknown-linux-musl": {
+          "name": "node-26.12.1-x86_64-unknown-linux-musl.tar.xz",
+          "sha256": "9ac4889c758acffc064ba452aef9f10e6fb7e59546dbfcc949abc5d8a9948e62",
+          "size": 28971196
+        }
+      },
+      "product": "node",
+      "repository": "laputa-systems/node-build",
+      "tag": "release-167fa66215b5b93ad8ac6634cc5b83b382ad0f07",
+      "version": "26.12.1"
+    },
     "rg": {
       "assets": {
         "aarch64-apple-darwin": {
