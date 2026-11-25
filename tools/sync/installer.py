@@ -44,6 +44,13 @@ PYTHON_VERSION = "3.15"
 # Matches stuff's fleet/policy/rust-tools.toml.
 CARGO_MUTANTS_VERSION = "27.1.0"
 CARGO_LLVM_COV_VERSION = "0.9.2"
+CARGO_LLVM_COV_REPO = "taiki-e/cargo-llvm-cov"
+CARGO_LLVM_COV_RELEASES = {
+    ("darwin", "aarch64"): ("aarch64-apple-darwin", "5cd0bf7da3ccedd8cfbd7bf4eaad9083d3f1d47e6633e0c5fab2aeae3d1b2d2e"),
+    ("darwin", "x86_64"): ("x86_64-apple-darwin", "07dbf196c2ad47ca6b30af993c19a6f487989c4986dc963d347d256bf814acd5"),
+    ("linux", "aarch64"): ("aarch64-unknown-linux-musl", "dab1bfd1f25f7fcd3d6fc6abf9d71b40217a7a103e1da88c1a23111960aa4a40"),
+    ("linux", "x86_64"): ("x86_64-unknown-linux-musl", "8d863ab2df1fb53d4f41052b3fa4627ac003d00c46a6388ce037d17472c504ef"),
+}
 _UV_INSTALL_LOCK = threading.Lock()
 NODEJS_VERSION = "26.13.1"
 MIRROR_BASE = "https://mirror.17166969.xyz/current"
@@ -950,6 +957,35 @@ class Installer:
             root = Path(directory)
             self.run([cargo, "install", "--locked", "--root", str(root), f"{name}@{version}"], check=True)
             self.install_binary(name, root / "bin" / name, version)
+
+    def install_cargo_llvm_cov(self) -> None:
+        name = "cargo-llvm-cov"
+        version = CARGO_LLVM_COV_VERSION
+        release = CARGO_LLVM_COV_RELEASES.get((self.os_name, self.arch))
+        if not release:
+            self.skip(name, f"no release binary for {self.os_name}/{self.arch}")
+        target, expected = release
+        asset = f"{name}-{target}.tar.gz"
+        url = f"https://github.com/{CARGO_LLVM_COV_REPO}/releases/download/v{version}/{asset}"
+        if self.is_current(name, version):
+            self.current(f"{name} is current ({version})")
+            return
+        self.fetch_msg(f"Downloading {asset} ...")
+        with tempfile.NamedTemporaryFile(delete=False) as stream:
+            archive_path = Path(stream.name)
+        try:
+            if not self.download(url, archive_path):
+                self.skip(name, f"{asset} download failed")
+            if self.sha256_file(archive_path) != expected:
+                self.skip(name, f"{asset} checksum mismatch")
+            member = self.tar_member(archive_path, name)
+            if member is None:
+                self.skip(name, f"{asset} does not contain {name}")
+        finally:
+            archive_path.unlink(missing_ok=True)
+        staged = self.stage_file(self.dest, f".{name}.")
+        staged.write_bytes(member)
+        self.install_binary(name, staged, version)
 
     def install_uv(self) -> None:
         with _UV_INSTALL_LOCK:
@@ -3302,7 +3338,7 @@ class Installer:
             "jaq": self.install_jaq, "mold": self.install_mold, "nodejs": self.install_nodejs,
             "python3": self.install_python3, "uv": self.install_uv, "node-build": self.install_nodebuild,
             "cargo-mutants": lambda: self.install_cargo_tool("cargo-mutants", CARGO_MUTANTS_VERSION),
-            "cargo-llvm-cov": lambda: self.install_cargo_tool("cargo-llvm-cov", CARGO_LLVM_COV_VERSION),
+            "cargo-llvm-cov": self.install_cargo_llvm_cov,
             "git": self.install_git, "ffmpeg": self.install_ffmpeg, "ssh": self.install_ssh,
             "oxish": self.install_oxish, "zzz": self.install_zzz, "gluon": self.install_gluon, "bctl": self.install_bctl,
             "img": lambda: self.install_sha_prerelease("img", "joshuarli/img", "img"),
