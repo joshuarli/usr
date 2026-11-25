@@ -1,0 +1,73 @@
+#!/bin/sh
+set -eu
+
+die() {
+    printf 'error: %s\n' "$*" >&2
+    exit 1
+}
+
+usage() {
+    printf 'Usage: %s [-h|--help] [--last DURATION]\n' "$0"
+    printf 'Diagnose a runaway fseventsd without root privileges.\n'
+    printf 'Default window: 5m. Examples: --last 1h, --last 24h\n'
+}
+
+last=5m
+case "${1:-}" in
+    -h|--help)
+        usage
+        exit 0
+        ;;
+    --last)
+        [ "$#" -eq 2 ] || die '--last requires a duration'
+        last=$2
+        shift 2
+        ;;
+    '') ;;
+    *) die "unknown argument: $1" ;;
+esac
+
+[ "$#" -eq 0 ] || die "unexpected argument: $1"
+[ "$(uname -s)" = Darwin ] || die 'macOS only'
+
+pid=$(pgrep -x fseventsd || true)
+[ -n "$pid" ] || die 'fseventsd is not running'
+
+printf 'fseventsd pid: %s\n' "$pid"
+ps -p "$pid" -o pid,etime,%cpu,%mem,rss,state,command
+
+printf '\nlaunchd state:\n'
+launchctl print system/com.apple.fseventsd 2>/dev/null |
+    grep -E '^[[:space:]]*(state|runs|pid|last exit code) =' ||
+    printf 'unavailable\n'
+
+count_log() {
+    log show --predicate "$1" --last "$last" --style compact 2>/dev/null |
+        grep -c "$2" || true
+}
+
+scan_old=$(count_log 'process == "fseventsd" AND eventMessage CONTAINS "scan_old"' scan_old)
+leaked=$(count_log 'process == "fseventsd" AND eventMessage CONTAINS "did not find client"' 'did not find client')
+clients=$(count_log 'process == "fseventsd" AND eventMessage CONTAINS "fsevent_add_client"' fsevent_add_client)
+
+printf '\nUnified log, last %s:\n' "$last"
+printf '  scan_old mount retries: %s\n' "$scan_old"
+printf '  leaked client removals: %s\n' "$leaked"
+printf '  fsevent_add_client calls: %s\n' "$clients"
+
+if [ "$clients" -gt 0 ]; then
+    printf '\nTop FSEvent client callers:\n'
+    log show --predicate 'process == "fseventsd" AND eventMessage CONTAINS "fsevent_add_client"' --last "$last" --style compact 2>/dev/null |
+        grep -oE 'pid [0-9]+' | sort | uniq -c | sort -rn | head -10 || true
+fi
+
+printf '\nNon-APFS mounts (fseventsd cannot track these):\n'
+mount | grep -vE '^/dev/disk' || printf '  none\n'
+
+printf '\nAssessment:\n'
+if [ "$scan_old" -gt 0 ] || [ "$leaked" -gt 0 ]; then
+    printf '  Active loop or client leak. Reclaim with `sudo killall fseventsd`, then\n'
+    printf '  investigate the non-APFS mounts above and the client callers.\n'
+else
+    printf '  No scan_old retries or client leaks in this window.\n'
+fi
