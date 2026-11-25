@@ -31,3 +31,10 @@ skip = ["gen/a_pb2.py", "README.md"]
 ```
 
 The body needs a `## Code` section: the rules the gate applies to touched code. Put repository-wide work, such as adopting a tool or migrating every file, under `## Adoption`; only an explicit `/standardize` applies it. Run `standards check`, and `standards explain FILE` to see why a trigger matched or missed. Prefer a lint or test that rejects a violation mechanically; a standard covers what a tool cannot check.
+
+### Out of scope
+
+The owner has ruled these out. Do not write standards for them, and do not fold their rules into another standard:
+
+- C and C headers.
+- Python packaging and project layout: `pyproject.toml` project metadata, build backends, and source layouts. The `python` standard's ty and Ruff configuration stays in scope.
