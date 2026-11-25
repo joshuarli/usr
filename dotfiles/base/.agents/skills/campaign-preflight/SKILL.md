@@ -42,7 +42,7 @@ For each area the campaign touches, load the skill and ask what decisions it wou
 | Failures | `root-cause` | The executor's rule for a failing item: cause before retry |
 | Optimization | `make-it-fast`, `benchmark-checklist` | What is measured, how, against what baseline, and the targets |
 | Cleanup | `dead-code-archaeology` | What is deleted at the end and how liveness is proven |
-| Repeat failures | [`audit-skills` failures](../audit-skills/references/failures.md) | Guards for mistakes the campaign is likely to repeat |
+| Repeat failures | [`audit-jstack` failures](../audit-jstack/references/failures.md) | Guards for mistakes the campaign is likely to repeat |
 
 **The test:** an agent with only the roadmap and the repo can land the first slice without asking anything, and can tell from **Status** alone what is accepted, what is red, and what is next.
 

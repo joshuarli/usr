@@ -101,7 +101,9 @@ BCTL_REPO = "joshuarli/bctl"
 FX_SETTINGS = Path(__file__).with_name("fx-settings.json")
 FFMPEG_COMMANDS = ["ffmpeg", "ffprobe"]
 OPENCODE_SHIM = '#!/bin/sh\nexec "${HOME}/.opencode/bin/opencode" "$@"'
-GIT_COMMANDS = ["git", "git-shell", "git-upload-archive", "git-upload-pack", "git-receive-pack", "git-submodule", "git-submodule--helper", "git-sh-setup", "git-sh-i18n", "git-sh-i18n--envsubst"]
+GIT_COMMANDS = ["git", "git-shell", "git-upload-archive", "git-upload-pack", "git-receive-pack"]
+FLAT_GIT_HELPERS = ["git-submodule", "git-submodule--helper", "git-sh-setup", "git-sh-i18n", "git-sh-i18n--envsubst"]
+FLAT_GIT_EXCLUDE_TEMPLATE = "# git ls-files --others --exclude-from=.git/info/exclude\n# Lines that start with '#' are comments."
 BUILDLIB_WHEEL_URL = "https://pypi.17166969.xyz/current/wheels/laputa_buildlib-0.3.2-py3-none-any.whl"
 BUILDLIB_WHEEL_SHA256 = "fb42251cc9ba6c9dd74e1d1050e66bde2571de8307e27be40cb66f026ef92024"
 BUILDLIB_WHEEL_SIZE = 33576
@@ -760,11 +762,12 @@ class Installer:
             return
         bindir, record = got
         payload = self.buildlib_payload(bindir)
-        if not all((payload / command).exists() or (payload / command).is_symlink()
+        programs = bindir.relative_to(payload)
+        if not all((bindir / command).exists() or (bindir / command).is_symlink()
                    for command in commands):
             self.skip(tool, f"the buildlib payload is missing the {tool} bundle")
         current = home / "current"
-        wants = {command: str(current / command) for command in commands}
+        wants = {command: str(current / programs / command) for command in commands}
         for command in commands:
             launcher = self.dest / command
             if launcher.exists() or launcher.is_symlink():
@@ -2439,25 +2442,28 @@ class Installer:
         self.changed = True
         self.ok(install_message)
 
-    def ensure_git_templates(self) -> bool:
+    def retire_flat_git(self) -> None:
+        current = self.git_home / "current"
+        for command in FLAT_GIT_HELPERS:
+            launcher = self.dest / command
+            if launcher.is_symlink() and os.readlink(launcher) == str(current / command):
+                launcher.unlink()
         templates = self.dest.parent / "share/git-core/templates"
         exclude = templates / "info/exclude"
-        template = "# git ls-files --others --exclude-from=.git/info/exclude\n# Lines that start with '#' are comments."
-        if exclude.is_symlink() or (exclude.exists() and not exclude.is_file()):
-            self.skip("git", f"{exclude} is not a regular file")
-        if not exclude.exists():
-            self.own_missing_dirs(templates / "info")
-            (templates / "info").mkdir(parents=True, exist_ok=True)
-            exclude.write_text(template + "\n")
-        if exclude.read_text().rstrip("\n") == template:
-            self.own_file(exclude)
-        return True
+        if exclude.is_file() and not exclude.is_symlink() \
+                and exclude.read_text().rstrip("\n") == FLAT_GIT_EXCLUDE_TEMPLATE:
+            exclude.unlink()
+            for directory in (templates / "info", templates, templates.parent):
+                try:
+                    directory.rmdir()
+                except OSError:
+                    break
 
     def install_git(self) -> None:
         self.install_buildlib_bundle(
             "git", self.git_home, GIT_COMMANDS, "git",
-            ok_message="git is current", install_message=f"Installed {self.dest}/git",
-            on_current=self.ensure_git_templates)
+            ok_message="git is current", install_message=f"Installed {self.dest}/git")
+        self.retire_flat_git()
 
     def install_ssh(self) -> None:
         triples = {("darwin", "aarch64"): "aarch64-apple-darwin",
@@ -3540,9 +3546,9 @@ class Installer:
                 for command in FFMPEG_COMMANDS:
                     if (self.dest / command).is_symlink() and os.readlink(self.dest / command) == str(self.ffmpeg_home / "current/bin" / command):
                         self.own_file(self.dest / command)
-        for state_name, tool, home, commands in (
-                ("git", "git", self.git_home, GIT_COMMANDS),
-                ("gluon", "gluon", self.gluon_home, GLUON_COMMANDS)):
+        for state_name, tool, home, commands, programs in (
+                ("git", "git", self.git_home, GIT_COMMANDS, "bin"),
+                ("gluon", "gluon", self.gluon_home, GLUON_COMMANDS, "")):
             record = self._state_text(state_name)
             payload = self.buildlib_cache / tool / record if record else None
             current = home / "current"
@@ -3554,7 +3560,7 @@ class Installer:
             self.own_file(self.state / state_name)
             for command in commands:
                 launcher = self.dest / command
-                if launcher.is_symlink() and os.readlink(launcher) == str(current / command):
+                if launcher.is_symlink() and os.readlink(launcher) == str(current / programs / command):
                     self.own_file(launcher)
         for state_name, tool in (("fd", "fd"), ("rg", "rg"), ("jaq", "jaq"),
                                  ("mold", "mold"), ("python3", "cpython")):

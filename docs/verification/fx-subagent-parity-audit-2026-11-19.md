@@ -62,7 +62,7 @@ Relevant sources: [usr runtime pin](https://github.com/joshuarli/usr/blob/5657b6
 | OpenCode Go DeepSeek | Existing approved PI worker route | Auth/protocol reached real endpoint; recorded quota blocked inference | First live PI-dependent replacement candidate |
 | Contributor Spark scout/mechanic | Existing PI Go routes | Not qualified by DeepSeek-only pilot | Separate route/effort/tool qualification |
 | Muse subscription | Dedicated SDK/serve adapter | No equivalent configured FX transport | Port/replace transport or retain PI for this route |
-| Devin SWE-2 Flash medium | Dedicated CLI-auth/catalog/stream adapter | No equivalent configured FX transport | Preserve catalog/variant/replay semantics in a replacement |
+| Devin SWE-2.1 (replaced SWE-2 Flash medium) | Dedicated CLI-auth/catalog/stream adapter | No equivalent configured FX transport | Preserve catalog/variant/replay semantics in a replacement |
 | Long context and compaction | PI child runtime supports it | FX engine supports it; bridge workload parity unqualified | Run context-pressure and recovery scenarios |
 | macOS ARM64 | Selected PI distribution | Existing FX experiment qualified locally | Extend evidence through new adapter |
 | Linux musl x86-64 / ARM64 | Selected PI distributions | Experiment installer rejects Linux | Pin and qualify native FX artifacts per architecture |
@@ -214,7 +214,7 @@ Use that adapter's host tests as the oracle for a transport extraction or native
 
 ### Devin
 
-The existing integration is a custom transport with CLI authentication/catalog discovery, effort-to-variant mapping, and replay information. The current worker pin is SWE-2 Flash medium. Preserve that exact mapping and tool/reasoning state, rather than assuming an OpenAI-compatible endpoint is interchangeable. [Bundled Devin adapter](https://github.com/joshuarli/pi-build/blob/235d3be03fc03dec6f217a3d9a2ff71a6f200c98/sources/pi-devin-local/README.md).
+The existing integration is a custom transport with CLI authentication/catalog discovery, effort-to-variant mapping, and replay information. At audit time the worker pin was SWE-2 Flash medium; it moved to SWE-2.1 on 2026-11-25 with `low`/`medium`/`high` lanes for scout/mechanic/worker. Preserve the exact mapping and tool/reasoning state, rather than assuming an OpenAI-compatible endpoint is interchangeable. [Bundled Devin adapter](https://github.com/joshuarli/pi-build/blob/235d3be03fc03dec6f217a3d9a2ff71a6f200c98/sources/pi-devin-local/README.md).
 
 ### Current routing boundaries
 

@@ -251,7 +251,140 @@ class HookTests(unittest.TestCase):
                 self.assertEqual("", self.context(self.hook(event)))
 
 
+class GateTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = scratch()
+        self.standards = Path(self.tmp.name) / "standards"
+        self.standards.mkdir()
+        for name in FIXTURE_STANDARDS:
+            shutil.copy(STANDARDS / f"{name}.md", self.standards)
+        self.repo = Repo(Path(self.tmp.name) / "repo")
+        self.repo.write("README.md", "hello\n")
+        self.repo.write("app.py", "def f():\n    return 1\n")
+        self.repo.commit()
+        self.base = self.head()
+
+    def tearDown(self):
+        subprocess.run(("git", "worktree", "prune"), cwd=self.repo.root, capture_output=True)
+        self.tmp.cleanup()
+
+    def head(self) -> str:
+        return subprocess.run(("git", "rev-parse", "HEAD"), cwd=self.repo.root, capture_output=True, text=True, check=True).stdout.strip()
+
+    def gate(self, *args: str) -> subprocess.CompletedProcess[str]:
+        return run("gate", *args, cwd=self.repo.root, directory=self.standards)
+
+    def gate_json(self, base: str) -> dict[str, Any]:
+        result = self.gate("--base", base, "--json")
+        self.assertEqual(0, result.returncode, result.stderr)
+        return json.loads(result.stdout)
+
+    def worktrees(self) -> list[str]:
+        out = subprocess.run(("git", "worktree", "list", "--porcelain"), cwd=self.repo.root, capture_output=True, text=True, check=True).stdout
+        return [line.split(" ", 1)[1] for line in out.splitlines() if line.startswith("worktree ")][1:]
+
+    def test_committed_violation_gets_a_brief_with_its_diff_and_standard(self):
+        self.repo.write("app.py", "import signal\nsignal.signal(signal.SIGINT, h)\n")
+        self.repo.commit()
+        out = self.gate_json(self.base)
+        self.assertEqual(["cli-interrupt"], out["standards"])
+        worktree = Path(out["worktree"])
+        self.assertEqual(self.repo.root / ".work/wt" / f"standards-gate-{self.head()[:12]}", worktree)
+        self.assertEqual([str(worktree.resolve())], [str(Path(w).resolve()) for w in self.worktrees()])
+        self.assertIn("+signal.signal(signal.SIGINT, h)", Path(out["diff"]).read_text())
+        brief = Path(out["brief"]).read_text()
+        self.assertIn("`.work/tmp/standards-gate/cli-interrupt.md`", brief)
+        self.assertIn("must-fix", brief)
+        self.assertEqual((self.standards / "cli-interrupt.md").read_text(), (Path(out["brief"]).parent / "cli-interrupt.md").read_text())
+        self.assertEqual(f"worktree-retire --into {self.head()} --discard-ignored {worktree}", out["retire"])
+        self.assertEqual("", subprocess.run(("git", "status", "--porcelain"), cwd=worktree, capture_output=True, text=True).stdout)
+        self.assertEqual("", subprocess.run(("git", "status", "--porcelain"), cwd=self.repo.root, capture_output=True, text=True).stdout)
+
+    def test_text_output_is_the_brief_path_and_retire_command(self):
+        self.repo.write("build.sh", "#!/bin/sh\n")
+        self.repo.commit()
+        result = self.gate("--base", self.base)
+        self.assertEqual(0, result.returncode, result.stderr)
+        worktree = self.repo.root / ".work/wt" / f"standards-gate-{self.head()[:12]}"
+        self.assertEqual(f"{worktree}/.work/tmp/standards-gate/brief.md\nworktree-retire --into {self.head()} --discard-ignored {worktree}\n", result.stdout)
+
+    def test_uncommitted_changes_are_not_selected_but_are_named(self):
+        self.repo.write("README.md", "hello there\n")
+        self.repo.commit()
+        self.repo.write("build.sh", "#!/bin/sh\n")
+        result = self.gate("--base", self.base, "--json")
+        self.assertEqual(0, result.returncode, result.stderr)
+        out = json.loads(result.stdout)
+        self.assertEqual(([], None, ["build.sh"]), (out["standards"], out["worktree"], out["unreviewed"]))
+        self.assertIn("not reviewed: build.sh", result.stderr)
+        self.assertEqual([], self.worktrees())
+
+    def test_no_applicable_standard_prints_nothing_and_makes_no_worktree(self):
+        self.repo.write("README.md", "hello there\n")
+        self.repo.commit()
+        result = self.gate("--base", self.base)
+        self.assertEqual((0, "", ""), (result.returncode, result.stdout, result.stderr))
+        self.assertEqual([], self.worktrees())
+        self.assertFalse((self.repo.root / ".work").exists())
+
+    def test_base_ahead_of_head_reviews_only_local_commits(self):
+        self.repo.git("checkout", "-q", "-b", "upstream")
+        self.repo.write("upstream.sh", "#!/bin/sh\n")
+        self.repo.commit()
+        self.repo.git("checkout", "-q", "main")
+        self.repo.write("README.md", "local\n")
+        self.repo.commit()
+        self.assertEqual([], self.gate_json("upstream")["standards"])
+
+    def test_existing_worktree_is_refused_and_kept(self):
+        self.repo.write("build.sh", "#!/bin/sh\n")
+        self.repo.commit()
+        first = self.gate_json(self.base)
+        marker = Path(first["worktree"]) / "keep"
+        marker.write_text("x")
+        again = self.gate("--base", self.base)
+        self.assertEqual(2, again.returncode)
+        self.assertIn("already exists", again.stderr)
+        self.assertTrue(marker.exists())
+
+    def test_usage_and_history_errors(self):
+        for args, message in ((("--base", "nope"), "nope: not a commit"), (("--base", "HEAD"), "no commits in HEAD..HEAD")):
+            with self.subTest(args=args):
+                result = self.gate(*args)
+                self.assertEqual((2, ""), (result.returncode, result.stdout))
+                self.assertIn(message, result.stderr)
+        self.assertEqual(2, self.gate().returncode)
+
+    def test_signal_while_preparing_removes_the_worktree(self):
+        self.repo.write("build.sh", "#!/bin/sh\n")
+        self.repo.commit()
+        for signum, notice in ((signal.SIGINT, "interrupted"), (signal.SIGTERM, "terminated")):
+            with self.subTest(signal=signum.name):
+                script = Path(self.tmp.name) / "interrupt.py"
+                script.write_text(
+                    "import os, signal, sys\n"
+                    f"sys.path.insert(0, {str(Path(standards.__file__).parent)!r})\n"
+                    "import standards\n"
+                    "def interrupted(selected, start, head):\n"
+                    f"    os.kill(os.getpid(), {int(signum)})\n"
+                    "standards.gate_brief = interrupted\n"
+                    f"os.chdir({str(self.repo.root)!r})\n"
+                    f"sys.exit(standards.main(['--dir', {str(self.standards)!r}, 'gate', '--base', {self.base!r}]))\n")
+                result = subprocess.run((sys.executable, "-I", str(script)), capture_output=True, text=True)
+                self.assertEqual((-signum, f"standards: {notice}\n"), (result.returncode, result.stderr))
+                self.assertEqual([], self.worktrees())
+                self.assertFalse((self.repo.root / ".work/wt" / f"standards-gate-{self.head()[:12]}").exists())
+
+
 class HelpTests(unittest.TestCase):
+    def test_subcommand_help_prints_usage_and_examples(self):
+        for name in standards.EXAMPLES:
+            with self.subTest(name=name):
+                result = subprocess.run((sys.executable, "-I", str(CLI), name, "--help"), capture_output=True, text=True)
+                self.assertEqual((0, ""), (result.returncode, result.stderr))
+                self.assertIn(f"usage: standards {name}", result.stdout)
+                self.assertIn(f"example: {standards.EXAMPLES[name][0]}", result.stdout)
+
     def test_bare_invocation_prints_the_complete_help(self):
         bare = subprocess.run((sys.executable, "-I", str(CLI)), capture_output=True, text=True)
         full = subprocess.run((sys.executable, "-I", str(CLI), "-h"), capture_output=True, text=True)

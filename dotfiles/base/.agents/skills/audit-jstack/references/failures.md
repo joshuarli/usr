@@ -1,6 +1,6 @@
 # Recurring failures and enforcement
 
-Read this for stages 3 and 4, in `~/usr` or the repository named in `/audit-skills <repo>`. The goal is to change the repo so the next agent cannot make the mistake again.
+Read this for stages 3 and 4, in `~/usr` or the repository named in `/audit-jstack <repo>`. The goal is to change the repo so the next agent cannot make the mistake again.
 
 Keep the caller's mode: an audit proposes guards and their acceptance evidence; implementation applies them only within the requested scope. `ultrareview` uses this procedure to file findings, not to change code or CI.
 

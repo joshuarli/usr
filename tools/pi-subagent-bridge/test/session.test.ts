@@ -21,7 +21,7 @@ const run = { pid: 12345, output: "/tmp/worker.ndjson", errors: "/tmp/worker.std
 const scope = { base_revision: "a".repeat(40), writable_paths: ["README"], acceptance_proof: "Check the output", attempt_limit: 2, stop_on: "Scope expansion" }
 const CODEX = { model: "gpt-6.1-terra", effort: "medium" } as const
 const COMMAND = { model: "deepseek/deepseek-v4.1-flash", effort: "high" } as const
-const DEVIN_WORKER = { providerID: "devin", id: "swe-2-flash", variant: "medium" } as const
+const DEVIN_WORKER = { providerID: "devin", id: "swe-2.1", variant: "high" } as const
 const GO = { providerID: "opencode-go", id: "deepseek-v4.1-flash", variant: "high" } as const
 
 function record(overrides: Record<string, unknown> = {}): Record<string, unknown> {

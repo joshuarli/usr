@@ -125,20 +125,24 @@ test("retired roles cannot silently survive in native profiles or harness config
     const policy = structuredClone(POLICY)
     Reflect.set(policy, "tiers", policy.tiers.filter(tier => tier !== "mechanic"))
     for (const record of [policy.rootRoutes, policy.nativePi.goModels, policy.nativePi.tools,
-      policy.nativePi.delegation, policy.opencode.efforts, policy.nativeFallback.claudeModels])
+      policy.nativePi.delegation, policy.nativePi.devinModels, policy.nativePi.devinAgentNames,
+      policy.nativePi.devinDelegation, policy.opencode.efforts, policy.nativeFallback.claudeModels])
       Reflect.deleteProperty(record, "mechanic")
-    for (const [tier, children] of Object.entries(policy.nativePi.delegation))
-      Reflect.set(policy.nativePi.delegation, tier, children.filter(child => child !== "mechanic"))
-    Reflect.set(policy.nativePi.devinDelegation, "worker", policy.nativePi.devinDelegation.worker.filter(child => child !== "mechanic"))
+    for (const record of [policy.nativePi.delegation, policy.nativePi.devinDelegation])
+      for (const [tier, children] of Object.entries(record))
+        Reflect.set(record, tier, (children as readonly string[]).filter(child => child !== "mechanic" && child !== "devin-mechanic"))
     Reflect.set(policy.nativeFallback, "tiers", policy.nativeFallback.tiers.filter(tier => tier !== "mechanic"))
     const before = f.paths.map(path => readFileSync(join(f.root, path), "utf8"))
     assert.throws(() => renderOutputs(f.root, policy), /Retired native profile mechanic: explicitly remove/)
     assert.deepEqual(f.paths.map(path => readFileSync(join(f.root, path), "utf8")), before)
     unlinkSync(join(f.root, "dotfiles/base/.pi/agent/agents/mechanic.md"))
+    unlinkSync(join(f.root, "dotfiles/base/.pi/agent/agents/devin-mechanic.md"))
     const settingsPath = join(f.root, "dotfiles/base/.pi/agent/settings.json")
     const settings = JSON.parse(readFileSync(settingsPath, "utf8"))
     delete settings.subagents.agentOverrides.mechanic
     delete settings.subagents.modelScope.agents.mechanic
+    delete settings.subagents.agentOverrides["devin-mechanic"]
+    delete settings.subagents.modelScope.agents["devin-mechanic"]
     writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + "\n")
     assert.throws(() => renderOutputs(f.root, policy), /Retired OpenCode tier mechanic: explicitly remove/)
     const openCodePath = join(f.root, "dotfiles/base/.config/opencode/opencode.json")
@@ -191,11 +195,8 @@ test("prohibited native Claude aliases cannot be projected", () => {
   const f = fixture()
   try {
     for (const model of ["fable", "claude-fable-5-2"]) {
-      const policy: Policy = {
-        ...POLICY,
-        nativeFallback: { ...POLICY.nativeFallback,
-          claudeModels: { ...POLICY.nativeFallback.claudeModels, expert: model } },
-      }
+      const policy = structuredClone(POLICY)
+      Reflect.set(policy.nativeFallback.claudeModels, "expert", model)
       assert.throws(() => renderOutputs(f.root, policy), /Prohibited model in active policy/)
     }
   } finally { f.close() }

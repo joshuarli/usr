@@ -72,10 +72,12 @@ export const COMMAND_TIER_MODELS = {
 /** Ordered admission plan per admitted bridge tier. Expert is a harness-native lane and has no plan here. */
 export const ROOT_PLANS = {
   scout: {
-    kind: "codex-last", command: COMMAND_TIER_MODELS.scout, pi: [GO_TIER_MODELS.scout], codex: CODEX_TIER_MODELS.scout,
+    kind: "codex-last", command: COMMAND_TIER_MODELS.scout,
+    pi: [GO_TIER_MODELS.scout, DEVIN_TIER_MODELS.scout], codex: CODEX_TIER_MODELS.scout,
   },
   mechanic: {
-    kind: "codex-last", command: COMMAND_TIER_MODELS.mechanic, pi: [GO_TIER_MODELS.mechanic], codex: CODEX_TIER_MODELS.mechanic,
+    kind: "codex-last", command: COMMAND_TIER_MODELS.mechanic,
+    pi: [GO_TIER_MODELS.mechanic, DEVIN_TIER_MODELS.mechanic], codex: CODEX_TIER_MODELS.mechanic,
   },
   worker: {
     kind: "codex-last", command: COMMAND_TIER_MODELS.worker,

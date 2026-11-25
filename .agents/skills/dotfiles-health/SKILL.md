@@ -36,7 +36,7 @@ The Python link manager in `tools/sync/` owns `.sym-dir` discovery, preflight, o
   - Broad shared policy, authority, or consequential uncertain behavior: get one focused independent consistency review and run the smallest behavioral scenario that can resolve the uncertainty.
 - Check review claims against the files; a past claim here was wrong. Do not stack reviews that address the same uncertainty, repeat successful checks on unchanged relevant inputs, or create a process artifact just to report that checking is complete.
 - When compressing a prompt, diff its backticked tokens against the old version so no decision is lost.
-- Use `/audit-skills` to judge from sessions whether an auto-triggered skill earns its place.
+- Use `/audit-jstack` to judge from sessions whether an auto-triggered skill earns its place.
 
 **The test:** `node tools/skills/skills.ts check` and the structural tests pass, no rule is stated outside its owner, and `sh sync plan` shows no `CONFLICT`.
 

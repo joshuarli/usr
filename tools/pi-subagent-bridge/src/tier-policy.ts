@@ -25,7 +25,7 @@ export type AllowedChild = { readonly [P in Tier]: ChildOf<P> }
 const PI_MODELS = {
   goDeepSeek: { providerID: "opencode-go", id: "deepseek-v4.1-flash" },
   goSpark: { providerID: "opencode-go", id: "muse-spark-1.3-contributor" },
-  devinFlash: { providerID: "devin", id: "swe-2-flash" },
+  devinSwe21: { providerID: "devin", id: "swe-2.1" },
 } as const
 export const PI_MODEL_ALLOWLIST = Object.values(PI_MODELS).map(({ providerID, id }) => `${providerID}/${id}`)
 
@@ -41,18 +41,29 @@ export const GO_TIER_MODELS = {
   readonly variant: Effort
 } }
 
-/** Devin Local worker. Only the medium SWE-2 Flash variant is admitted. */
+/** Devin Local lanes. Each bridge tier keeps its own free SWE-2.1 thinking level. */
 export const DEVIN_TIER_MODELS = {
-  worker: { ...PI_MODELS.devinFlash, variant: "medium" },
+  scout: { ...PI_MODELS.devinSwe21, variant: "low" },
+  mechanic: { ...PI_MODELS.devinSwe21, variant: "medium" },
+  worker: { ...PI_MODELS.devinSwe21, variant: "high" },
 } as const satisfies {
-  readonly worker: { readonly providerID: "devin"; readonly id: "swe-2-flash"; readonly variant: "medium" }
+  readonly scout: { readonly providerID: "devin"; readonly id: "swe-2.1"; readonly variant: "low" }
+  readonly mechanic: { readonly providerID: "devin"; readonly id: "swe-2.1"; readonly variant: "medium" }
+  readonly worker: { readonly providerID: "devin"; readonly id: "swe-2.1"; readonly variant: "high" }
 }
-export const DEVIN_AGENT_NAMES = { worker: "devin-worker" } as const
+export type DevinTier = keyof typeof DEVIN_TIER_MODELS
+export const DEVIN_AGENT_NAMES = {
+  scout: "devin-scout",
+  mechanic: "devin-mechanic",
+  worker: "devin-worker",
+} as const satisfies Record<BridgeTier, string>
 export const DEVIN_DELEGATION = {
+  scout: DELEGATION.scout.map(tier => tier === "scout" ? DEVIN_AGENT_NAMES.scout : tier),
+  mechanic: DELEGATION.mechanic.map(tier => tier === "mechanic" ? DEVIN_AGENT_NAMES.mechanic : tier),
   worker: DELEGATION.worker.map(tier => tier === "worker" ? DEVIN_AGENT_NAMES.worker : tier),
-} as const satisfies { readonly worker: readonly string[] }
-export function isDevinTier(tier: Tier): tier is "worker" {
-  return tier === "worker"
+} as const satisfies Record<BridgeTier, readonly string[]>
+export function isDevinTier(tier: Tier): tier is DevinTier {
+  return tier in DEVIN_TIER_MODELS
 }
 
 const DISCOVERY_TOOLS = ["grep", "find", "ls", "subagent", "subagent_supervisor"] as const
@@ -83,10 +94,13 @@ export function assertDelegation<P extends Tier>(parent: P, child: unknown): ass
 /** Exact pins admitted for nested spawns, per tier. */
 export type GoModelRef = { providerID: string; id: string; variant?: string }
 export function tierForModel(model: GoModelRef, readOnly: boolean): Tier {
-  if (model.providerID === DEVIN_TIER_MODELS.worker.providerID &&
-      model.id === DEVIN_TIER_MODELS.worker.id &&
-      model.variant === DEVIN_TIER_MODELS.worker.variant && !readOnly)
-    return "worker"
+  const devinTier = (Object.keys(DEVIN_TIER_MODELS) as DevinTier[]).find((candidate) => {
+    const expected = DEVIN_TIER_MODELS[candidate]
+    return model.providerID === expected.providerID &&
+      model.id === expected.id && model.variant === expected.variant &&
+      readOnly === (candidate === "scout")
+  })
+  if (devinTier) return devinTier
   const tier = TIERS.find((candidate) => {
     const expected = GO_TIER_MODELS[candidate]
     return expected.providerID === model.providerID &&

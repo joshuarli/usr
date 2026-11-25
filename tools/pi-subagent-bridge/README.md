@@ -8,9 +8,9 @@ Bridge tiers: `scout`, `mechanic`, `worker`. Native-only tier: `expert`, which a
 
 | Tier | Primary | Fallback (in order) |
 | --- | --- | --- |
-| scout | Command Code `meta/muse-ember` (`medium`) | Pi `opencode-go/muse-spark-1.3-contributor` (`medium`); Codex `gpt-6-luna` (`medium`) |
-| mechanic | Command Code `meta/muse-ember` (`xhigh`) | Pi `opencode-go/muse-spark-1.3-contributor` (`high`); Codex `gpt-6-luna` (`high`) |
-| worker | Command Code `deepseek/deepseek-v4.1-flash` (`high`) | Pi `opencode-go/deepseek-v4.1-flash` (`high`); Pi `devin/swe-2-flash` (`medium`); Codex `gpt-6.1-terra` (`high`) |
+| scout | Command Code `meta/muse-ember` (`medium`) | Pi `opencode-go/muse-spark-1.3-contributor` (`medium`); Pi `devin/swe-2.1` (`low`); Codex `gpt-6-luna` (`medium`) |
+| mechanic | Command Code `meta/muse-ember` (`xhigh`) | Pi `opencode-go/muse-spark-1.3-contributor` (`high`); Pi `devin/swe-2.1` (`medium`); Codex `gpt-6-luna` (`high`) |
+| worker | Command Code `deepseek/deepseek-v4.1-flash` (`high`) | Pi `opencode-go/deepseek-v4.1-flash` (`high`); Pi `devin/swe-2.1` (`high`); Codex `gpt-6.1-terra` (`high`) |
 <!-- policy:end routing-summary -->
 
 Expert assignments never enter the bridge. Antigravity, Command Code, OpenCode and Devin top-level sessions delegate only through native subagents; Codex uses its configured native subagents (no per-tier pin); Claude Code pins `opus` at `xhigh` effort for expert work; Pi launches its native `expert` profile. `scope-check CWD SCOPE_JSON_FILE [BRANCH] --register TITLE` records a native lane, and `scope-check --lane ID` from its repository records its latest Git scope check. `campaign list` includes these lanes. `scope-check` applies the bridge's Git scope check to such a native lane (see `pi-subagent-bridge scope-check -h`). See [orchestrate](../../dotfiles/base/.agents/skills/orchestrate/SKILL.md).
@@ -62,16 +62,17 @@ The [FX migration campaign](../../docs/roadmap.md#campaign-runtime-independent-w
 
 New ordinary sessions write schema 4 (`codex-last`); sessions admitted under the earlier codex-first plan keep schema-2 writes, and experimental leaf sessions use schema 3. Versions 1 to 3 remain readable. FX resume tokens are runtime-tagged and bound to the original worktree, native session, model/provider/effort and private connection/control settings.
 
-## Devin SWE-2 Flash
+## Devin SWE-2.1
 
-`devin/swe-2-flash` at **medium** effort is an explicitly pinned **last**
-Pi fallback for the `worker` tier and a dedicated interactive
-`devin-worker` profile; the default Codex/Command/OpenCode routes
-and other worker-tier Pi routes are unchanged — no other tier
-routes to Devin. The provider is supplied by a hash-verified `pi-build` release, never a
-local `pi install`. See [pi-build PR #5](https://github.com/joshuarli/pi-build/pull/5).
-Only the admitted `medium` variant is allowed by the typed tier policy.
-Unavailability cannot authorize another effort level or tier.
+`devin/swe-2.1` is an explicitly pinned **last** Pi fallback for every bridge
+tier, each at its own free thinking level: `low` for `devin-scout`, `medium`
+for `devin-mechanic` and `high` for `devin-worker`. Expert stays harness-native
+and has no Devin lane. The default Codex/Command/OpenCode routes and the other
+Pi routes are unchanged. The provider is supplied by a hash-verified `pi-build`
+release, never a local `pi install`. See [pi-build PR #5](https://github.com/joshuarli/pi-build/pull/5).
+Only the three admitted variants are allowed by the typed tier policy; the
+free-but-not-pinned `xhigh`/`max` and the metered `-lightning` variants are not
+admitted. Unavailability cannot authorize another effort level or tier.
 
 On the target machine, `sh sync` installs the Devin CLI (`sh sync tools
 devin`) and the pinned `pi-build` runtime that bundles `pi-devin-local`.
@@ -81,22 +82,25 @@ model catalog without the interactive `/login` flow: run the bundled
 (a single `-p` prompt is enough — extension startup refreshes
 `~/.cache/pi-devin/models.json`), and store the CLI `windsurf_api_key`
 as the provider's `oauth` entry in `~/.pi/agent/auth.json`. Verify that
-`swe-2-flash-medium` appears in the catalog and that the account is
-entitled to `swe-2-flash` — catalog presence alone does not prove
-entitlement. For an explicit experiment, launch native `devin-worker`
-through the Pi subagent tool. Scoped bridge workers start
-`PI_OFFLINE=1`, so no live catalog bootstrap is attempted; missing
-credentials/cache fail before admission.
-No tokens or account data are copied into the repo.
+`swe-2-1-low`, `swe-2-1-medium` and `swe-2-1-high` appear in the catalog.
+`devin models` and `devin models list --format json` report the SWE-2.1 family
+with `cost_tier: "Free"` and no `cost_summary` on the current Max plan;
+`devin auth status` reports the plan. A catalog entry alone does not prove
+entitlement. For an explicit experiment, launch a native `devin-*` profile
+through the Pi subagent tool. Scoped bridge workers start `PI_OFFLINE=1`,
+so no live catalog bootstrap is attempted; missing credentials/cache fail
+before admission. No tokens or account data are copied into the repo.
 
-Offline fixture checks do not prove paid/free entitlement, streaming or
-tool loops; the owner must run an actual SWE-2 Flash tool-and-resume test.
+Offline fixture checks do not prove free entitlement, streaming or tool
+loops; the owner must run an actual SWE-2.1 tool-and-resume test.
 
-Observed in production lanes (2026-11-24, stuff and buildlib): SWE-2 Flash
-met narrow, well-specified acceptance proofs with sound code and behaviour
-tests, but under a mutation gate it deleted an archive path-escape check and
-other defensive code to kill surviving mutants, and its tests assumed the
-macOS host triple, failing on Linux runners. Brief and review it as the
+The retired SWE-2 Flash lane was observed in production (2026-11-24, stuff and
+buildlib) to meet narrow, well-specified acceptance proofs with sound code and
+behaviour tests, but under a mutation gate it deleted an archive path-escape
+check and other defensive code to kill surviving mutants, and its tests
+assumed the macOS host triple, failing on Linux runners. That observation is
+about the retired model, not evidence for SWE-2.1; brief and review Devin work
+as the
 [orchestrate skill](../../dotfiles/base/.agents/skills/orchestrate/SKILL.md#the-bridge-except-command-code-opencode-devin-antigravity-and-copilot-cli)
 describes.
 

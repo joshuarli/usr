@@ -1,25 +1,25 @@
 ---
-name: audit-skills
-description: "Use for /audit-skills: improve the agent system's reliability and cost from evidence. Audit instructions for contradictions, duplicate owners, and bloat; measure from sessions whether skills fire and help; find mistakes agents repeat and guard them, architecture first and instructions last; consolidate; prove each fix. `past 2h` limits it to recent sessions; a repo path targets that repo's repeated failures."
+name: audit-jstack
+description: "Use for /audit-jstack: improve the agent system's reliability and cost from evidence. Audit instructions for contradictions, duplicate owners, and bloat; measure from sessions whether skills fire and help; find mistakes agents repeat and guard them, architecture first and instructions last; consolidate; prove each fix. `past 2h` limits it to recent sessions; a repo path targets that repo's repeated failures."
 disable-model-invocation: true
 metadata:
   opencode/slash: "true"
   opencode/autoinvoke: "false"
 ---
 
-# Audit Skills
+# Audit Jstack
 
 The one entry point for improving how agents work here. Instructions drift, skills fire wrongly or add steps without helping, and agents repeat the same mistakes, which get fixed by hand. Each finding ends in the strongest fix available: a mechanism that makes the mistake impossible, a merged or deleted skill, or one owner for a rule. A new instruction is the last resort, for a judgment call nothing can enforce. A good run often leaves fewer instructions than it found.
 
 ## Invocation
 
-- `/audit-skills`: the whole loop over the agent system in `~/usr`.
-- `/audit-skills past 2h` (any window): stages 2 and 3 over sessions in that window only, across harnesses and repos, including delegation and qualification tooling friction.
-- `/audit-skills <repo>`: stages 3, 4 and 6 for that repository, from its history, reviews and sessions, plus its `AGENTS.md` chain and repo-local skills. A window may be combined with it.
+- `/audit-jstack`: the whole loop over the agent system in `~/usr`.
+- `/audit-jstack past 2h` (any window): stages 2 and 3 over sessions in that window only, across harnesses and repos, including delegation and qualification tooling friction.
+- `/audit-jstack <repo>`: stages 3, 4 and 6 for that repository, from its history, reviews and sessions, plus its `AGENTS.md` chain and repo-local skills. A window may be combined with it.
 
 Before stage 1, ask the owner whether to run `cleanup-sessions` (default: data older than 7 days; `cleanup-sessions --dry-run` previews) so stale sessions do not dominate the sample; run it only on their yes.
 
-Audit and report first. Apply only what the owner approves, unless the invocation explicitly authorizes an unattended repair run (for example `/audit-skills apply`). Even then, park owner decisions: a behavior choice between conflicting rules, removing a slash command the owner types, and model or effort settings.
+Audit and report first. Apply only what the owner approves, unless the invocation explicitly authorizes an unattended repair run (for example `/audit-jstack apply`). Even then, park owner decisions: a behavior choice between conflicting rules, removing a slash command the owner types, and model or effort settings.
 
 ## Cost
 

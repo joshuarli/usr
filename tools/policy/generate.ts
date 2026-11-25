@@ -184,8 +184,8 @@ function profiles(policy: Policy) {
     }),
     ...Object.entries(policy.nativePi.devinModels).map(([key, pin]) => {
       const tier = policyTier(key)
-      const name = policy.nativePi.devinAgentNames[tier as "worker"]
-      const allowed = policy.nativePi.devinDelegation[tier as "worker"]
+      const name = (policy.nativePi.devinAgentNames as Readonly<Record<string, string>>)[tier]
+      const allowed = (policy.nativePi.devinDelegation as Readonly<Record<string, readonly string[]>>)[tier]
       if (!name || !allowed) throw new Error(`Missing Devin profile mapping: ${tier}`)
       return { name, tier, pin, allowed }
     }),
