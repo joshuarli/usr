@@ -26,7 +26,8 @@ Optimize the work users experience, and the fastest operation is the one you sto
 - **Fit the structure to the operations.** A lookup inside a loop over the same data is a quadratic scan: index it, sort once at the ownership boundary, use a set for membership. A derived index is derived state with an owner and an invalidation. Bound recursion and traversal against cycles and adversarial input. Keep clear code until a measured N says otherwise.
 - **Ownership before cleverness.** Know who owns, who borrows, and why anything is shared (`Rc`, `Arc`). Remove a clone only if the lifetime stays simple, prefer slices and views for read-only access, and pool buffers only where measured. Never reach for `unsafe` to save an allocation.
 - **Large input flows through, it does not pile up.** Classify each input as small, large, or unbounded; stream the last two with bounded buffers and a chosen backpressure policy (block, reject, spill, drop). Never assume a chunk is a record, and bound decompression that external input controls. Test at awkward boundaries: one byte at a time, at a delimiter, inside a multibyte character.
-- **A cache needs a measured cost, a named authority, and an invalidation.** Add caches, parallelism, pooling, or dependencies only when evidence supports their costs.
+- **Caching is cope for a slow design.** When work is slow, find why it costs what it costs and remove or restructure it. A cache hides the cost from one path while first runs, edits, other entry points, and tests still pay it, and it adds invalidation, staleness, and a trust boundary. Cache only work that is irreducible, such as network, disk, an external service, or computation measured near its floor; then give the cache a named authority and an invalidation.
+- **Earn parallelism, pooling, and dependencies.** Add them only when evidence supports their costs, after the work itself is lean.
 
 ## Verify
 
