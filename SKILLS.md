@@ -104,7 +104,7 @@ Repo upkeep and getting work merged.
 
 | Skill | Mode | Use it to |
 | --- | --- | --- |
-| `audit-skills` | Explicit | Improve the agent system from evidence: audit instructions, judge from sessions whether each skill earns its place, and make repeated mistakes impossible (architecture, then types, then a lint, then a test, docs last). `/audit-skills past 2h` reads recent sessions; `/audit-skills <repo>` targets the mistakes agents repeat in that repo, for example after you correct the same one twice. |
+| `audit-jstack` | Explicit | Improve the agent system from evidence: audit instructions, judge from sessions whether each skill earns its place, and make repeated mistakes impossible (architecture, then types, then a lint, then a test, docs last). `/audit-jstack past 2h` reads recent sessions; `/audit-jstack <repo>` targets the mistakes agents repeat in that repo, for example after you correct the same one twice. |
 | `create-verification-skill` | Explicit | Write or refresh a repo-local skill that checks a project's real user-facing behavior. `do` looks for one. |
 | `todo` | Auto | Save work for later as a `TODO.md` ticket (P1 to P4) or an RFC. Ask for "save this as a todo". |
 

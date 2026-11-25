@@ -20,7 +20,7 @@ Do not rewrite expected results to conceal a product regression. Keep read-only 
 
 Use the real interface for one meaningful success and one rejection or failure path. If a procedure creates resources, check cleanup, retained useful evidence, and repeatability. For an important invariant, test whether the verifier catches a plausible violation with a controlled broken fixture or disposable mutation when safe and worth the cost. The negative control must fail for the intended reason. Never mutate the user's working tree for this experiment.
 
-For a guard against a recurring defect, use the historical negative and positive controls and acceptance evidence in [recurring failures](../../audit-skills/references/failures.md#prove). A plausible injected fault is useful sensitivity evidence, but does not establish that a past incident was replayed.
+For a guard against a recurring defect, use the historical negative and positive controls and acceptance evidence in [recurring failures](../../audit-jstack/references/failures.md#prove). A plausible injected fault is useful sensitivity evidence, but does not establish that a past incident was replayed.
 
 ## Formal models
 
