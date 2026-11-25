@@ -90,7 +90,6 @@ INSTALL_SCRIPT_MIRROR_SHA256 = {
 }
 FFMPEG_REPO = "laputa-systems/ffmpeg-build"
 NODE_BUILD_REPO = "laputa-systems/node-build"
-PYTHON_BUILD_REPO = "laputa-systems/python-build"
 PLAYER_REPO = "joshuarli/play"
 GHOSTTY_CUSTOM_ASSET = "Ghostty-Custom-aarch64-apple-darwin.dmg"
 GHOSTTY_CUSTOM_BUNDLE_ID = "com.joshuarli.ghostty-custom"
