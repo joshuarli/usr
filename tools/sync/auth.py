@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
 import subprocess
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -173,29 +172,12 @@ def _fx(home: Path, env: dict[str, str]) -> Probe:
     return Probe(False, "could not check — fx status --json")
 
 
-def _dsh(home: Path, env: dict[str, str]) -> Probe:
-    if env.get("DEEPSEEK_API_KEY", "").strip():
-        return Probe(True, "signed in")
-    vault = shutil.which("vault", path=env.get("PATH"))
-    if vault is None and (home / ".local/bin/vault").exists():
-        vault = str(home / ".local/bin/vault")
-    if vault is None:
-        return Probe(False, "no DEEPSEEK_API_KEY — export one or install vault")
-    result = _run(home, env, Path(vault), "ls", timeout=3.0)
-    if result is None:
-        return Probe(False, "could not check — vault ls (store may be locked)")
-    if "deepseek_api_key" in (result.stdout or "").lower():
-        return Probe(True, "signed in")
-    return Probe(False, "no DEEPSEEK_API_KEY in vault — vault set DEEPSEEK_API_KEY")
-
-
 HARNESSES: tuple[Harness, ...] = tuple(sorted((
     Harness("agy", "agy", _agy),
     Harness("claude", "claude", _claude),
     Harness("cmd", "cmd", _cmd),
     Harness("codex", "codex", _codex),
     Harness("devin", "devin", _devin),
-    Harness("dsh", "dsh", _dsh),
     Harness("fx", "fx", _fx),
     Harness("pi", "pi", _pi),
     Harness("muse", "muse", _muse),

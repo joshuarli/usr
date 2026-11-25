@@ -160,21 +160,9 @@ class AuthProbeTests(unittest.TestCase):
         self.assertEqual(row.state, "login")
         self.assertIn("could not check", row.detail)
 
-    def test_dsh_prefers_env_then_vault(self):
+    def test_disabled_dsh_launcher_is_not_probed(self):
         self.fake_bin("dsh", "#!/bin/sh\nexit 0\n")
-        env = dict(self.env, DEEPSEEK_API_KEY="fake-key", PATH=str(self.home / "nowhere"))
-        self.assertEqual(self.state("dsh", auth.login_lines(self.home, env)).state, "current")
-        self.fake_bin("vault", "#!/bin/sh\necho 'DEEPSEEK_API_KEY'\nexit 0\n")
-        env_without_vault = dict(self.env, PATH=str(self.home / "nowhere"))
-        self.assertEqual(self.state("dsh", auth.login_lines(self.home, env_without_vault)).state, "current")
-        self.fake_bin("vault", "#!/bin/sh\necho 'SOME_OTHER_KEY'\nexit 0\n")
-        row = self.state("dsh", auth.login_lines(self.home, env_without_vault))
-        self.assertEqual(row.state, "login")
-
-    def test_dsh_without_env_or_vault_is_flagged(self):
-        self.fake_bin("dsh", "#!/bin/sh\nexit 0\n")
-        env = dict(self.env, PATH=str(self.home / "nowhere"))
-        self.assertEqual(self.state("dsh", auth.login_lines(self.home, env)).state, "login")
+        self.assertEqual(auth.login_lines(self.home, self.env), [])
 
     def test_probes_run_in_parallel(self):
         barrier = threading.Barrier(2, timeout=5)
