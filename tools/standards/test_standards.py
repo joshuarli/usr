@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import signal
 import subprocess
@@ -194,6 +195,77 @@ class SelectTests(unittest.TestCase):
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertIn("  cli-interrupt trigger 2: misses (paths no match, content \\bSIG(INT|TERM)\\b)\n", result.stdout)
         self.assertIn("  shell trigger 1: misses (paths no match)\n", result.stdout)
+
+
+class HookTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = scratch()
+        root = Path(self.tmp.name)
+        self.standards = root / "standards"
+        self.standards.mkdir()
+        for name in FIXTURE_STANDARDS:
+            shutil.copy(STANDARDS / f"{name}.md", self.standards)
+        self.repo = Repo(root / "repo")
+        self.repo.write("tool.sh", "#!/bin/sh\n")
+        self.repo.write("README.md", "hi\n")
+        self.env = {**os.environ, "XDG_CACHE_HOME": str(root / "cache")}
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def hook(self, event: object) -> subprocess.CompletedProcess[str]:
+        data = event if isinstance(event, str) else json.dumps(event)
+        return subprocess.run((sys.executable, "-I", str(CLI), "--dir", str(self.standards), "hook"),
+                              input=data, capture_output=True, text=True, env=self.env)
+
+    def event(self, session: str, tool_input: object) -> dict[str, object]:
+        return {"hook_event_name": "PostToolUse", "session_id": session, "cwd": str(self.repo.root),
+                "tool_name": "Edit", "tool_input": tool_input}
+
+    def context(self, result: subprocess.CompletedProcess[str]) -> str:
+        self.assertEqual(0, result.returncode, result.stderr)
+        if not result.stdout:
+            return ""
+        context = json.loads(result.stdout)["hookSpecificOutput"]["additionalContext"]
+        assert isinstance(context, str)
+        return context
+
+    def test_announces_each_standard_once_per_session(self):
+        first = self.context(self.hook(self.event("s1", {"file_path": str(self.repo.root / "tool.sh")})))
+        self.assertIn("`shell`", first)
+        self.assertIn("for tool.sh", first)
+        self.assertEqual("", self.context(self.hook(self.event("s1", {"file_path": "tool.sh"}))))
+        self.assertIn("`shell`", self.context(self.hook(self.event("s2", {"file_path": "tool.sh"}))))
+
+    def test_reads_apply_patch_file_headers(self):
+        patch = "*** Begin Patch\n*** Update File: tool.sh\n@@\n-a\n+b\n*** End Patch\n"
+        self.assertIn("`shell`", self.context(self.hook(self.event("s3", {"command": patch}))))
+
+    def test_untriggered_missing_and_invalid_input_stay_silent(self):
+        for event in (self.event("s4", {"file_path": "README.md"}), self.event("s4", {"file_path": "missing.sh"}),
+                      "not json", {"hook_event_name": "Stop", "session_id": "s4"}, self.event("", {"file_path": "tool.sh"})):
+            with self.subTest(event=event):
+                self.assertEqual("", self.context(self.hook(event)))
+
+
+class HelpTests(unittest.TestCase):
+    def test_bare_invocation_prints_the_complete_help(self):
+        bare = subprocess.run((sys.executable, "-I", str(CLI)), capture_output=True, text=True)
+        full = subprocess.run((sys.executable, "-I", str(CLI), "-h"), capture_output=True, text=True)
+        self.assertEqual((0, 0), (bare.returncode, full.returncode))
+        self.assertEqual(full.stdout, bare.stdout)
+        for name in standards.EXAMPLES:
+            self.assertIn(f"\nstandards {name} [-h]", full.stdout)
+        self.assertTrue(full.stdout.rstrip().endswith(standards.OWNED_FOOTER))
+        self.assertEqual(1, full.stdout.count("Maintained by Joshua Li: https://github.com/joshuarli/usr"))
+
+    def test_every_example_parses(self):
+        cli = standards.parser()
+        for name, examples in standards.EXAMPLES.items():
+            for example in examples:
+                with self.subTest(example=example):
+                    argv = example.split("<")[0].split()[1:]
+                    self.assertEqual(name, cli.parse_args(argv).command)
 
 
 class InterruptTests(unittest.TestCase):

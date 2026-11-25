@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
 import signal
 import subprocess
 import sys
+import time
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
@@ -22,7 +24,6 @@ TRIGGER_KEYS = ("paths", "shebang", "content")
 EXAMPLE_KEYS = {"match", "skip"}
 REQUIRED_SECTION = "## Code"
 MAX_TEXT = 1 << 20
-FOOTER = "Maintained by Joshua Li: https://github.com/joshuarli/usr"
 
 
 class Failure(Exception):
@@ -409,33 +410,169 @@ def render_list(standards: Sequence[Standard], as_json: bool) -> str:
     return "".join(f"{s.name}\t{s.path}\t{s.summary}\n" for s in standards)
 
 
-def parser() -> argparse.ArgumentParser:
-    top = argparse.ArgumentParser(
-        prog="standards", description="Select the coding standards that apply to a change or a tree.",
-        epilog="Exit status: 0 success (selecting nothing is success), 1 invalid standards from check, 2 usage or operational error, killed by SIGINT when interrupted (130 in a shell).\n"
-               f"Ctrl-C stops at once; standards writes nothing, so re-running is always safe.\n\n{FOOTER}",
-        formatter_class=argparse.RawDescriptionHelpFormatter)
+HOOK_EVENTS = {"PostToolUse"}
+HOOK_INPUT_LIMIT = 1 << 20
+HOOK_STATE_DAYS = 7
+PATCH_FILE = re.compile(r"^\*\*\* (?:Add|Update) File: (.+)$", re.M)
+EXIT_STATUS = ("Exit status: 0 success (selecting nothing is success), 1 invalid standards from check, "
+               "2 usage or operational error; killed by SIGINT when interrupted (130 in a shell).\n"
+               "Ctrl-C stops at once; standards writes nothing outside its hook state, so re-running is always safe.")
+OWNED_FOOTER = """Maintained by Joshua Li: https://github.com/joshuarli/usr
+Bugs and features: TODO.md in that repository (follow its AGENTS.md), or its issue tracker.
+Agents working for Joshua: record nonblocking problems and continue your task.
+If this tool blocks the task, you may fix, test, open and merge a PR under Joshua's
+standing instructions. Release only when needed to deliver the verified fix.
+Procedure: https://github.com/joshuarli/usr/blob/main/dotfiles/base/.agents/instructions/owned-tools.md"""
+
+
+def edited_paths(tool_input: object) -> list[str]:
+    texts: list[str] = []
+    paths: list[str] = []
+    if isinstance(tool_input, dict):
+        for key in ("file_path", "notebook_path"):
+            value = tool_input.get(key)
+            if isinstance(value, str) and value:
+                paths.append(value)
+        texts.extend(value for value in tool_input.values() if isinstance(value, str))
+    elif isinstance(tool_input, str):
+        texts.append(tool_input)
+    for text in texts:
+        paths.extend(match.strip() for match in PATCH_FILE.findall(text))
+    return list(dict.fromkeys(paths))
+
+
+def repo_relative(path: Path) -> str:
+    for parent in path.parents:
+        if (parent / ".git").exists():
+            return path.relative_to(parent).as_posix()
+    return path.as_posix()
+
+
+def hook_state(event: dict[str, Any]) -> Path:
+    base = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache") / "standards-hook"
+    key = f"{event.get('session_id', '')}\0{event.get('agent_id', '')}"
+    return base / hashlib.sha256(key.encode()).hexdigest()
+
+
+def prune_hook_state(directory: Path, now: float) -> None:
+    for entry in directory.iterdir():
+        if now - entry.stat().st_mtime > HOOK_STATE_DAYS * 86400:
+            entry.unlink(missing_ok=True)
+
+
+def hook(directory: Path) -> int:
+    try:
+        raw = sys.stdin.buffer.read(HOOK_INPUT_LIMIT + 1)
+        if len(raw) > HOOK_INPUT_LIMIT:
+            return 0
+        event = json.loads(raw)
+        if not isinstance(event, dict) or event.get("hook_event_name") not in HOOK_EVENTS or not event.get("session_id"):
+            return 0
+        cwd = Path(event["cwd"]) if isinstance(event.get("cwd"), str) else Path.cwd()
+        changes = []
+        for name in edited_paths(event.get("tool_input")):
+            path = Path(name) if Path(name).is_absolute() else cwd / name
+            if path.is_file():
+                changes.append(whole(repo_relative(path.resolve()), read_text(path)))
+        if not changes:
+            return 0
+        state = hook_state(event)
+        announced = set(state.read_text().split()) if state.exists() else set()
+        fresh = [s for s in select(load(directory), changes) if s.standard.name not in announced]
+        if not fresh:
+            return 0
+        state.parent.mkdir(parents=True, exist_ok=True)
+        prune_hook_state(state.parent, time.time())
+        partial = state.with_name(f"{state.name}.{os.getpid()}.tmp")
+        try:
+            partial.write_text("\n".join(sorted(announced | {s.standard.name for s in fresh})) + "\n")
+            os.replace(partial, state)
+        finally:
+            partial.unlink(missing_ok=True)
+        listed = "; ".join(f"`{s.standard.name}` ({s.standard.path}, for {s.reasons[0].file})" for s in fresh)
+        message = (f"Coding standards now apply to this session's edits: {listed}. Follow their `## Code` rules while writing; "
+                   "the completion gate in ~/.agents/instructions/coding-standards.md checks them before you report done.")
+        print(json.dumps({"hookSpecificOutput": {"hookEventName": event["hook_event_name"], "additionalContext": message}}))
+    except (OSError, ValueError, TypeError, KeyError, RecursionError, Failure):
+        # Advisory hook: a failure must never block the edit it observed.
+        return 0
+    return 0
+
+
+EXAMPLES = {
+    "select": ["standards select", "standards select --base origin/main --json", "standards select --tree", "standards select tools/cli.py"],
+    "explain": ["standards explain tools/cli.py"],
+    "list": ["standards list --json"],
+    "check": ["standards check"],
+    "hook": ["standards hook < post-tool-use.json"],
+}
+
+
+class TopParser(argparse.ArgumentParser):
+    commands: dict[str, argparse.ArgumentParser]
+
+    def format_help(self, formatter: argparse.HelpFormatter | None = None) -> str:
+        lines = [self.format_usage().rstrip(), "", self.description or "", "", "Options:"]
+        lines.extend(describe_actions(self))
+        for name, sub in self.commands.items():
+            lines.extend(["", f"{sub.format_usage().removeprefix('usage: ').rstrip()}", f"  {sub.description}"])
+            lines.extend(describe_actions(sub))
+            lines.extend(f"  example: {example}" for example in EXAMPLES[name])
+        lines.extend(["", EXIT_STATUS, "", OWNED_FOOTER])
+        return "\n".join(lines) + "\n"
+
+
+def describe_actions(parser: argparse.ArgumentParser) -> list[str]:
+    lines = []
+    for action in parser._actions:
+        if isinstance(action, (argparse._HelpAction, argparse._SubParsersAction)):
+            continue
+        if action.option_strings:
+            spelling = ", ".join(action.option_strings) + ("" if action.nargs == 0 else f" {action.metavar or action.dest.upper()}")
+        else:
+            spelling = str(action.metavar or action.dest)
+        lines.append(f"  {spelling:<22} {action.help}")
+    return lines
+
+
+def parser() -> TopParser:
+    top = TopParser(prog="standards", description="Select the coding standards that apply to a change or a tree.")
     top.add_argument("--dir", type=Path, default=DEFAULT_DIR, help=f"standards directory (default: {DEFAULT_DIR})")
-    commands = top.add_subparsers(dest="command", required=True, metavar="COMMAND")
-    pick = commands.add_parser("select", help="print the standards a change, tree, or file list triggers")
+    commands = top.add_subparsers(dest="command", metavar="COMMAND")
+
+    def command(name: str, description: str) -> argparse.ArgumentParser:
+        sub = commands.add_parser(name, help=description, description=description,
+                                  epilog="\n".join(f"example: {e}" for e in EXAMPLES[name]),
+                                  formatter_class=argparse.RawDescriptionHelpFormatter)
+        top.commands[name] = sub
+        return sub
+
+    top.commands = {}
+    pick = command("select", "Print the standards a change, tree, or file list triggers.")
     source = pick.add_mutually_exclusive_group()
-    source.add_argument("--base", help="diff the working tree against REV instead of HEAD; untracked files always count")
+    source.add_argument("--base", metavar="REV", help="diff the working tree against REV instead of HEAD; untracked files always count")
     source.add_argument("--tree", action="store_true", help="match every tracked and untracked non-ignored file in full")
     pick.add_argument("--json", action="store_true", help="print a JSON array")
-    pick.add_argument("files", nargs="*", help="match these whole files instead of the Git diff")
-    why = commands.add_parser("explain", help="show how every trigger evaluates for each file")
-    why.add_argument("files", nargs="+", help="files to evaluate in full")
-    listing = commands.add_parser("list", help="print every standard")
+    pick.add_argument("files", nargs="*", metavar="FILE", help="match these whole files instead of the Git diff")
+    why = command("explain", "Show how every trigger evaluates for each file.")
+    why.add_argument("files", nargs="+", metavar="FILE", help="files to evaluate in full")
+    listing = command("list", "Print every standard.")
     listing.add_argument("--json", action="store_true", help="print a JSON array")
-    commands.add_parser("check", help="validate every standard and its examples")
+    command("check", "Validate every standard and its examples.")
+    command("hook", "Read a Claude Code or Codex PostToolUse event on stdin and announce standards the edited files trigger, once per session.")
     return top
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     cli = parser()
     args = cli.parse_args(argv)
+    if args.command is None:
+        sys.stdout.write(cli.format_help())
+        return 0
     if args.command == "select" and args.files and (args.base or args.tree):
         cli.error("files cannot be combined with --base or --tree")
+    if args.command == "hook":
+        return hook(args.dir)
     try:
         if args.command == "check":
             try:

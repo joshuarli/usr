@@ -2,6 +2,8 @@
 
 Coding standards live in `~/.agents/standards/*.md`. Each declares the paths, shebangs, and added-line patterns that trigger it, so `standards select` chooses them from the change instead of from model judgment. Apply them once, at completion, without loading their text into the main session.
 
+In Claude Code and Codex, a PostToolUse hook (`standards hook`) names each standard the first time an edit in the session triggers it, so you can follow its `## Code` rules while writing. Other harnesses rely on the gate alone. A standard name in backticks, such as `lifecycle-concurrency`, means `~/.agents/standards/<name>.md`.
+
 1. **Select.** Before reporting code changes done, run `standards select` in each repository you changed. It reads staged, unstaged, and untracked work against `HEAD`; add `--base REV` to include commits since `REV`. No output means no standard applies: stop here.
 2. **Check in a reviewer.** A scout has no shell and reads only its worktree, so hand it files. Commit the work locally (fold any gate fixes in before pushing), create `git worktree add --detach .work/wt/standards-gate HEAD`, and in it write `git diff BASE HEAD` to `.work/tmp/standards-gate/change.diff`, where `BASE` is the revision before your work, then copy each listed standard next to it. Give one scout-tier reviewer, routed by `orchestrate`, that directory and a one-line intent. Retire the worktree with `worktree-retire` afterwards. The reviewer reads the standards' `## Code` sections and the diff and returns findings only, each with `file:line`, the rule it breaks, and a class:
    - **must-fix:** a clear violation in lines the change added or touched.

@@ -310,6 +310,14 @@ type = "command"
 command = 'python3 -I -S "$HOME/.local/bin/agent-disk-pressure" hook'
 timeout = 5
 
+[[hooks.PostToolUse]]
+matcher = "Edit|Write|apply_patch"
+
+[[hooks.PostToolUse.hooks]]
+type = "command"
+command = 'python3 -I -S "$HOME/.local/bin/standards" hook'
+timeout = 5
+
 [[hooks.Stop]]
 
 [[hooks.Stop.hooks]]
