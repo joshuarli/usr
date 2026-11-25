@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
-"""Measure skill use and approval stalls from local Claude and Codex sessions.
+"""Measure skill use, tool use, and approval stalls from local Claude and Codex sessions.
 
-usage.py loads [--days N] [--json]   per-skill sessions that loaded or invoked each skill
-usage.py stalls [--days N] [--json]  approval nudges and stops after run-until-done authority
+usage.py loads [--days N] [--json]          per-skill sessions that loaded or invoked each skill
+usage.py stalls [--days N] [--json]         approval nudges and stops after run-until-done authority
+usage.py tools NAME... [--days N] [--json]  CLI invocations and flags per named tool
 
 Counts are per session. Claude subagent transcripts (subdirectories) and Codex
 child sessions (cwd under .work/) are excluded, and Codex's skill listing is
-ignored: only tool calls that read a SKILL.md count as a load.
+ignored: only tool calls that read a SKILL.md count as a load. Tool counts read
+only command strings from tool calls, so contract text and repo-name mentions
+do not count as invocations.
 """
 from __future__ import annotations
 
@@ -38,6 +41,7 @@ class Session:
     loads: set[str] = field(default_factory=set)
     invoked: set[str] = field(default_factory=set)
     turns: list[tuple[str, str]] = field(default_factory=list)
+    commands: list[str] = field(default_factory=list)
 
 
 def skill_modes() -> dict[str, str]:
@@ -79,8 +83,11 @@ def claude_sessions(home: Path, cutoff: float) -> Iterator[Session]:
             content = message.get("content")
             if record.get("type") == "assistant" and isinstance(content, list):
                 for c in content:
-                    if isinstance(c, dict) and c.get("type") == "tool_use" and c.get("name") == "Skill":
+                    if not isinstance(c, dict) or c.get("type") != "tool_use": continue
+                    if c.get("name") == "Skill":
                         session.loads.add(str((c.get("input") or {}).get("skill", "")))
+                    command = (c.get("input") or {}).get("command")
+                    if isinstance(command, str): session.commands.append(command)
                 if text := text_of(content).strip(): session.turns.append(("assistant", text))
             elif record.get("type") == "user" and record.get("toolUseResult") is None:
                 text = text_of(content)
@@ -89,27 +96,46 @@ def claude_sessions(home: Path, cutoff: float) -> Iterator[Session]:
         yield session
 
 
-def codex_sessions(home: Path, cutoff: float) -> Iterator[Session]:
+def command_strings(payload: dict[str, Any]) -> list[str]:
+    """Pull shell commands out of the command-shaped Codex tool-call payloads."""
+    found: list[str] = []
+    arguments = payload.get("arguments")
+    if isinstance(arguments, str):
+        try: arguments = json.loads(arguments)
+        except json.JSONDecodeError: arguments = None
+    if isinstance(arguments, dict):
+        for key in ("cmd", "command"):
+            value = arguments.get(key)
+            if isinstance(value, str): found.append(value)
+            elif isinstance(value, list): found.extend(x for x in value if isinstance(x, str))
+    raw = payload.get("input")
+    if isinstance(raw, str):
+        found.extend(m.group(1) for m in re.finditer(r'\bcmd\s*:\s*"((?:[^"\\]|\\.)*)"', raw))
+    return found
+
+
+def codex_sessions(home: Path, cutoff: float, include_children: bool = False) -> Iterator[Session]:
     for path in recent((home / ".codex/sessions").glob("**/*.jsonl"), cutoff):
         session = Session("codex", path); child = False
         for record in records(path):
             payload = record.get("payload") or {}
-            if record.get("type") == "session_meta" and "/.work/" in str(payload.get("cwd", "")): child = True; break
+            if record.get("type") == "session_meta" and "/.work/" in str(payload.get("cwd", "")): child = True; continue
             kind = payload.get("type")
             if kind in ("function_call", "custom_tool_call", "local_shell_call"):
                 session.loads |= set(SKILL_READ.findall(json.dumps(payload)))
+                session.commands.extend(command_strings(payload))
             elif kind == "message":
                 text = text_of(payload.get("content"))
                 if payload.get("role") == "user" and text and not text.lstrip().startswith("<") and "AGENTS.md" not in text[:300]:
                     session.invoked |= set(DOLLAR.findall(text)); session.turns.append(("user", text))
                 elif payload.get("role") == "assistant" and text.strip():
                     session.turns.append(("assistant", text))
-        if not child: yield session
+        if not child or include_children: yield session
 
 
-def sessions(home: Path, days: float) -> list[Session]:
+def sessions(home: Path, days: float, include_children: bool = False) -> list[Session]:
     cutoff = time.time() - days * 86400
-    return [*claude_sessions(home, cutoff), *codex_sessions(home, cutoff)]
+    return [*claude_sessions(home, cutoff), *codex_sessions(home, cutoff, include_children)]
 
 
 def loads_report(all_sessions: list[Session], modes: dict[str, str]) -> dict[str, Any]:
@@ -120,6 +146,41 @@ def loads_report(all_sessions: list[Session], modes: dict[str, str]) -> dict[str
     rows: list[dict[str, Any]] = [{"skill": k, "mode": m, "claude": counts["claude"][k], "codex": counts["codex"][k]} for k, m in modes.items()]
     rows.sort(key=lambda r: (r["mode"], -(r["claude"] + r["codex"]), r["skill"]))
     return {"sessions": dict(totals), "skills": rows}
+
+
+def invocations(command: str, name: str) -> list[str]:
+    """Segments of a shell command whose executable is exactly NAME."""
+    segments: list[str] = []
+    for part in re.split(r"[;&|\n]|\$\(", command):
+        tokens = part.strip().split()
+        while tokens and re.match(r"^[A-Za-z_]\w*=", tokens[0]): tokens.pop(0)
+        if tokens and tokens[0] == name: segments.append(part.strip())
+    return segments
+
+
+def flags_of(segments: list[str]) -> Counter[str]:
+    flags: Counter[str] = Counter()
+    for segment in segments:
+        for token in segment.split()[1:]:
+            if token.startswith("-") and token not in ("-", "--"): flags[token.split("=", 1)[0]] += 1
+    return flags
+
+
+def tools_report(all_sessions: list[Session], names: list[str]) -> dict[str, Any]:
+    totals = Counter(s.harness for s in all_sessions)
+    rows: list[dict[str, Any]] = []
+    for name in names:
+        per = Counter(); seen: set[Path] = set(); flags: Counter[str] = Counter()
+        for session in all_sessions:
+            segments = [seg for command in session.commands for seg in invocations(command, name)]
+            if segments:
+                per[session.harness] += len(segments)
+                seen.add(session.path)
+                flags.update(flags_of(segments))
+        rows.append({"tool": name, "claude": per["claude"], "codex": per["codex"],
+                     "calls": sum(per.values()), "sessions": len(seen), "flags": dict(flags.most_common())})
+    rows.sort(key=lambda row: -row["calls"])
+    return {"sessions": dict(totals), "tools": rows}
 
 
 @dataclass(frozen=True)
@@ -154,18 +215,27 @@ def stalls_report(all_sessions: list[Session]) -> dict[str, Any]:
 
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(prog="usage.py", description=__doc__.split("\n\n")[0])
-    parser.add_argument("command", choices=("loads", "stalls"))
+    parser.add_argument("command", choices=("loads", "stalls", "tools"))
+    parser.add_argument("names", nargs="*")
     parser.add_argument("--days", type=float, default=14)
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args(argv)
-    found = sessions(Path(os.environ.get("HOME", "~")).expanduser(), args.days)
-    report = loads_report(found, skill_modes()) if args.command == "loads" else stalls_report(found)
+    if args.command == "tools" and not args.names: parser.error("tools needs at least one tool name")
+    found = sessions(Path(os.environ.get("HOME", "~")).expanduser(), args.days, args.command == "tools")
+    if args.command == "loads": report = loads_report(found, skill_modes())
+    elif args.command == "stalls": report = stalls_report(found)
+    else: report = tools_report(found, args.names)
     if args.json: print(json.dumps(report, indent=2)); return 0
     print("sessions:", " ".join(f"{h}={n}" for h, n in sorted(report["sessions"].items())))
     if args.command == "loads":
         for r in report["skills"]: print(f"{r['mode']:8} {r['claude']:4} {r['codex']:4}  {r['skill']}")
-    else:
+    elif args.command == "stalls":
         print(f"with an approval nudge: {report['sessions_with_nudge']}; granted run-until-done: {report['authority_granted']}; stopped again after it: {report['restopped_after_authority']}")
+    else:
+        print(f"{'tool':14} {'claude':>6} {'codex':>6} {'calls':>6} {'sessions':>8}  flags")
+        for r in report["tools"]:
+            flags = " ".join(f"{k}={v}" for k, v in r["flags"].items())
+            print(f"{r['tool']:14} {r['claude']:6} {r['codex']:6} {r['calls']:6} {r['sessions']:8}  {flags}")
     return 0
 
 
