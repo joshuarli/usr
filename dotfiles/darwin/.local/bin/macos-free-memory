@@ -187,10 +187,10 @@ def apply_targets(procs: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], li
         (late if p["pid"] in own else first).append(
             {**p, "expect": "opencode", "label": "opencode serve"}
         )
-    for p in find_procs(procs, "opencode2"):
-        if p["pid"] in own:
+    for p in find_procs(procs, "opencode"):
+        if "serve" in p["args"].lower() or p["pid"] in own:
             continue
-        first.append({**p, "expect": "opencode2", "label": "opencode2"})
+        first.append({**p, "expect": "opencode", "label": "opencode"})
     if not shutil.which("watchman"):
         for p in procs:
             if "watchman --foreground" in p["args"] and p["pid"] not in own:
@@ -356,14 +356,15 @@ Examples:
                 f"kill {p['pid']}  # stop unused `opencode serve --service`, restart on demand",
             )
         )
-    for p in find_procs(procs, "opencode2"):
-        if not any(str(p["pid"]) in c for c, _ in cands):
-            cands.append(
-                (
-                    f"opencode2 PID {p['pid']} ({p['rss_mb']:.0f}M, {p['etime']})",
-                    f"kill {p['pid']}",
-                )
+    for p in find_procs(procs, "opencode"):
+        if "serve" in p["args"].lower() or any(str(p["pid"]) in c for c, _ in cands):
+            continue
+        cands.append(
+            (
+                f"opencode PID {p['pid']} ({p['rss_mb']:.0f}M, {p['etime']})",
+                f"kill {p['pid']}",
             )
+        )
     claude = find_procs(procs, "claude")
     claude = [p for p in claude if "shell-snapshots" not in p["args"]]
     if len(claude) > 1:

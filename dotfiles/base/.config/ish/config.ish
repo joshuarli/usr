@@ -54,7 +54,7 @@ alias tn tmux -f "$XDG_CONFIG_HOME/tmux/tmux.conf" new -s
 alias ta tmux -f "$XDG_CONFIG_HOME/tmux/tmux.conf" a -t
 alias tk tmux -f "$XDG_CONFIG_HOME/tmux/tmux.conf" kill-session -t
 
-alias o opencode2
+alias o opencode
 
 set CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION 9001
 

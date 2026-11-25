@@ -66,12 +66,12 @@ Pi authenticates only to OpenCode Go using the existing OpenCode login. `sh sync
 {
   "opencode-go": {
     "type": "api_key",
-    "key": "!opencode2 auth export opencode | jaq -r '.[] | select(.active) | .value.access'"
+    "key": "!opencode auth export opencode | jaq -r '.[] | select(.active) | .value.access'"
   }
 }
 ```
 
-Pi resolves the credential command at runtime; OpenCode's OAuth session may need refreshing with `opencode2`. Pi authenticates only to OpenCode Go with that credential (exported as `OPENCODE_API_KEY`); there is no Zen access from the Pi path. Muse Ember remains only in the Command Code lane; nothing on the Pi path pins it. Codex subscription runs first using `codex login` with ChatGPT. Command Code uses a separate interactive `cmd login` and runs second. No credentials are committed.
+Pi resolves the credential command at runtime; OpenCode's OAuth session may need refreshing with `opencode`. Pi authenticates only to OpenCode Go with that credential (exported as `OPENCODE_API_KEY`); there is no Zen access from the Pi path. Muse Ember remains only in the Command Code lane; nothing on the Pi path pins it. Codex subscription runs first using `codex login` with ChatGPT. Command Code uses a separate interactive `cmd login` and runs second. No credentials are committed.
 
 `sh sync` does **not** run `pi install`, `pi update`, or npm for Pi. The tracked package list is empty and a nonempty Pi package list is treated as a sync conflict; the CLI explicitly loads its locally vendored extensions. `sh sync plan` and `sh sync doctor` inspect local postconditions without writing. The bridge uses the single installed Pi runtime, and the tracked user profiles in `~/.pi/agent/agents/` enforce the same tier contract for interactive Pi.
 

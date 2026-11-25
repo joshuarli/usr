@@ -124,17 +124,17 @@ class AuthProbeTests(unittest.TestCase):
         (config / "auth.json").write_text(json.dumps({"schema_version": 1, "providers": {}}))
         self.assertEqual(self.state("muse", auth.login_lines(self.home, self.env)).state, "login")
 
-    def test_opencode2_parses_auth_list_output(self):
-        self.fake_bin("opencode2", "#!/bin/sh\necho 'OpenCode Console  Personal                    stored'\nexit 0\n")
-        self.assertEqual(self.state("opencode2", auth.login_lines(self.home, self.env)).state, "current")
-        self.fake_bin("opencode2", "#!/bin/sh\necho 'No authenticated integrations'\nexit 0\n")
-        row = self.state("opencode2", auth.login_lines(self.home, self.env))
+    def test_opencode_parses_auth_list_output(self):
+        self.fake_bin("opencode", "#!/bin/sh\necho 'OpenCode Console  Personal                    stored'\nexit 0\n")
+        self.assertEqual(self.state("opencode", auth.login_lines(self.home, self.env)).state, "current")
+        self.fake_bin("opencode", "#!/bin/sh\necho 'No authenticated integrations'\nexit 0\n")
+        row = self.state("opencode", auth.login_lines(self.home, self.env))
         self.assertEqual(row.state, "login")
-        self.assertIn("opencode2 auth login", row.detail)
+        self.assertIn("opencode auth login", row.detail)
 
-    def test_opencode2_handles_empty_output(self):
-        self.fake_bin("opencode2", "#!/bin/sh\nexit 0\n")
-        self.assertEqual(self.state("opencode2", auth.login_lines(self.home, self.env)).state, "login")
+    def test_opencode_handles_empty_output(self):
+        self.fake_bin("opencode", "#!/bin/sh\nexit 0\n")
+        self.assertEqual(self.state("opencode", auth.login_lines(self.home, self.env)).state, "login")
 
     def test_agy_flags_sign_in_requirement(self):
         self.fake_bin("agy", "#!/bin/sh\necho 'Fetching available models...'\necho 'Error: Please sign in to view available models. Launch the CLI without arguments to sign in.' >&2\nexit 1\n")

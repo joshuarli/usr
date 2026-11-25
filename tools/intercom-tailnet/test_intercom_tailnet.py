@@ -45,7 +45,7 @@ class TailnetTests(unittest.TestCase):
             (self.package / "broker" / name).write_text("fixture\n")
         fixture = (f"#!{sys.executable}\nimport json, os, sys\n"
                    "print(json.dumps({'argv': sys.argv[1:], 'env': dict(os.environ)}))\n")
-        for name in ("node", "pi", "codex", "claude", "opencode", "opencode2"):
+        for name in ("node", "pi", "codex", "claude", "opencode"):
             program = self.bin / name
             program.write_text(fixture)
             program.chmod(0o700)
@@ -73,7 +73,7 @@ class TailnetTests(unittest.TestCase):
         return self.call("run", "--endpoint", endpoint, "--credential", str(self.credential), "--", command, "--fixture")
 
     def test_01_run_passes_only_explicit_coordinator_settings(self):
-        for command in ("pi", "claude", "codex", "opencode", "opencode2"):
+        for command in ("pi", "claude", "codex", "opencode"):
             with self.subTest(command=command):
                 result = self.run_coordinator(command=command)
                 self.assertEqual(result.returncode, 0, result.stderr)
@@ -257,7 +257,7 @@ class TailnetTests(unittest.TestCase):
 
     def test_17_missing_companion_entrypoint_fails_even_with_matching_receipt(self):
         (self.data / "agent-intercom/agent-intercom-opencode/dist/plugin-v2.mjs").unlink()
-        result = self.run_coordinator(command="opencode2")
+        result = self.run_coordinator(command="opencode")
         self.assertEqual(result.returncode, 1)
         self.assertIn("does not match the selected Pi runtime", result.stderr)
 

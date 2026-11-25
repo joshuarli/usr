@@ -244,7 +244,7 @@ export async function diagnoseGoModel(model: ModelRef): Promise<string | null> {
     if (!runtime.getModel(model.providerID, model.id))
       return `Pinned OpenCode Go model ${model.providerID}/${model.id} is not in the Pi SDK catalog`
     if (!runtime.hasConfiguredAuth(model.providerID))
-      return `No configured auth for ${model.providerID} in Pi SDK; sign in with opencode2 or set OPENCODE_API_KEY`
+      return `No configured auth for ${model.providerID} in Pi SDK; sign in with opencode or set OPENCODE_API_KEY`
   } catch { return null }
   return null
 }

@@ -32,7 +32,7 @@ COMPANIONS = ROOT / "tools/sync/companions.py"
 NODE_RUNTIME_TOOLS = frozenset({"cmd", "pnpm", "cf", "pi", "dsh"})
 TOOL_EXECUTABLES = {
     "nodejs": ("node", "npm"), "ffmpeg": ("ffmpeg", "ffprobe"),
-    "shuck": ("shellcheck",), "opencode2": ("opencode2",), "lz": ("less",),
+    "shuck": ("shellcheck",), "opencode": ("opencode",), "lz": ("less",),
     "ghostty": ("ghostty-custom",), "ghostty-custom": ("ghostty-custom",),
     "player": ("player",), "antigravity": ("agy",), "gluon": ("meson", "ninja", "gluon-build"), "bctl": ("bctl",),
     "python3": ("python3",), "ssh": ("ssh",),
@@ -329,7 +329,7 @@ def graph(ctx: Context, names: list[str], *, setup: bool) -> Graph:
                           lambda: mac_packages_apply(ctx), lambda: mac_packages_status(ctx),
                           frozenset({"host:packages"})))
 
-    all_tools = set(names) | {"uv", "nodejs", "claude", "opencode2", "cmd", "pi"}
+    all_tools = set(names) | {"uv", "nodejs", "claude", "opencode", "cmd", "pi"}
     pending = list(all_tools)
     while pending:
         tool = pending.pop()

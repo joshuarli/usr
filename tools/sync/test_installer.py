@@ -1360,7 +1360,7 @@ esac
         self.make(extra_bin=self.root / "gh-bin").prune_bctl_releases()
         self.assertFalse(old.exists())
 
-    def test_opencode2_archive_shim_and_current(self):
+    def test_opencode_archive_shim_and_current(self):
         import hashlib
         target = "linux-x64"
         asset = f"opencode-{installer.OPENCODE_VERSION}-{target}.tar.xz"
@@ -1369,15 +1369,16 @@ esac
         digest = hashlib.sha256(payload).hexdigest()
         with patch.dict(installer.OPENCODE_MIRROR_SHA256, {target: digest}):
             inst = self.make({url: payload})
-            inst.install_opencode2()
+            inst.install_opencode()
             self.assertEqual((self.home / ".opencode/bin/opencode").read_bytes(), b"binary")
-            self.assertTrue(self.dest_path("opencode2").is_file())
+            self.assertFalse(self.dest_path("opencode2").exists())
+            self.assertFalse((self.home / ".opencode/bin/opencode2").exists())
             self.assertEqual(self.dest_path("opencode").read_text(), '#!/bin/sh\nexec "${HOME}/.opencode/bin/opencode" "$@"\n')
             inst = self.make({url: payload})
-            inst.install_opencode2()
+            inst.install_opencode()
             self.assertFalse(inst.changed)
 
-    def test_opencode2_alias_keeps_foreign_file(self):
+    def test_opencode_keeps_foreign_file(self):
         import hashlib
         target = "linux-x64"
         asset = f"opencode-{installer.OPENCODE_VERSION}-{target}.tar.xz"
@@ -1389,8 +1390,47 @@ esac
         foreign.write_text("#!/bin/sh\necho foreign\n")
         foreign.chmod(0o755)
         with patch.dict(installer.OPENCODE_MIRROR_SHA256, {target: digest}):
-            inst.install_opencode2()
+            inst.install_opencode()
         self.assertEqual(foreign.read_text(), "#!/bin/sh\necho foreign\n")
+
+    def test_opencode_retires_legacy_launchers(self):
+        state = self.home / ".local/state/dl"
+        state.mkdir(parents=True, exist_ok=True)
+        old_record = f"opencode2-{installer.OPENCODE_VERSION}-linux-x64\n"
+        (state / "opencode2").write_text(old_record)
+        shim = '#!/bin/sh\nexec "${HOME}/.opencode/bin/opencode" "$@"\n'
+        for old in (self.dest_path("opencode2"), self.home / ".opencode/bin/opencode2"):
+            old.parent.mkdir(parents=True, exist_ok=True)
+            old.write_text(shim)
+        inst = self.make({})
+        inst.retire_opencode_alias()
+        self.assertFalse((state / "opencode2").exists())
+        self.assertEqual(self.state("opencode"), old_record.strip().replace("opencode2-", "opencode-", 1))
+        self.assertFalse(self.dest_path("opencode2").exists())
+        self.assertFalse((self.home / ".opencode/bin/opencode2").exists())
+        self.assertEqual(inst.removed, {state / "opencode2", self.dest_path("opencode2"),
+                                        self.home / ".opencode/bin/opencode2"})
+
+    def test_opencode_upgrades_legacy_install_without_redownload(self):
+        state = self.home / ".local/state/dl"
+        state.mkdir(parents=True, exist_ok=True)
+        (state / "opencode2").write_text(f"opencode2-{installer.OPENCODE_VERSION}-linux-x64\n")
+        binary = self.home / ".opencode/bin/opencode"
+        binary.parent.mkdir(parents=True, exist_ok=True)
+        binary.write_bytes(b"binary")
+        shim = '#!/bin/sh\nexec "${HOME}/.opencode/bin/opencode" "$@"\n'
+        for launcher in (self.dest_path("opencode"), self.dest_path("opencode2"),
+                         self.home / ".opencode/bin/opencode2"):
+            launcher.parent.mkdir(parents=True, exist_ok=True)
+            launcher.write_text(shim)
+            launcher.chmod(0o755)
+        inst = self.make({})
+        inst.install_opencode()
+        self.assertFalse(inst.changed)
+        self.assertEqual(binary.read_bytes(), b"binary")
+        self.assertEqual(self.state("opencode"), f"opencode-{installer.OPENCODE_VERSION}-linux-x64")
+        self.assertFalse(self.dest_path("opencode2").exists())
+        self.assertFalse((self.home / ".opencode/bin/opencode2").exists())
 
     def test_player_linux_and_ghostty_rejections(self):
         inst = self.make({}, os_name="darwin", arch="x86_64")

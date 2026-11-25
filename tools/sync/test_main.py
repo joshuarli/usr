@@ -56,14 +56,14 @@ class MainTests(unittest.TestCase):
         dag = main.graph(self.ctx, [], setup=True).select(["claude-mcp"])
         names = {task.name for task in dag.order()}
         self.assertTrue({"links", "tool:nodejs", "tool:pi", "pi-extensions", "claude-mcp"} <= names)
-        self.assertFalse({"tool:cmd", "tool:opencode2", "tool:claude"} & names,
+        self.assertFalse({"tool:cmd", "tool:opencode", "tool:claude"} & names,
                          "bridge registration must not install npm-managed provider harnesses")
 
     def test_pi_bridge_requires_only_offline_pi_and_node(self):
         dag = main.graph(self.ctx, [], setup=True).select(["pi-mcp"])
         names = {task.name for task in dag.order()}
         self.assertTrue({"links", "tool:nodejs", "tool:pi", "pi-extensions", "pi-mcp"} <= names)
-        self.assertFalse({"tool:cmd", "tool:opencode2", "tool:claude"} & names,
+        self.assertFalse({"tool:cmd", "tool:opencode", "tool:claude"} & names,
                          "bridge registration must not install npm-managed provider harnesses")
 
     def test_opencode_task_only_enforces_bridge_absence(self):

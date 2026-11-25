@@ -112,7 +112,7 @@ if [ -x "$target/.local/bin/pi" ] && [ -f "$root/tools/sync/pi-worker.py" ]; the
         cat "$scratch/pi-bridge"
     fi
 fi
-if [ -x "$target/.local/bin/opencode2" ] && [ -f "$root/tools/sync/opencode-worker.py" ]; then
+if [ -x "$target/.local/bin/opencode" ] && [ -f "$root/tools/sync/opencode-worker.py" ]; then
     if python3 -I "$root/tools/sync/opencode-worker.py" verify-absent > "$scratch/opencode-bridge" 2>&1; then
         ok 'OpenCode bridge is not registered'
     else

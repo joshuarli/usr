@@ -18,9 +18,9 @@ import pi_release  # noqa: E402
 
 TAILNET_V4 = ipaddress.ip_network("100.64.0.0/10")
 TAILNET_V6 = ipaddress.ip_network("fd7a:115c:a1e0::/48")
-COORDINATORS = frozenset({"pi", "claude", "codex", "opencode", "opencode2"})
+COORDINATORS = frozenset({"pi", "claude", "codex", "opencode"})
 COMPANION_ENTRYPOINTS = {"claude": ("claude", "claude-server.mjs"), "codex": ("codex", "codex-server.mjs"),
-                         "opencode": ("opencode", "plugin-v2.mjs"), "opencode2": ("opencode", "plugin-v2.mjs")}
+                         "opencode": ("opencode", "plugin-v2.mjs")}
 
 
 class IntercomError(ValueError):
@@ -203,7 +203,7 @@ Procedure: https://github.com/joshuarli/usr/blob/main/dotfiles/base/.agents/inst
     run = commands.add_parser("run", help="run an enrolled Pi, Claude, Codex or OpenCode coordinator")
     run.add_argument("--endpoint", required=True, help="hub transport endpoint")
     run.add_argument("--credential", required=True, help="private credential file")
-    run.add_argument("command", nargs=argparse.REMAINDER, help="-- pi|claude|codex|opencode|opencode2 [arguments]")
+    run.add_argument("command", nargs=argparse.REMAINDER, help="-- pi|claude|codex|opencode [arguments]")
     doctor = commands.add_parser("doctor", help="check the local setup; optional reachability never enrolls or sends messages")
     doctor.add_argument("--endpoint", help="hub transport endpoint to check")
     doctor.add_argument("--credential", help="private credential file to check")
@@ -235,7 +235,7 @@ def main(argv: list[str] | None = None) -> int:
             runtime_command("tailnet-admin")  # Fail clearly on a release without the remote transport.
             command = args.command[1:] if args.command[:1] == ["--"] else args.command
             if not command or Path(command[0]).name not in COORDINATORS:
-                raise IntercomError("run requires -- pi|claude|codex|opencode|opencode2 [arguments]; scoped workers are not coordinators")
+                raise IntercomError("run requires -- pi|claude|codex|opencode [arguments]; scoped workers are not coordinators")
             require_matching_companion(Path(command[0]).name)
             env["AGENT_INTERCOM_REMOTE_ENDPOINT"] = args.endpoint
             env["AGENT_INTERCOM_ACCESS_CREDENTIAL_PATH"] = str(credential)

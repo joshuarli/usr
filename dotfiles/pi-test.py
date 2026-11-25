@@ -163,7 +163,7 @@ class PiTests(unittest.TestCase):
         self.assertFalse((PROFILE / "agents/god.md").exists())
         self.assertEqual(os.readlink(PROFILE / "AGENTS.md"), "../../.codex/AGENTS.md")
         self.assertIn("pi-subagent-bridge", (ROOT / "dotfiles/base/.agents/skills/orchestrate/SKILL.md").read_text())
-        self.assertIn("opencode2 auth export", (ROOT / "docs/pi.md").read_text())
+        self.assertIn("opencode auth export", (ROOT / "docs/pi.md").read_text())
 
 
 

@@ -28,7 +28,7 @@ class PiAuthTests(unittest.TestCase):
         pi_auth.apply(self.home, self.env)
         data = json.loads(self.auth_file().read_text())
         self.assertEqual(data, {"opencode-go": pi_auth.ENTRY})
-        self.assertIn("!opencode2 auth export opencode", data["opencode-go"]["key"])
+        self.assertIn("!opencode auth export opencode", data["opencode-go"]["key"])
         self.assertEqual(self.auth_file().stat().st_mode & 0o777, 0o600)
         self.assertTrue(pi_auth.status(self.home, self.env).current)
 

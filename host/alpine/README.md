@@ -69,7 +69,7 @@ that checkout), and runs `install.sh` as root through `doas` or `sudo`.
 The server profile installs `fd`, `rg`, `jaq`, `fastermod`, `tm`, `ish`,
 `stuff`, `e`, `fz`, `fs`, `srv`, `git`, `python3`, `uv`, `gh`, `zzz`, `shuck`,
 and `vault`. The heavy
-agent, media, sync, and build extras (`codex`, `claude`, `opencode2`, `pi`,
+agent, media, sync, and build extras (`codex`, `claude`, `opencode`, `pi`,
 `agent-browser`, `cf`, `ffmpeg`, `nodejs`, `pnpm`, `syncthing`, `player`, `mold`)
 are opt-in on a server with `sh sync tools TOOL...`. The full set is installed by default
 in desktop mode. `sync tools`, `sync`, and `doctor` follow the profile recorded in

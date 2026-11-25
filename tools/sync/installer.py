@@ -101,7 +101,7 @@ BCTL_COMMANDS = ["bctl"]
 BCTL_REPO = "joshuarli/bctl"
 FX_SETTINGS = Path(__file__).with_name("fx-settings.json")
 FFMPEG_COMMANDS = ["ffmpeg", "ffprobe"]
-OPENCODE2_SHIM = '#!/bin/sh\nexec "${HOME}/.opencode/bin/opencode" "$@"'
+OPENCODE_SHIM = '#!/bin/sh\nexec "${HOME}/.opencode/bin/opencode" "$@"'
 GIT_COMMANDS = ["git", "git-shell", "git-upload-archive", "git-upload-pack", "git-receive-pack", "git-submodule", "git-submodule--helper", "git-sh-setup", "git-sh-i18n", "git-sh-i18n--envsubst"]
 
 
@@ -174,7 +174,7 @@ class Installer:
         self.oxish_home = Path(self.env.get("OXISH_HOME") or self.data_home / "oxish")
         self.gluon_home = Path(self.env.get("GLUON_HOME") or self.data_home / "gluon")
         self.bctl_releases_home = self.data_home / "bctl"
-        self.opencode2_home = Path(self.env.get("OPENCODE2_HOME") or self.home / ".opencode")
+        self.opencode_home = Path(self.env.get("OPENCODE_HOME") or self.home / ".opencode")
         self.cmd_root = self.data_home / "command-code"
         self.pi_root = self.data_home / "pi-runtime"
         self.pi_legacy_root = self.data_home / "pi"
@@ -2810,59 +2810,59 @@ class Installer:
         self.write_ffmpeg_pin(tool, [tag])
         self.prune_ffmpeg_releases(self.ffmpeg_triple(tool))
 
-    def write_opencode2_shim(self, target: Path) -> None:
-        staged = self.stage_file(target.parent, ".opencode2-shim.")
-        staged.write_text(OPENCODE2_SHIM + "\n")
+    def write_opencode_shim(self, target: Path) -> None:
+        staged = self.stage_file(target.parent, ".opencode-shim.")
+        staged.write_text(OPENCODE_SHIM + "\n")
         staged.chmod(0o755)
         os.replace(staged, target)
         self.own_file(target)
 
-    def write_opencode_alias(self) -> None:
-        alias = self.dest / "opencode"
-        if alias.exists() or alias.is_symlink():
-            if not self.opencode_alias_managed():
-                self.warn(f"Warning: {alias} is not the compat shim; keeping it")
-                return
-        self.write_opencode2_shim(alias)
-
-    def opencode_alias_managed(self) -> bool:
-        alias = self.dest / "opencode"
-        if alias.is_symlink():
-            return os.readlink(alias) == str(self.opencode2_home / "bin/opencode2")
-        if not alias.is_file() or not os.access(alias, os.X_OK):
-            return False
-        try:
-            return alias.read_text().rstrip("\n") == OPENCODE2_SHIM
-        except OSError:
-            return False
-
-    def opencode2_managed(self) -> bool:
-        launcher = self.dest / "opencode2"
+    def opencode_managed(self) -> bool:
+        launcher = self.dest / "opencode"
         if launcher.is_symlink():
-            return os.readlink(launcher) == str(self.opencode2_home / "bin/opencode2")
+            return os.readlink(launcher) == str(self.opencode_home / "bin/opencode")
         if not launcher.is_file() or not os.access(launcher, os.X_OK):
             return False
         try:
-            return launcher.read_text().rstrip("\n") == OPENCODE2_SHIM
+            return launcher.read_text().rstrip("\n") == OPENCODE_SHIM
         except OSError:
             return False
 
-    def opencode2_legacy(self) -> bool:
-        launcher = self.dest / "opencode2"
+    def opencode_legacy(self) -> bool:
+        launcher = self.dest / "opencode"
         return launcher.is_file() and not launcher.is_symlink() \
-            and (self.state / "opencode2").is_file() and self.legacy_binary("opencode2")
+            and (self.state / "opencode").is_file() and self.legacy_binary("opencode")
 
-    def install_opencode2(self) -> None:
-        if self.installed("opencode2") and not self.opencode2_legacy() and not self.opencode2_managed():
-            if (self.dest / "opencode2").is_file() and not (self.dest / "opencode2").is_symlink() \
-                    and (self.state / "opencode2").is_file() and not self.which("file"):
-                self.warn("Warning: file is required to identify the existing OpenCode 2 launcher; keeping it")
-            self.current("opencode2 is installed")
+    def retire_opencode_alias(self) -> None:
+        old_state = self.state / "opencode2"
+        if not old_state.is_file():
+            return
+        record = old_state.read_text().strip()
+        if record.startswith("opencode2-"):
+            self.write_state("opencode", "opencode-" + record[len("opencode2-"):])
+        old_state.unlink()
+        self.removed.add(old_state)
+        for launcher in (self.dest / "opencode2", self.opencode_home / "bin/opencode2"):
+            if launcher.is_file() and not launcher.is_symlink():
+                try:
+                    if launcher.read_text().rstrip("\n") == OPENCODE_SHIM:
+                        launcher.unlink()
+                        self.removed.add(launcher)
+                except OSError:
+                    pass
+
+    def install_opencode(self) -> None:
+        self.retire_opencode_alias()
+        if self.installed("opencode") and not self.opencode_legacy() and not self.opencode_managed():
+            if (self.dest / "opencode").is_file() and not (self.dest / "opencode").is_symlink() \
+                    and (self.state / "opencode").is_file() and not self.which("file"):
+                self.warn("Warning: file is required to identify the existing OpenCode launcher; keeping it")
+            self.current("opencode is installed")
             return
         targets = {("darwin", "x86_64"): "darwin-x64", ("darwin", "aarch64"): "darwin-arm64",
                    ("linux", "x86_64"): "linux-x64", ("linux", "aarch64"): "linux-arm64"}
         if (self.os_name, self.arch) not in targets:
-            self.skip("opencode2", f"no upstream binary for {self.os_name}/{self.arch}")
+            self.skip("opencode", f"no upstream binary for {self.os_name}/{self.arch}")
         target = targets[(self.os_name, self.arch)]
         ldd_result = self.run(["ldd", "--version"], capture=True) if self.which("ldd") else None
         if self.os_name == "linux" and (Path("/etc/alpine-release").exists()
@@ -2871,36 +2871,34 @@ class Installer:
         asset = f"opencode-{OPENCODE_VERSION}-{target}.tar.xz"
         url = f"{MIRROR_BASE}/{asset}"
         digest = OPENCODE_MIRROR_SHA256[target]
-        record = f"opencode2-{OPENCODE_VERSION}-{target}"
-        bin_dir = self.opencode2_home / "bin"
-        if not self.opencode2_legacy() and self.is_current("opencode2", record):
-            self.write_opencode2_shim(bin_dir / "opencode2")
-            self.write_opencode2_shim(self.dest / "opencode2")
-            self.write_opencode_alias()
+        record = f"opencode-{OPENCODE_VERSION}-{target}"
+        bin_dir = self.opencode_home / "bin"
+        if not self.opencode_legacy() and self.is_current("opencode", record):
+            self.write_opencode_shim(self.dest / "opencode")
             self.own_file(bin_dir / "opencode")
-            self.current("opencode2 is current")
+            self.current("opencode is current")
             return
         binary = bin_dir / "opencode"
         if binary.exists() or binary.is_symlink():
-            if not self.opencode2_managed() or not (self.state / "opencode2").is_file():
-                self.skip("opencode2", f"{binary} already exists")
+            if not self.opencode_managed() or not (self.state / "opencode").is_file():
+                self.skip("opencode", f"{binary} already exists")
         self.own_missing_dirs(bin_dir)
         bin_dir.mkdir(parents=True, exist_ok=True)
-        self.fetch_msg("Downloading opencode2 ...")
+        self.fetch_msg("Downloading opencode ...")
         with tempfile.NamedTemporaryFile(delete=False) as stream:
             archive_path = Path(stream.name)
         if not self.download(url, archive_path):
             archive_path.unlink(missing_ok=True)
-            self.skip("opencode2", "download failed")
+            self.skip("opencode", "download failed")
         if self.sha256_file(archive_path) != digest:
             archive_path.unlink(missing_ok=True)
-            self.skip("opencode2", "checksum mismatch")
-        staged = self.stage_file(bin_dir, ".opencode2.")
+            self.skip("opencode", "checksum mismatch")
+        staged = self.stage_file(bin_dir, ".opencode.")
         member = self.tar_member(archive_path, "opencode")
         archive_path.unlink(missing_ok=True)
         if not member:
             staged.unlink(missing_ok=True)
-            self.skip("opencode2", f"{asset} is missing the opencode binary")
+            self.skip("opencode", f"{asset} is missing the opencode binary")
         staged.write_bytes(member)
         if self.os_name == "darwin":
             self.run(["xattr", "-d", "com.apple.quarantine", str(staged)])
@@ -2908,12 +2906,10 @@ class Installer:
         staged.chmod(staged.stat().st_mode | 0o111)
         os.replace(staged, binary)
         self.own_file(binary)
-        self.write_opencode2_shim(bin_dir / "opencode2")
-        self.write_opencode2_shim(self.dest / "opencode2")
-        self.write_opencode_alias()
-        self.write_state("opencode2", record)
+        self.write_opencode_shim(self.dest / "opencode")
+        self.write_state("opencode", record)
         self.changed = True
-        self.ok(f"Installed {self.dest}/opencode2")
+        self.ok(f"Installed {self.dest}/opencode")
 
     def replace_dir(self, tool: str, staged: Path, target: Path) -> None:
         old = None
@@ -3322,7 +3318,7 @@ class Installer:
             "antigravity": self.install_antigravity, "agy": self.install_antigravity,
             "muse": self.install_muse, "claude": self.install_claude, "codex": self.install_codex,
             "devin": self.install_devin,
-            "opencode2": self.install_opencode2,
+            "opencode": self.install_opencode,
             "ghostty": self.install_ghostty_custom, "ghostty-custom": self.install_ghostty_custom,
             "play": self.install_player, "player": self.install_player,
             "jaq": self.install_jaq, "mold": self.install_mold, "nodejs": self.install_nodejs,
@@ -3449,10 +3445,20 @@ class Installer:
                 self.own_dir(self.pi_legacy_root)
                 if launcher.is_symlink() and os.readlink(launcher) == str(self.pi_legacy_root / "bin/pi"):
                     self.own_file(launcher)
-        self.record_managed_binary("opencode2")
-        if (self.state / "opencode2").is_file() and (self.state / "opencode2").stat().st_size > 0 and self.opencode2_managed():
-            self.own_file(self.opencode2_home / "bin/opencode2")
-            self.own_file(self.opencode2_home / "bin/opencode")
+        self.record_managed_binary("opencode")
+        if (self.state / "opencode").is_file() and (self.state / "opencode").stat().st_size > 0 and self.opencode_managed():
+            self.own_file(self.opencode_home / "bin/opencode")
+        old_state = self.state / "opencode2"
+        if old_state.is_file() and old_state.stat().st_size > 0:
+            self.own_file(old_state)
+            old_launcher = self.dest / "opencode2"
+            if old_launcher.is_file() and not old_launcher.is_symlink():
+                try:
+                    if old_launcher.read_text().rstrip("\n") == OPENCODE_SHIM:
+                        self.own_file(old_launcher)
+                        self.own_file(self.opencode_home / "bin/opencode2")
+                except OSError:
+                    pass
         for prog in ("dsh", "dsh-tui"):
             if (self.state / prog).is_file():
                 self.own_file(self.state / prog)
@@ -3534,7 +3540,7 @@ def default_tools(os_name: str, arch: str, profile: str, server_tools: Path | No
     tools = ["fd", "rg"]
     if not (os_name == "linux" and arch == "aarch64"):
         tools.append("jaq")
-    tools += "codex claude devin opencode2 pi fastermod tm ish stuff e fz srv git python3 uv cf agent-browser rage vault".split()
+    tools += "codex claude devin opencode pi fastermod tm ish stuff e fz srv git python3 uv cf agent-browser rage vault".split()
     if (os_name, arch) in (("darwin", "aarch64"), ("linux", "x86_64"), ("linux", "aarch64")):
         tools += ["ffmpeg", "nodejs", "pnpm", "cmd", "syncthing", "shuck", "img", "gluon", "lz"]
     if (os_name, arch) in (("linux", "x86_64"), ("linux", "aarch64")):

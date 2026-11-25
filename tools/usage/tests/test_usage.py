@@ -369,7 +369,7 @@ class OwnedHelpTests(unittest.TestCase):
     def test_provider_help_points_to_reference(self):
         import subprocess
         root = Path(__file__).resolve().parents[3]
-        for name in [item[0] for item in NS["PROVIDERS"]] + ["opencode2"]:
+        for name in [item[0] for item in NS["PROVIDERS"]]:
             result = subprocess.run([str(root / "dotfiles/base/.local/bin/usage"), name, "-h"], capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn("usage -h", result.stdout)

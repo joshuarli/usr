@@ -133,17 +133,17 @@ def _muse(home: Path, env: dict[str, str]) -> Probe:
     return Probe(False, "not signed in — muse login")
 
 
-def _opencode2(home: Path, env: dict[str, str]) -> Probe:
-    binary = home / ".local/bin/opencode2"
+def _opencode(home: Path, env: dict[str, str]) -> Probe:
+    binary = home / ".local/bin/opencode"
     result = _run(home, env, binary, "auth", "list")
     out = _output(result)
     if result is None:
-        return Probe(False, "could not check — opencode2 auth list")
+        return Probe(False, "could not check — opencode auth list")
     if "no authenticated integrations" in out:
-        return Probe(False, "no credentials — opencode2 auth login")
+        return Probe(False, "no credentials — opencode auth login")
     if "stored" in out:
         return Probe(True, "signed in")
-    return Probe(False, "could not check — opencode2 auth list")
+    return Probe(False, "could not check — opencode auth list")
 
 
 def _agy(home: Path, env: dict[str, str]) -> Probe:
@@ -199,7 +199,7 @@ HARNESSES: tuple[Harness, ...] = tuple(sorted((
     Harness("fx", "fx", _fx),
     Harness("pi", "pi", _pi),
     Harness("muse", "muse", _muse),
-    Harness("opencode2", "opencode2", _opencode2),
+    Harness("opencode", "opencode", _opencode),
 ), key=lambda harness: harness.name))
 
 

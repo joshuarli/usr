@@ -72,7 +72,7 @@ intercom-tailnet run --endpoint tcp://100.100.100.11:47831 \
   --credential "$HOME/.config/agent-intercom/mac-main.json" -- pi
 ```
 
-Use `-- claude`, `-- codex`, `-- opencode`, or `-- opencode2` for another harness;
+Use `-- claude`, `-- codex`, or `-- opencode` for another harness;
 their existing arguments follow the executable. Each concurrent coordinator
 needs its own enrollment. The Codex MCP registration forwards the selected
 endpoint and credential path to its Intercom adapter. Claude's local MCP process

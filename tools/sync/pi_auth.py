@@ -1,7 +1,7 @@
 """Seed Pi's OpenCode Go credential from the opencode login.
 
 The key is a runtime command, not a copied token: Pi runs
-`opencode2 auth export opencode` when it needs the credential, so sync never
+`opencode auth export opencode` when it needs the credential, so sync never
 sees, stores or refreshes access tokens. Existing entries are preserved; an
 unreadable or non-object auth file is a conflict and is never rewritten.
 """
@@ -19,7 +19,7 @@ from dag import Probe
 PROVIDER = "opencode-go"
 ENTRY = {
     "type": "api_key",
-    "key": "!opencode2 auth export opencode | jaq -r '.[] | select(.active) | .value.access'",
+    "key": "!opencode auth export opencode | jaq -r '.[] | select(.active) | .value.access'",
 }
 MAX_AUTH_BYTES = 1_000_000
 
