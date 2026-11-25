@@ -7,19 +7,43 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from typing import Any
 
 ROOT = Path(__file__).resolve().parents[2]
 CLI = ROOT / "dotfiles/base/.local/bin/standards"
 STANDARDS = ROOT / "dotfiles/base/.agents/standards"
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import standards  # noqa: E402
+
+VALID = '''+++
+name = "{name}"
+summary = "s"
+{triggers}
+[examples]
+match = {match}
+skip = {skip}
++++
+# T
+
+## Code
+
+- rule
+'''
 
 
 def run(*args: str, cwd: Path, directory: Path = STANDARDS) -> subprocess.CompletedProcess[str]:
     return subprocess.run((sys.executable, "-I", str(CLI), "--dir", str(directory), *args), cwd=cwd, capture_output=True, text=True)
 
 
-def selected(result: subprocess.CompletedProcess[str]) -> dict[str, list[dict[str, str]]]:
+def selected(result: subprocess.CompletedProcess[str]) -> dict[str, list[dict[str, Any]]]:
     assert result.returncode == 0, result.stderr
     return {item["name"]: item["reasons"] for item in json.loads(result.stdout)}
+
+
+def scratch() -> tempfile.TemporaryDirectory[str]:
+    base = ROOT / ".work/tmp"
+    base.mkdir(parents=True, exist_ok=True)
+    return tempfile.TemporaryDirectory(dir=base)
 
 
 class Repo:
@@ -37,16 +61,38 @@ class Repo:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text)
 
-    def commit(self, message: str = "c") -> None:
+    def commit(self) -> None:
         self.git("add", "-A")
-        self.git("commit", "-q", "-m", message)
+        self.git("commit", "-q", "-m", "c")
+
+
+class PathPatternTests(unittest.TestCase):
+    def test_gitignore_semantics(self):
+        cases = [
+            ("*.sh", "a/b/x.sh", True), ("*.sh", "x.shx", False),
+            ("/build.sh", "build.sh", True), ("/build.sh", "a/build.sh", False),
+            ("docs/*.md", "docs/a.md", True), ("docs/*.md", "docs/x/a.md", False), ("docs/*.md", "a/docs/a.md", False),
+            ("**/src/main.rs", "src/main.rs", True), ("**/src/main.rs", "a/b/src/main.rs", True),
+            ("bin/", "x/bin/tool", True), ("bin/", "bin", False),
+            ("/.github/workflows/**", ".github/workflows/a/b.yml", True), ("/.github/workflows/**", "s/.github/workflows/a.yml", False),
+            ("a/**/b", "a/b", True), ("a/**/b", "a/x/y/b", True),
+            ("[!a]x", "bx", True), ("[!a]x", "ax", False), ("?.py", "a.py", True), ("?.py", "ab.py", False),
+            ("Makefile", "deep/pkg/Makefile", True), ("\\*.md", "*.md", True), ("\\*.md", "a.md", False),
+        ]
+        for pattern, path, expected in cases:
+            with self.subTest(pattern=pattern, path=path):
+                self.assertEqual(expected, standards.paths_match([standards.compile_path(pattern)], path)[0])
+
+    def test_last_matching_pattern_wins(self):
+        patterns = [standards.compile_path(p) for p in ("*", "!*.md", "keep.md")]
+        self.assertEqual((False, "!*.md"), standards.paths_match(patterns, "docs/a.md"))
+        self.assertEqual((True, "keep.md"), standards.paths_match(patterns, "docs/keep.md"))
+        self.assertEqual((True, "*"), standards.paths_match(patterns, "src/a.py"))
 
 
 class SelectTests(unittest.TestCase):
     def setUp(self):
-        base = ROOT / ".work/tmp"
-        base.mkdir(parents=True, exist_ok=True)
-        self.tmp = tempfile.TemporaryDirectory(dir=base)
+        self.tmp = scratch()
         self.repo = Repo(Path(self.tmp.name))
         self.repo.write("README.md", "hello\n")
         self.repo.write("tool", "#!/bin/sh\nset -eu\necho one\n")
@@ -56,7 +102,7 @@ class SelectTests(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
-    def select(self, *args: str) -> dict[str, list[dict[str, str]]]:
+    def select(self, *args: str) -> dict[str, list[dict[str, Any]]]:
         return selected(run("select", "--json", *args, cwd=self.repo.root))
 
     def test_clean_tree_and_prose_edits_select_nothing(self):
@@ -68,7 +114,7 @@ class SelectTests(unittest.TestCase):
         self.repo.write("tool", "#!/bin/sh\nset -eu\necho two\n")
         result = self.select()
         self.assertEqual(["shell"], list(result))
-        self.assertEqual([("tool", "shebang")], [(r["file"], r["trigger"]) for r in result["shell"]])
+        self.assertEqual([("tool", ["shebang"])], [(r["file"], [c["kind"] for c in r["conditions"]]) for r in result["shell"]])
 
     def test_only_added_lines_trigger_content_rules(self):
         self.repo.write("app.py", "import argparse\ndef f():\n    return 1\n")
@@ -78,23 +124,24 @@ class SelectTests(unittest.TestCase):
         self.repo.write("app.py", "import signal\nsignal.signal(signal.SIGINT, h)\n")
         self.assertEqual(["cli-interrupt"], list(self.select()))
 
-    def test_untracked_and_nested_paths_select_by_glob(self):
-        self.repo.write("svc/.github/workflows/ci.yml", "on: push\n")
-        self.repo.write("pkg/Makefile", "all:\n\ttrue\n")
-        result = self.select()
-        self.assertEqual({"github-actions", "shell"}, set(result))
-        self.assertEqual("path", result["shell"][0]["trigger"])
+    def test_trigger_conditions_combine(self):
+        self.repo.write("README.md", "Press Ctrl-C to send SIGINT.\n")
+        self.assertEqual({}, self.select())
 
     def test_quoted_paths_and_plus_prefixed_content_keep_their_added_lines(self):
         for name in ("a b.py", "é.py"):
             self.repo.write(name, "x\n")
         self.repo.commit()
         self.repo.write("a b.py", "x\nimport argparse\n")
-        result = self.select()
-        self.assertEqual([("a b.py", "content")], [(r["file"], r["trigger"]) for r in result["cli-interrupt"]])
+        self.assertEqual(["a b.py"], [r["file"] for r in self.select()["cli-interrupt"]])
         self.repo.write("a b.py", "x\n")
         self.repo.write("é.py", "x\n++ import argparse\n")
         self.assertEqual(["é.py"], [r["file"] for r in self.select()["cli-interrupt"]])
+
+    def test_untracked_files_select_by_path(self):
+        self.repo.write(".github/workflows/ci.yml", "on: push\n")
+        self.repo.write("pkg/Makefile", "all:\n\ttrue\n")
+        self.assertEqual({"github-actions", "shell"}, set(self.select()))
 
     def test_deleted_files_select_nothing(self):
         self.repo.write("build.sh", "#!/bin/sh\n")
@@ -107,6 +154,13 @@ class SelectTests(unittest.TestCase):
         self.repo.commit()
         self.assertEqual({}, self.select())
         self.assertEqual(["shell"], list(self.select("--base", "HEAD~1")))
+
+    def test_tree_matches_every_file_in_full(self):
+        self.repo.write("cli.py", "import argparse\n")
+        self.repo.commit()
+        self.assertEqual({}, self.select())
+        self.assertEqual({"cli-interrupt", "shell"}, set(self.select("--tree")))
+        self.assertEqual(2, run("select", "--tree", "tool", cwd=self.repo.root).returncode)
 
     def test_explicit_files_match_whole_content(self):
         self.assertEqual(["shell"], list(self.select("tool")))
@@ -121,40 +175,58 @@ class SelectTests(unittest.TestCase):
         self.assertEqual(0, result.returncode, result.stderr)
         name, path, reason = result.stdout.rstrip("\n").split("\t")
         self.assertEqual(("shell", str(STANDARDS / "shell.md")), (name, path))
-        self.assertTrue(reason.startswith("tool: shebang "), reason)
+        self.assertTrue(reason.startswith("tool: trigger 2: shebang "), reason)
+
+    def test_explain_shows_each_trigger_verdict(self):
+        self.repo.write("notes.md", "SIGINT\n")
+        result = run("explain", "notes.md", cwd=self.repo.root)
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertIn("  cli-interrupt trigger 2: misses (paths no match, content \\bSIG(INT|TERM)\\b)\n", result.stdout)
+        self.assertIn("  shell trigger 1: misses (paths no match)\n", result.stdout)
 
 
 class CheckTests(unittest.TestCase):
     def setUp(self):
-        base = ROOT / ".work/tmp"
-        base.mkdir(parents=True, exist_ok=True)
-        self.tmp = tempfile.TemporaryDirectory(dir=base)
+        self.tmp = scratch()
         self.dir = Path(self.tmp.name)
 
     def tearDown(self):
         self.tmp.cleanup()
 
     def check(self, name: str, text: str) -> subprocess.CompletedProcess[str]:
+        for old in self.dir.glob("*.md"):
+            old.unlink()
         (self.dir / f"{name}.md").write_text(text)
         return run("check", cwd=self.dir, directory=self.dir)
 
-    def test_repository_standards_are_valid(self):
+    def standard(self, name: str = "t", triggers: str = '[[trigger]]\npaths = ["*.x"]\n', match: str = '["a.x"]', skip: str = '["a.y"]') -> str:
+        return VALID.format(name=name, triggers=triggers, match=match, skip=skip)
+
+    def test_repository_standards_and_examples_are_valid(self):
         result = run("check", cwd=ROOT)
+        self.assertEqual(0, result.returncode, result.stderr)
+
+    def test_valid_fixture_passes(self):
+        result = self.check("t", self.standard())
         self.assertEqual(0, result.returncode, result.stderr)
 
     def test_invalid_standards_fail_closed(self):
         cases = {
-            "missing frontmatter": ("a", "# A\n", "missing frontmatter"),
-            "name mismatch": ("b", "---\nname: other\nsummary: s\npaths:\n  - x\n---\n", "name must equal"),
-            "unknown key": ("c", "---\nname: c\nsummary: s\nglob: x\n---\n", "expected one of"),
-            "no triggers": ("d", "---\nname: d\nsummary: s\n---\n", "needs at least one"),
-            "bad regex": ("e", "---\nname: e\nsummary: s\ncontent:\n  - '('\n---\n", "invalid content regex"),
-            "inline list": ("f", "---\nname: f\nsummary: s\npaths: x\n---\n", "must be a list"),
+            "yaml frontmatter": ("t", "---\nname: t\n---\n", "missing +++ TOML frontmatter"),
+            "bad toml": ("t", "+++\nname = \n+++\n", "invalid TOML"),
+            "name mismatch": ("t", self.standard(name="other"), "name must equal"),
+            "unknown key": ("t", self.standard(triggers='[[trigger]]\nglob = ["x"]\n'), "unknown keys"),
+            "no triggers": ("t", self.standard(triggers=""), "at least one [[trigger]]"),
+            "empty trigger": ("t", self.standard(triggers="[[trigger]]\n"), "needs at least one of"),
+            "only negations": ("t", self.standard(triggers='[[trigger]]\npaths = ["!*.md"]\n'), "positive pattern"),
+            "bad regex": ("t", self.standard(triggers="[[trigger]]\ncontent = ['(']\n"), "invalid trigger 1 content regex"),
+            "no examples": ("t", self.standard(match="[]"), "non-empty match list"),
+            "no code section": ("t", self.standard().replace("## Code", "## Rules"), "'## Code' section"),
+            "example should match": ("t", self.standard(match='["a.y"]'), "example 'a.y' should match but did not match"),
+            "example should skip": ("t", self.standard(skip='["b.x"]'), "example 'b.x' should skip but matched"),
         }
         for label, (name, text, message) in cases.items():
             with self.subTest(label):
-                for old in self.dir.glob("*.md"):
-                    old.unlink()
                 result = self.check(name, text)
                 self.assertEqual(1, result.returncode, label)
                 self.assertIn(message, result.stderr)

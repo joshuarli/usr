@@ -1,30 +1,45 @@
----
-name: cli-interrupt
-summary: CLIs, long-running scripts, background jobs, and interactive terminal tools stop cooperatively on Ctrl-C or SIGTERM, discard partial work, and exit 130.
-paths:
-  - "bin/*"
-  - "cli/*"
-  - "cli.py"
-  - "__main__.py"
-  - "src/main.rs"
-  - "src/bin/*"
-content:
-  - '\bSIG(INT|TERM)\b'
-  - '\bKeyboardInterrupt\b'
-  - '\bAbortController\b'
-  - '\bAbortSignal\b'
-  - '\bprocess\.argv\b'
-  - '\bargparse\b'
-  - '\blexopt\b'
-  - '\bclap::'
-  - '\btrap\b.*\b(INT|TERM|EXIT)\b'
----
++++
+name = "cli-interrupt"
+summary = "CLIs, long-running scripts, background jobs, and interactive terminal tools stop cooperatively on Ctrl-C or SIGTERM, discard partial work, and exit 130."
+
+[[trigger]]
+paths = ["bin/", "cli/", "cli.py", "__main__.py", "**/src/main.rs", "**/src/bin/"]
+
+[[trigger]]
+paths = ["*", "!*.md", "!*.txt", "!*.rst"]
+content = [
+  '\bSIG(INT|TERM)\b',
+  '\bKeyboardInterrupt\b',
+  '\bAbort(Controller|Signal)\b',
+  '\bprocess\.argv\b',
+  '\bargparse\b',
+  '\blexopt\b',
+  '\bclap::',
+  '\btrap\b.*\b(INT|TERM|EXIT)\b',
+]
+
+[examples]
+match = [
+  "dotfiles/base/.local/bin/standards",
+  "crates/tool/src/main.rs",
+  "src/bin/extra.rs",
+  { path = "tools/report.py", text = "import argparse\n" },
+]
+skip = [
+  "README.md",
+  "src/lib.rs",
+  { path = "docs/signals.md", text = "Handle SIGINT.\n" },
+  { path = "tools/util.py", text = "def f():\n    return 1\n" },
+]
++++
 
 # Cooperative CLI interruption
 
 Ctrl-C is a user request to stop, not a reason to abort mid-write. A tool that exits immediately on the first signal can leave partial files, unreleased resources, or a checkpoint that never landed. Treat interruption as a first-class control flow path from the start. This applies to any CLI, subcommand, long-running script, background job, or interactive terminal tool. It does not apply to instantaneous commands with no I/O or locks.
 
-## Standard
+## Code
+
+### Standard
 
 - **One signal owner.** Install one SIGINT handler that aborts a single `AbortController`; do not call `process.exit` on the first signal. A second signal may force exit as an escape hatch. Route the same controller through every phase of the run.
 - **Cancellation reaches every wait.** Pass the signal into network calls, timers, sleep/backoff loops, child processes, page automation, and credential capture. Combine it with per-operation timeouts rather than replacing it, so a timeout and an interrupt both stop promptly. No phase may ignore the signal for longer than one bounded operation.
@@ -34,7 +49,7 @@ Ctrl-C is a user request to stop, not a reason to abort mid-write. A tool that e
 - **Re-run is safe.** Checkpoints, cursors, and merge-by-id stores make the next invocation idempotent. An interrupted run must never require manual cleanup before it can be retried.
 - **Limits are documented.** Say in `--help` that Ctrl-C stops after the current unit, that a second Ctrl-C forces exit, and what the exit code is.
 
-## Tests
+### Tests
 
 - A mid-flight abort test: start a slow or staged operation, abort it, then assert no final or partial artifact, no further work started, and the saved state is still readable.
 - A pre-aborted signal test: no work is scheduled at all.

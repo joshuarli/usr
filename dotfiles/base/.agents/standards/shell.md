@@ -1,25 +1,35 @@
----
-name: shell
-summary: Shell scripts, Makefile recipes, Dockerfile RUN lines, and pipeline shell are strict POSIX sh on disk, shellcheck-clean, and never hide a failed pipeline stage.
-paths:
-  - "*.sh"
-  - "*.bash"
-  - "*.dash"
-  - "Makefile"
-  - "GNUmakefile"
-  - "*.mk"
-  - "Dockerfile"
-  - "*.Dockerfile"
-  - "Containerfile"
-shebang:
-  - '^#!\s*\S*/(env\s+(-S\s+)?)?(sh|bash|dash|ash|ksh|zsh)\b'
----
++++
+name = "shell"
+summary = "Shell scripts, Makefile recipes, Dockerfile RUN lines, and pipeline shell are strict POSIX sh on disk, shellcheck-clean, and never hide a failed pipeline stage."
+
+[[trigger]]
+paths = ["*.sh", "*.bash", "*.dash", "Makefile", "GNUmakefile", "*.mk", "Dockerfile", "*.Dockerfile", "Containerfile"]
+
+[[trigger]]
+shebang = ['^#!\s*\S*/(env\s+(-S\s+)?)?(sh|bash|dash|ash|ksh|zsh)\b']
+
+[examples]
+match = [
+  "tools/build.sh",
+  "pkg/Makefile",
+  "images/app.Dockerfile",
+  { path = "dotfiles/base/.local/bin/pk", text = "#!/bin/sh\nset -eu\n" },
+  { path = "bin/run", text = "#!/usr/bin/env bash\n" },
+]
+skip = [
+  "README.md",
+  "docs/shell.md",
+  { path = "bin/report", text = "#!/usr/bin/env python3\n" },
+]
++++
 
 # Shell
 
 Apply this to shell the change adds or touches anywhere: script files, `script` or `command` tasks in pipeline YAML, Dockerfile `RUN`, and Makefile recipes. Every item here is must-fix for the shell the change touches. GitHub Actions steps follow [github-actions](github-actions.md) first.
 
-## Inline shell goes on disk
+## Code
+
+### Inline shell goes on disk
 
 - Do not leave shell inline in pipeline or workflow YAML. Move it to a script file and have the step call that script, one command per step. This covers one-liners that capture values, such as `-var="sha=$(git rev-parse HEAD)"`.
 - When the change touches a step that already has inline shell, break that step out too. Report any other inline shell in the same file instead of rewriting it.
@@ -27,16 +37,15 @@ Apply this to shell the change adds or touches anywhere: script files, `script` 
 - Plain single commands with literal arguments (`make test`, `pnpm check`) can stay inline.
 - Do not feed code to another interpreter as a string (`python -c`, `node -e`, heredoc-fed scripts) when a script file or a direct call would do.
 
-## Strict POSIX
+### Strict POSIX
 
 - New and extracted scripts use `#!/bin/sh` and POSIX syntax only. Debian and Ubuntu run `/bin/sh` as dash, so bashisms break there: `[[ ]]`, arrays, `<(...)`, `echo -e`, `function`, `source`, `$'...'`, and hyphens in function names. Use `printf` instead of `echo -e`.
 - If you change an existing bash or zsh script, port it to POSIX `sh` when the port is contained to that script. If the port would spread, report it instead.
 - Every touched script passes `shellcheck --shell=sh --enable=check-extra-masked-returns` with no disables added. SC2312 flags masked `$(...)` statuses.
-- If the repo runs pre-commit or prek and has no shellcheck hook, add one with those flags. Type detection skips sourced, non-executable `.sh` files, so add a path-based entry for them too.
 - To pass arguments through `env` in a shebang, use `#!/usr/bin/env -S cmd args`. Plain `env` treats the whole string as one program name on Linux.
 - Do not add support for fish, zsh, or other non-POSIX output modes.
 
-## Pipefail vigilance
+### Pipefail vigilance
 
 POSIX `sh` has no reliable `pipefail`, so a pipeline returns only its last stage's status. Treat every `|` as a possible hidden failure.
 
@@ -73,7 +82,7 @@ TREE
 
 In the fix, `printf` cannot fail on its own, so the `grep` status decides the result. Use a here-document whenever the producer is a real command.
 
-## Control flow
+### Control flow
 
 - Start scripts with `set -eu`.
 - Output that is piped to `sh` or passed to `eval` prints all or nothing. Collect it into a variable, check every producer, and only then print. A partial list makes a partial cleanup look complete.
@@ -81,8 +90,16 @@ In the fix, `printf` cannot fail on its own, so the `grep` status decides the re
 - `trap cleanup EXIT` alone is not enough, because dash skips the EXIT trap on a signal. Also trap `INT TERM` and exit from that handler.
 - Wrap network calls on startup and deploy paths in `timeout`. A timeout takes the same fallback as any other failure.
 
-## Verify
+### Verify
 
 - Run shellcheck with the flags above on every touched script.
 - Run the script under dash, not bash in POSIX mode. Put stub commands on `PATH` and make each one fail in turn. Check that the script exits non-zero and prints nothing partial. Where the old script worked, compare its output with the new one's.
 - Check `git diff --summary` for lost exec bits, because file-writing tools can drop them.
+
+## Adoption
+
+Apply these only when bringing a whole repository up to this standard, not at the completion gate.
+
+- Port existing bash and zsh scripts to POSIX `sh`, one script per change, verifying each under dash.
+- Move inline shell out of every pipeline and workflow step into scripts on disk.
+- If the repo runs pre-commit or prek and has no shellcheck hook, add one with `--shell=sh --enable=check-extra-masked-returns`. Type detection skips sourced, non-executable `.sh` files, so add a path-based entry for them too.
