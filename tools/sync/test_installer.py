@@ -1,4 +1,5 @@
 """Installer tests with fake HTTP and fake executables; no network or home effects."""
+import hashlib
 import io
 import shutil
 import time
@@ -79,6 +80,64 @@ class FakeInstaller(Installer):
 
     def effective_url(self, url):
         return self.routes.get(url + " ->", "")
+
+
+class FakeBuildlib:
+    """buildlib.tools double: serves lock entries and pinned archives from the routes table."""
+
+    LAYOUTS = {
+        "fd": ("", False), "rg": ("", False), "jaq": ("", False), "gluon": ("", False),
+        "git": ("", False), "cpython": ("bin", True), "mold": ("bin", True),
+    }
+
+    def __init__(self, routes):
+        self.routes = routes
+        self.calls = []
+
+    def _fetch(self, url):
+        if url not in self.routes:
+            raise URLError(f"no route for {url}")
+        route = self.routes[url]
+        return route[0] if isinstance(route, tuple) else route
+
+    def load_lock(self, path):
+        return json.loads(Path(path).read_text())
+
+    def install(self, lock, tool, cache_dir, target=None):
+        self.calls.append((tool, target))
+        entry = lock["tools"][tool]
+        pin = entry["assets"][target]
+        url = f"https://github.com/{entry['repository']}/releases/download/{entry['tag']}/{pin['name']}"
+        archive = self._fetch(url)
+        if len(archive) != pin["size"] or hashlib.sha256(archive).hexdigest() != pin["sha256"]:
+            raise RuntimeError("buildlib checksum mismatch")
+        bin_subdir, wrapped = self.LAYOUTS[tool]
+        cache = Path(cache_dir) / tool
+        final = cache / pin["sha256"]
+        if final.is_dir() and (final / bin_subdir).is_dir():
+            return final / bin_subdir
+        cache.mkdir(parents=True, exist_ok=True)
+        staging = Path(tempfile.mkdtemp(dir=cache))
+        try:
+            tree = staging / "tree"
+            tree.mkdir()
+            with tarfile.open(fileobj=io.BytesIO(archive), mode="r:*") as tar:
+                tar.extractall(tree)
+            if wrapped:
+                payload = next(tree.iterdir())
+            else:
+                payload = tree
+                renamed = payload / f"{entry['product']}-{target}"
+                if renamed.is_file():
+                    renamed.replace(payload / entry["product"])
+                    (payload / entry["product"]).chmod(0o755)
+            bin_dir = payload / bin_subdir
+            if not bin_dir.is_dir():
+                raise RuntimeError("buildlib payload has no bin dir")
+            os.rename(payload, final)
+        finally:
+            shutil.rmtree(staging, ignore_errors=True)
+        return final / bin_subdir
 
 
 class InstallerTests(unittest.TestCase):
@@ -183,6 +242,31 @@ sys.exit(1)
     def npm_installs(self):
         log = self.root / "npm.log"
         return [json.loads(line) for line in log.read_text().splitlines()] if log.is_file() else []
+
+    BUILDLIB_TRIPLES = {("darwin", "aarch64"): "aarch64-apple-darwin",
+                        ("linux", "x86_64"): "x86_64-unknown-linux-musl",
+                        ("linux", "aarch64"): "aarch64-unknown-linux-musl"}
+
+    def buildlib_make(self, entries, os_name="linux", arch="x86_64"):
+        """Install-ready Installer whose buildlib module serves `entries` from routes.
+
+        Each entry is (tool, repository, tag, product, version, archive, asset_name);
+        the target triple comes from os_name/arch like the real installer.
+        """
+        triple = self.BUILDLIB_TRIPLES[(os_name, arch)]
+        tools = {}
+        routes = {}
+        for tool, repo, tag, product, version, archive, name in entries:
+            tools[tool] = {"repository": repo, "tag": tag, "product": product, "version": version,
+                           "assets": {triple: {"name": name, "size": len(archive),
+                                               "sha256": hashlib.sha256(archive).hexdigest()}}}
+            routes[f"https://github.com/{repo}/releases/download/{tag}/{name}"] = archive
+        lock = self.root / "tools.lock.json"
+        lock.write_text(json.dumps({"schema": 1, "tools": tools}))
+        inst = self.make(routes, os_name=os_name, arch=arch)
+        inst._buildlib_module = FakeBuildlib(inst.routes)
+        inst.env["USR_BUILDLIB_LOCK"] = str(lock)
+        return inst
 
     def test_cargo_mutants_installs_fork_prerelease(self):
         import hashlib
@@ -623,25 +707,31 @@ sys.exit(1)
         inst = self.make({}, os_name="darwin", arch="aarch64")
         with self.assertRaises(SkipInstall):
             inst.install_zzz()
-        asset = "fd-v1-aarch64-apple-darwin"
-        url = f"https://github.com/sharkdp/fd/releases/download/v1/{asset}.tar.gz"
-        routes = {"https://github.com/sharkdp/fd/releases/latest ->":
-                  "https://github.com/sharkdp/fd/releases/tag/v1",
-                  url: (b"tar", {"ETag": "e"})}
-        inst = self.make(routes, os_name="darwin", arch="aarch64")
-        with patch.object(inst, "tar_member", return_value=b"binary"):
-            inst.install_fd_or_rg("fd")
-        self.assertEqual(self.dest_path("fd").read_bytes(), b"binary")
+        triple = "aarch64-apple-darwin"
+        payload = make_tar({"fd": b"binary"})
+        inst = self.buildlib_make([("fd", "laputa-systems/fd", "release-fd", "fd", "",
+                                    payload, f"fd-{triple}.tar.xz")],
+                                  os_name="darwin", arch="aarch64")
+        inst.install_fd_or_rg("fd")
+        sha = hashlib.sha256(payload).hexdigest()
+        self.assertEqual(os.readlink(self.dest_path("fd")),
+                         str(inst.buildlib_cache / "fd" / sha / "fd"))
+        self.assertEqual((inst.buildlib_cache / "fd" / sha / "fd").read_bytes(), b"binary")
+        self.assertEqual(self.state("fd"), sha)
 
     def test_jaq_direct_and_uv_checksum(self):
-        inst = self.make({"https://github.com/01mf02/jaq/releases/latest/download/jaq-x86_64-unknown-linux-musl":
-                          (b"binary", {"ETag": "e"})})
+        triple = "x86_64-unknown-linux-musl"
+        payload = make_tar({"jaq": b"binary"})
+        inst = self.buildlib_make([("jaq", "laputa-systems/jaq", "release-jaq", "jaq", "",
+                                    payload, f"jaq-{triple}.tar.xz")])
         inst.install_jaq()
-        self.assertEqual(self.dest_path("jaq").read_bytes(), b"binary")
+        sha = hashlib.sha256(payload).hexdigest()
+        self.assertEqual(os.readlink(self.dest_path("jaq")),
+                         str(inst.buildlib_cache / "jaq" / sha / "jaq"))
+        self.assertEqual(self.state("jaq"), sha)
         asset = "uv-x86_64-unknown-linux-musl"
         url = f"https://github.com/astral-sh/uv/releases/download/0.1/{asset}.tar.gz"
         payload = make_tar({f"{asset}/uv": b"u", f"{asset}/uvx": b"x"})
-        import hashlib
         digest = hashlib.sha256(payload).hexdigest()
         routes = {"https://github.com/astral-sh/uv/releases.atom": atom([("2024-01-01", "0.1")]),
                   url: (payload, {"ETag": "e"}),
@@ -659,64 +749,54 @@ sys.exit(1)
         with self.assertRaises(SkipInstall):
             inst.install_uv()
 
-    def _python_routes(self, sha, payload, *, version="3.15.1", **kwargs):
-        return self._build_routes("laputa-systems/python-build", "cpython", sha, payload,
-                                  version=version, **kwargs)
+    def _cpython_entries(self, payload, version="3.15.1", name=None, triple="x86_64-unknown-linux-musl"):
+        name = name or f"cpython-{version}-{triple}.tar.xz"
+        return [("cpython", "laputa-systems/python-build", "release-cpython", "cpython", version,
+                 payload, name)]
 
     def test_python3_install_current_and_checksum_mismatch(self):
-        import hashlib
-        sha = "b" * 40
-        tag = f"release-{sha}"
         payload = make_tar({"python/bin/python3.15": b"#!/bin/sh\nexit 0\n"}, "w:xz")
-        routes = self._python_routes(sha, payload)
-        digest = hashlib.sha256(payload).hexdigest()
-        inst = self.make(routes)
+        inst = self.buildlib_make(self._cpython_entries(payload))
         inst.install_python3()
+        sha = hashlib.sha256(payload).hexdigest()
+        interpreter = inst.buildlib_cache / "cpython" / sha / "bin/python3.15"
+        self.assertTrue(interpreter.is_file())
         self.assertTrue(self.dest_path("python3").is_symlink())
         self.assertTrue(self.dest_path("python3.15").is_symlink())
-        self.assertEqual(os.readlink(self.dest_path("python3")),
-                         str(self.home / f".local/share/python-build/{tag}/python/bin/python3.15"))
-        self.assertEqual(self.state("python3"), digest)
-        inst = self.make(routes)
+        self.assertEqual(os.readlink(self.dest_path("python3")), str(interpreter))
+        self.assertEqual(self.state("python3"), sha)
+        inst = self.buildlib_make(self._cpython_entries(payload))
         inst.install_python3()
         self.assertFalse(inst.changed)
-        inst = self.make(self._python_routes(sha, payload, listed="0" * 64))
-        self.dest_path("python3").unlink(missing_ok=True)
-        self.dest_path("python3.15").unlink(missing_ok=True)
-        (self.home / ".local/state/dl/python3").unlink(missing_ok=True)
-        import shutil as _shutil
-        _shutil.rmtree(self.home / ".local/share/python-build", ignore_errors=True)
-        with self.assertRaises(SkipInstall):
-            inst.install_python3()
-        self.assertFalse(self.dest_path("python3").exists())
+        with tempfile.TemporaryDirectory(dir=self.root) as home:
+            old_home = self.home
+            self.home = Path(home)
+            try:
+                bad = self.buildlib_make(self._cpython_entries(payload))
+                bad_module = bad._buildlib_module
+                assert bad_module is not None
+                bad_module.routes[
+                    "https://github.com/laputa-systems/python-build/releases/download/release-cpython/"
+                    "cpython-3.15.1-x86_64-unknown-linux-musl.tar.xz"] = b"tampered"
+                with self.assertRaises(SkipInstall):
+                    bad.install_python3()
+                self.assertFalse(self.dest_path("python3").exists())
+            finally:
+                self.home = old_home
 
     def test_python3_skips_a_release_without_a_build_archive(self):
-        new, old = "b" * 40, "a" * 40
-        payload = make_tar({"python/bin/python3.15": b"#!/bin/sh\nexit 0\n"}, "w:xz")
-        good = self._python_routes(old, payload)
-        legacy = self._python_routes(new, payload, etag="e2")
-        new_base = f"https://github.com/laputa-systems/python-build/releases/download/release-{new}"
-        legacy[f"{new_base}/SHA256SUMS"] = b"0" * 64 + b"  legacy-input.tar.gz\n"
-        routes = dict(good)
-        routes.update(legacy)
-        routes["https://github.com/laputa-systems/python-build/releases.atom"] = atom([
-            ("2026-11-14T00:00:00Z", f"release-{new}"),
-            ("2026-11-13T00:00:00Z", f"release-{old}"),
-        ])
-        inst = self.make(routes)
-        inst.install_python3()
-        link = os.readlink(self.dest_path("python3"))
-        self.assertIn(f"release-{old}", link)
+        lock = self.root / "empty.lock.json"
+        lock.write_text(json.dumps({"schema": 1, "tools": {}}))
+        inst = self.make({})
+        inst.env["USR_BUILDLIB_LOCK"] = str(lock)
+        with self.assertRaises(SkipInstall) as ctx:
+            inst.install_python3()
+        self.assertIn("no cpython asset", str(ctx.exception))
+        self.assertFalse(self.dest_path("python3").exists())
 
-    def test_python3_refuses_a_release_whose_manifest_does_not_match(self):
-        sha = "b" * 40
-        triple = "x86_64-unknown-linux-musl"
-        payload = make_tar({"python/bin/python3.15": b"#!/bin/sh\nexit 0\n"}, "w:xz")
-        routes = self._python_routes(sha, payload, etag="e2",
-                                     manifest={"schema_version": 1, "product": "cpython",
-                                               "version": "3.15.1", "target": triple,
-                                               "source_revision": "0" * 40})
-        inst = self.make(routes)
+    def test_python3_refuses_a_payload_without_the_interpreter(self):
+        payload = make_tar({"python/bin/other": b"#!/bin/sh\nexit 0\n"}, "w:xz")
+        inst = self.buildlib_make(self._cpython_entries(payload))
         with self.assertRaises(SkipInstall):
             inst.install_python3()
         self.assertFalse(self.dest_path("python3").exists())
@@ -1136,15 +1216,6 @@ sys.exit(1)
         with self.assertRaisesRegex(SkipInstall, "arm64"):
             intel.install_devin()
 
-    def _bundle_routes(self, repo, tag, asset, payload, sums_asset=None, digest=None):
-        import hashlib
-        digest = digest or hashlib.sha256(payload).hexdigest()
-        base = f"https://github.com/{repo}/releases/download/{tag}"
-        routes = {f"https://github.com/{repo}/releases.atom": atom([("2024-01-01", tag)]),
-                  f"{base}/{asset}": (payload, {"ETag": "e"}),
-                  f"{base}/SHA256SUMS": f"{digest}  {sums_asset or asset}\n".encode()}
-        return routes, base
-
     def _git_tar(self):
         buffer = io.BytesIO()
         with tarfile.open(fileobj=buffer, mode="w:xz") as archive:
@@ -1176,121 +1247,85 @@ sys.exit(1)
                 f"{base}/SHA256SUMS": sums,
                 f"https://github.com/{repo}/releases.atom": atom([("2026-11-12T00:00:00Z", f"release-{sha}")])}
 
-    def _git_routes(self, sha, payload, *, version="2.56.0", **kwargs):
-        routes = self._build_routes("laputa-systems/git-build", "git", sha, payload, version=version, **kwargs)
-        routes.pop("https://github.com/laputa-systems/git-build/releases.atom")
-        return routes
+    def _git_entries(self, payload, version="2.56.0", name=None, triple="x86_64-unknown-linux-musl"):
+        name = name or f"git-{version}-{triple}.tar.xz"
+        return [("git", "laputa-systems/git-build", "release-git", "git", version, payload, name)]
 
     def test_git_bundle_install_current_and_unmanaged(self):
-        old, new = "1" * 40, "2" * 40
         payload = self._git_tar()
-        routes = self._git_routes(new, payload)
-        old_base = f"https://github.com/laputa-systems/git-build/releases/download/release-{old}"
-        routes[f"{old_base}/SHA256SUMS"] = f"{'b' * 64}  git-x86_64-unknown-linux-musl.zip\n".encode()
-        feed = atom([("2026-11-09T08:06:37Z", f"release-{old}"), ("2026-11-12T18:37:58Z", f"release-{new}")])
-        routes["https://github.com/laputa-systems/git-build/releases.atom"] = feed
-        inst = self.make(routes)
+        inst = self.buildlib_make(self._git_entries(payload))
         inst.install_git()
-        self.assertTrue(self.dest_path("git").is_symlink())
+        sha = hashlib.sha256(payload).hexdigest()
         current = self.home / ".local/share/git/current"
-        self.assertEqual(os.readlink(current).rsplit("/", 1)[1], f"release-{new}-x86_64-unknown-linux-musl")
+        self.assertEqual(os.readlink(current), str(inst.buildlib_cache / "git" / sha))
         self.assertTrue((current / "git").is_file())
         self.assertTrue((current / "git-upload-pack").is_symlink())
         self.assertTrue((self.dest_path("git").parent.parent / "share/git-core/templates/info/exclude").is_file())
-        inst = self.make(routes)
-        inst.install_git()
-        self.assertFalse(inst.changed)
+        self.assertEqual(self.state("git"), sha)
+        again = self.buildlib_make(self._git_entries(payload))
+        again.install_git()
+        self.assertFalse(again.changed)
+        self.dest_path("git").unlink()
+        self.dest_path("git").write_text("foreign")
+        with self.assertRaises(SkipInstall):
+            self.buildlib_make(self._git_entries(payload)).install_git()
+        self.assertEqual(self.dest_path("git").read_text(), "foreign")
 
-    def _git_feed_routes(self, sha, payload, **kwargs):
-        routes = self._git_routes(sha, payload, **kwargs)
-        routes["https://github.com/laputa-systems/git-build/releases.atom"] = atom(
-            [("2026-11-12T00:00:00Z", f"release-{sha}")])
-        return routes
-
-    def test_git_interrupted_activation_resumes_and_rejects_modified(self):
-        sha = "7" * 40
-        routes = self._git_feed_routes(sha, self._git_tar())
-        for interruption in ("publication", "selection", "launcher", "modified"):
+    def test_git_interrupted_activation_resumes(self):
+        payload = self._git_tar()
+        entries = self._git_entries(payload)
+        for interruption in ("publication", "selection", "state"):
             with self.subTest(interruption=interruption), tempfile.TemporaryDirectory(dir=self.root) as scratch:
                 old_home = self.home
                 self.home = Path(scratch) / "home"
                 try:
-                    inst = self.make(routes)
-                    if interruption in ("publication", "modified"):
+                    inst = self.buildlib_make(entries)
+                    if interruption == "publication":
                         patcher = patch.object(inst, "switch_symlink", return_value=False)
                     elif interruption == "selection":
-                        patcher = patch.object(inst, "_ensure_bundle_link", side_effect=SkipInstall("git", "interrupted"))
+                        patcher = patch.object(inst, "link_symlink", side_effect=SkipInstall("git", "interrupted"))
                     else:
-                        patcher = patch.object(inst, "write_state", side_effect=SkipInstall("git", "interrupted"))
+                        patcher = patch.object(inst, "write_state", side_effect=SkipInstall("git", "state"))
                     with patcher, self.assertRaises(SkipInstall):
                         inst.install_git()
-                    release = inst.git_home / "releases" / f"release-{sha}-x86_64-unknown-linux-musl"
-                    self.assertTrue(release.is_dir())
-                    if interruption == "modified":
-                        (release / "git").write_text("modified")
-                        with self.assertRaises(SkipInstall):
-                            self.make(routes).install_git()
-                        self.assertEqual((release / "git").read_text(), "modified")
-                        self.assertFalse((inst.git_home / "current").is_symlink())
-                    else:
-                        fresh = self.make(routes)
-                        fresh.install_git()
-                        self.assertEqual(os.readlink(inst.git_home / "current"), str(release))
-                        self.assertTrue(self.dest_path("git").is_symlink())
-                        self.assertTrue(self.state("git"))
-                        self.assertIn(("D", release), fresh.claims)
+                    fresh = self.buildlib_make(entries)
+                    fresh.install_git()
+                    sha = hashlib.sha256(payload).hexdigest()
+                    self.assertEqual(os.readlink(inst.git_home / "current"),
+                                     str(inst.buildlib_cache / "git" / sha))
+                    self.assertTrue(self.dest_path("git").is_symlink())
+                    self.assertTrue(self.state("git"))
+                    self.assertIn(("D", inst.buildlib_cache / "git" / sha), fresh.claims)
                 finally:
                     self.home = old_home
 
-    def test_git_falls_back_past_a_release_without_supported_assets(self):
-        newest, older = "3" * 40, "4" * 40
-        routes = self._git_routes(older, self._git_tar())
-        base = f"https://github.com/laputa-systems/git-build/releases/download/release-{newest}"
-        routes[f"{base}/SHA256SUMS"] = f"{'b' * 64}  git-x86_64-unknown-linux-musl.tar.gz\n".encode()
-        routes["https://github.com/laputa-systems/git-build/releases.atom"] = atom(
-            [("2026-11-12T00:00:00Z", f"release-{newest}"), ("2026-11-01T00:00:00Z", f"release-{older}")])
-        self.make(routes).install_git()
-        self.assertIn(f"release-{older}", os.readlink(self.home / ".local/share/git/current"))
+    def test_git_skips_when_the_lock_lacks_the_asset(self):
+        lock = self.root / "empty.lock.json"
+        lock.write_text(json.dumps({"schema": 1, "tools": {}}))
+        inst = self.make({})
+        inst.env["USR_BUILDLIB_LOCK"] = str(lock)
+        with self.assertRaises(SkipInstall) as ctx:
+            inst.install_git()
+        self.assertIn("no git asset", str(ctx.exception))
+        self.assertFalse((self.home / ".local/share/git/current").exists())
 
-    def test_git_installs_zip_release(self):
-        import io
-        import zipfile
-        sha = "5" * 40
-        buffer = io.BytesIO()
-        with zipfile.ZipFile(buffer, "w") as archive:
-            for name, mode in (("git", 0o100755), ("git-shell", 0o100755), ("git-submodule", 0o100755),
-                               ("git-sh-i18n--envsubst", 0o100755), ("git-sh-setup", 0o100644), ("git-sh-i18n", 0o100644)):
-                info = zipfile.ZipInfo(name)
-                info.create_system = 3
-                info.external_attr = mode << 16
-                archive.writestr(info, b"g")
-            for helper in ("git-upload-archive", "git-upload-pack", "git-receive-pack", "git-submodule--helper"):
-                info = zipfile.ZipInfo(helper)
-                info.create_system = 3
-                info.external_attr = 0o120777 << 16
-                archive.writestr(info, b"git")
-        payload = buffer.getvalue()
-        routes = self._git_routes(sha, payload, version="2.56.0", archive_fmt="zip")
-        routes["https://github.com/laputa-systems/git-build/releases.atom"] = atom(
-            [("2026-11-12T00:00:00Z", f"release-{sha}")])
-        inst = self.make(routes)
-        inst.install_git()
-        self.assertTrue(self.dest_path("git").is_symlink())
-        self.assertEqual(os.readlink(self.home / ".local/share/git/current").rsplit("/", 1)[1], f"release-{sha}-x86_64-unknown-linux-musl")
-
-    def test_git_rejects_manifest_for_another_revision(self):
-        sha = "3" * 40
-        routes = self._git_feed_routes(sha, self._git_tar(), manifest={
-            "schema_version": 1, "product": "git", "version": "2.56.0",
-            "target": "x86_64-unknown-linux-musl", "source_revision": "5" * 40})
+    def test_git_rejects_a_payload_missing_commands(self):
+        payload = make_tar({"git": b"g"}, "w:xz")
+        inst = self.buildlib_make(self._git_entries(payload))
         with self.assertRaises(SkipInstall):
-            self.make(routes).install_git()
+            inst.install_git()
         self.assertFalse((self.home / ".local/share/git/current").exists())
 
     def test_git_rejects_archive_digest_mismatch(self):
-        routes = self._git_feed_routes("3" * 40, self._git_tar(), listed="c" * 64)
+        payload = self._git_tar()
+        inst = self.buildlib_make(self._git_entries(payload))
+        module = inst._buildlib_module
+        assert module is not None
+        url = ("https://github.com/laputa-systems/git-build/releases/download/release-git/"
+               "git-2.56.0-x86_64-unknown-linux-musl.tar.xz")
+        module.routes[url] = payload + b"tampered"
         with self.assertRaises(SkipInstall):
-            self.make(routes).install_git()
+            inst.install_git()
         self.assertFalse((self.home / ".local/share/git/current").exists())
 
     def test_release_tags_order_by_date_not_name(self):
@@ -1327,34 +1362,36 @@ sys.exit(1)
         self.assertTrue(self.dest_path("oxish-server").is_symlink())
         self.assertEqual(self.state("oxish-server"), "e")
 
+    def _gluon_entries(self, payload, triple="x86_64-unknown-linux-musl"):
+        return [("gluon", "laputa-systems/gluon", "release-gluon", "gluon", "",
+                 payload, f"gluon-{triple}.tar.xz")]
+
     def test_gluon_bundle(self):
         members = {"meson": b"m", "ninja": b"n", "gluon-build": b"b"}
-        payload = make_zip(members, executable=set(members))
-        routes, base = self._bundle_routes("laputa-systems/gluon", "release-abc123", "gluon-x86_64-unknown-linux-musl.zip", payload)
-        inst = self.make(routes)
+        payload = make_tar(members, mode="w:xz")
+        inst = self.buildlib_make(self._gluon_entries(payload))
         inst.install_gluon()
+        sha = hashlib.sha256(payload).hexdigest()
         for command in ("meson", "ninja", "gluon-build"):
-            self.assertTrue(self.dest_path(command).is_symlink())
-        self.assertTrue((self.home / ".local/share/gluon/current").is_symlink())
-        self.assertEqual(self.state("gluon"), "e")
-        again = self.make(routes)
+            self.assertEqual(os.readlink(self.dest_path(command)),
+                             str(inst.gluon_home / "current" / command))
+        self.assertEqual(os.readlink(inst.gluon_home / "current"),
+                         str(inst.buildlib_cache / "gluon" / sha))
+        self.assertEqual(self.state("gluon"), sha)
+        again = self.buildlib_make(self._gluon_entries(payload))
         again.install_gluon()
         self.assertFalse(again.changed)
 
-    def test_gluon_bundle_prefers_tar_xz(self):
-        import hashlib
+    def test_gluon_refuses_a_foreign_launcher(self):
         members = {"meson": b"m", "ninja": b"n", "gluon-build": b"b"}
-        tarball = make_tar(members, mode="w:xz")
-        legacy = make_zip({name: b"old" for name in members}, executable=set(members))
-        routes, base = self._bundle_routes("laputa-systems/gluon", "release-abc123",
-                                           "gluon-x86_64-unknown-linux-musl.tar.xz", tarball)
-        routes[f"{base}/gluon-x86_64-unknown-linux-musl.zip"] = (legacy, {"ETag": "z"})
-        routes[f"{base}/SHA256SUMS"] += f"{hashlib.sha256(legacy).hexdigest()}  gluon-x86_64-unknown-linux-musl.zip\n".encode()
-        inst = self.make(routes)
-        inst.install_gluon()
-        self.assertEqual(self.state("gluon"), "e")
-        self.assertEqual((self.home / ".local/share/gluon/current/meson").read_bytes(), b"m")
-        self.assertNotIn(f"{base}/gluon-x86_64-unknown-linux-musl.zip", inst.fetched)
+        payload = make_tar(members, mode="w:xz")
+        self.dest_path("meson").parent.mkdir(parents=True, exist_ok=True)
+        self.dest_path("meson").write_text("foreign")
+        inst = self.buildlib_make(self._gluon_entries(payload))
+        with self.assertRaises(SkipInstall):
+            inst.install_gluon()
+        self.assertEqual(self.dest_path("meson").read_text(), "foreign")
+        self.assertFalse((inst.gluon_home / "current").exists())
 
     def test_available_archive_prefers_tar_xz_then_legacy(self):
         base = "https://x/releases/download/t"
@@ -1559,7 +1596,7 @@ esac
         self.assertIn("vault", darwin)
         self.assertEqual(darwin.count("vault"), 1)
         linux_arm = default_tools("linux", "aarch64", "")
-        self.assertNotIn("jaq", linux_arm)
+        self.assertIn("jaq", linux_arm)
         self.assertIn("vault", linux_arm)
         self.assertIn("vault", default_tools("linux", "x86_64", ""))
         self.assertIn("lz", linux_arm)

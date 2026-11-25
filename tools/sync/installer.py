@@ -27,7 +27,7 @@ import sys
 import tarfile
 import tempfile
 import threading
-from typing import Callable, NoReturn, cast
+from typing import Any, Callable, NoReturn, cast
 from urllib.error import URLError
 from urllib.request import Request, urlopen
 import zipfile
@@ -103,6 +103,10 @@ FX_SETTINGS = Path(__file__).with_name("fx-settings.json")
 FFMPEG_COMMANDS = ["ffmpeg", "ffprobe"]
 OPENCODE_SHIM = '#!/bin/sh\nexec "${HOME}/.opencode/bin/opencode" "$@"'
 GIT_COMMANDS = ["git", "git-shell", "git-upload-archive", "git-upload-pack", "git-receive-pack", "git-submodule", "git-submodule--helper", "git-sh-setup", "git-sh-i18n", "git-sh-i18n--envsubst"]
+BUILDLIB_WHEEL_URL = "https://pypi.17166969.xyz/current/wheels/laputa_buildlib-0.3.1-py3-none-any.whl"
+BUILDLIB_WHEEL_SHA256 = "3d1f275b95b0189dd50bd455586235e488fe30222cb2e4243af668e56676d057"
+BUILDLIB_WHEEL_SIZE = 33331
+BUILDLIB_LOCK = Path(__file__).with_name("tools.lock.json")
 
 
 class InstallError(Exception):
@@ -180,6 +184,10 @@ class Installer:
         self.pi_legacy_root = self.data_home / "pi"
         self.pi_cache = pi_offline.cache_dir(self.home, self.env)
         self.python_build_root = self.data_home / "python-build"
+        self.buildlib_home = self.data_home / "buildlib"
+        self.buildlib_cache = self.buildlib_home / "cache"
+        self.buildlib_wheel = self.buildlib_home / "laputa_buildlib-0.3.1-py3-none-any.whl"
+        self._buildlib_module = None
         self.uv_python_root = self.data_home / "uv-python"
         self.node_build_root = self.data_home / "node-build"
         self.nodejs_root = self.data_home / "nodejs"
@@ -652,20 +660,153 @@ class Installer:
     def valid_version(self, version: str) -> bool:
         return re.match(r"^\d+\.\d+\.\d+([.-][A-Za-z0-9.-]+)?$", version) is not None
 
-    def install_direct(self, name: str, url: str) -> None:
-        record = self.asset_id(url)
-        if not record:
-            self.unchecked(name, f"{url} is unreachable")
-            return
-        if self.is_current(name, record):
-            self.current(f"{name} is current")
-            return
-        self.fetch_msg(f"Downloading {name} ...")
-        staged = self.stage_file(self.dest, f".{name}.")
-        if not self.download(url, staged):
+    def buildlib_triple(self) -> str:
+        triples = {("darwin", "aarch64"): "aarch64-apple-darwin",
+                   ("linux", "x86_64"): "x86_64-unknown-linux-musl",
+                   ("linux", "aarch64"): "aarch64-unknown-linux-musl"}
+        return triples.get((self.os_name, self.arch), "")
+
+    def buildlib_lock_path(self) -> Path:
+        return Path(self.env.get("USR_BUILDLIB_LOCK") or BUILDLIB_LOCK)
+
+    def buildlib_record(self, tool: str, triple: str) -> str:
+        try:
+            document = json.loads(self.buildlib_lock_path().read_text())
+        except (OSError, ValueError):
+            return ""
+        assets = document.get("tools", {}).get(tool, {}).get("assets", {})
+        pin = assets.get(triple)
+        value = pin.get("sha256", "") if isinstance(pin, dict) else ""
+        return value if isinstance(value, str) else ""
+
+    def fetch_buildlib_wheel(self, wheel: Path) -> None:
+        self.own_missing_dirs(self.buildlib_home)
+        self.buildlib_home.mkdir(parents=True, exist_ok=True)
+        staged = self.stage_file(self.buildlib_home, ".buildlib-wheel.")
+        try:
+            if not self.download(BUILDLIB_WHEEL_URL, staged):
+                raise InstallError("the pinned buildlib wheel download failed")
+            if staged.stat().st_size != BUILDLIB_WHEEL_SIZE \
+                    or self.sha256_file(staged) != BUILDLIB_WHEEL_SHA256:
+                raise InstallError("the pinned buildlib wheel checksum mismatch")
+            os.replace(staged, wheel)
+        finally:
             staged.unlink(missing_ok=True)
-            self.skip(name, "download failed")
-        self.install_binary(name, staged, record)
+        self.own_file(wheel)
+
+    def load_buildlib(self):
+        if self._buildlib_module is not None:
+            return self._buildlib_module
+        wheel = Path(self.env.get("USR_BUILDLIB_WHEEL") or self.buildlib_wheel)
+        if not wheel.exists():
+            self.fetch_buildlib_wheel(wheel)
+        if str(wheel) not in sys.path:
+            sys.path.insert(0, str(wheel))
+        import buildlib.tools  # ty: ignore[import-not-found]
+        self._buildlib_module = buildlib.tools
+        return buildlib.tools
+
+    def buildlib_bins(self, tool: str, probe: str) -> tuple[Path, str] | None:
+        """Install `tool` from tools.lock.json through buildlib; return (bin dir, record)."""
+        triple = self.buildlib_triple()
+        if not triple:
+            self.skip(tool, f"no buildlib target for {self.os_name}/{self.arch}")
+        record = self.buildlib_record(tool, triple)
+        if not record:
+            self.skip(tool, f"tools.lock.json has no {tool} asset for {triple}")
+        try:
+            module = self.load_buildlib()
+            lock = module.load_lock(self.buildlib_lock_path())
+            bindir = Path(module.install(lock, tool, self.buildlib_cache, target=triple))
+        except Exception as exc:
+            reason = str(exc) or type(exc).__name__
+            if self.installed(probe):
+                self.warn(f"Warning: keeping installed {tool} ({reason}; will retry next run)")
+                return None
+            self.skip(tool, f"buildlib install failed: {reason}")
+        return bindir, record
+
+    @staticmethod
+    def buildlib_payload(bindir: Path) -> Path:
+        return bindir.parent if bindir.name == "bin" else bindir
+
+    def install_buildlib_command(self, tool: str, command: str, state: str) -> None:
+        got = self.buildlib_bins(tool, command)
+        if got is None:
+            return
+        bindir, record = got
+        payload = self.buildlib_payload(bindir)
+        target = bindir / command
+        launcher = self.dest / command
+        if self._state_text(state) == record and launcher.is_symlink() \
+                and os.readlink(launcher) == str(target) and target.is_file():
+            self.own_dir(payload)
+            self.own_file(launcher)
+            self.own_file(self.state / state)
+            self.current(f"{command} is current")
+            return
+        if not target.is_file():
+            self.skip(tool, f"the buildlib payload has no {command}")
+        self.link_symlink(launcher, str(target))
+        self.write_state(state, record)
+        self.own_dir(payload)
+        self.changed = True
+        self.ok(f"Installed {launcher}")
+
+    def install_buildlib_bundle(self, tool: str, home: Path, commands: list[str], state: str, *,
+                                ok_message: str = "", install_message: str = "",
+                                on_current: Callable[[], object] | None = None) -> None:
+        got = self.buildlib_bins(tool, commands[0])
+        if got is None:
+            return
+        bindir, record = got
+        payload = self.buildlib_payload(bindir)
+        if not all((payload / command).exists() or (payload / command).is_symlink()
+                   for command in commands):
+            self.skip(tool, f"the buildlib payload is missing the {tool} bundle")
+        current = home / "current"
+        wants = {command: str(current / command) for command in commands}
+        for command in commands:
+            launcher = self.dest / command
+            if launcher.exists() or launcher.is_symlink():
+                have = os.readlink(launcher) if launcher.is_symlink() else ""
+                if not have.startswith(str(current) + os.sep) \
+                        and not have.startswith(str(home / "releases") + os.sep):
+                    self.skip(tool, f"{launcher} is not a dl-managed symlink")
+        if self._state_text(state) == record and current.is_symlink() \
+                and os.readlink(current) == str(payload) \
+                and all((self.dest / command).is_symlink()
+                        and os.readlink(self.dest / command) == wants[command]
+                        for command in commands):
+            self.own_dir(payload)
+            self.own_file(current)
+            self.own_file(self.state / state)
+            for command in commands:
+                self.own_file(self.dest / command)
+            if on_current is not None:
+                on_current()
+            self.current(ok_message or f"{tool} is current")
+            return
+        if home.is_symlink() or (home.exists() and not home.is_dir()):
+            self.skip(tool, f"{home} is not a directory")
+        self.own_missing_dirs(home)
+        home.mkdir(parents=True, exist_ok=True)
+        if not self.switch_symlink(payload, current):
+            self.skip(tool, f"could not switch {current}")
+        self.own_file(current)
+        for command in commands:
+            self.link_symlink(self.dest / command, wants[command])
+        legacy = home / "releases"
+        if legacy.is_dir() and not legacy.is_symlink():
+            shutil.rmtree(legacy, ignore_errors=True)
+            self.removed.add(legacy)
+            self.changed = True
+        self.own_dir(payload)
+        self.write_state(state, record)
+        self.changed = True
+        self.ok(install_message or f"Installed {self.dest}/{commands[0]}")
+        if on_current is not None:
+            on_current()
 
     def install_sha_prerelease(self, tool: str, repo: str, install_name: str,
                                platforms: tuple[tuple[str, str], ...] | None = None) -> None:
@@ -857,97 +998,23 @@ class Installer:
         self.install_binary("zzz", staged, record)
 
     def install_fd_or_rg(self, prog: str) -> None:
-        owner, project = {"fd": ("sharkdp", "fd"), "rg": ("BurntSushi", "ripgrep")}[prog]
-        if (self.os_name, self.arch) == ("linux", "x86_64") or (self.os_name, self.arch) == ("linux", "aarch64"):
-            artifact_target = f"{self.arch}-unknown-linux-musl"
-        elif (self.os_name, self.arch) in (("darwin", "x86_64"), ("darwin", "aarch64")):
-            artifact_target = f"{self.arch}-apple-darwin"
-        else:
-            self.skip(prog, f"no upstream release for {self.os_name}/{self.arch}")
-        latest_url = self.effective_url(f"https://github.com/{owner}/{project}/releases/latest")
-        tag_match = re.search(r"/releases/tag/([^/]+)$", latest_url)
-        tag = tag_match.group(1) if tag_match else ""
-        if not tag:
-            self.unchecked(prog, "no upstream release found")
-            return
-        asset = f"{project}-{tag}-{artifact_target}"
-        url = f"https://github.com/{owner}/{project}/releases/download/{tag}/{asset}.tar.gz"
-        record = self.asset_id(url)
-        if not record:
-            self.unchecked(prog, f"{asset}.tar.gz is not available in {tag}")
-            return
-        if self.is_current(prog, record):
-            self.current(f"{prog} is current ({tag})")
-            return
-        self.fetch_msg(f"Downloading {asset}.tar.gz ...")
-        with tempfile.NamedTemporaryFile(delete=False) as stream:
-            archive_path = Path(stream.name)
-        if not self.download(url, archive_path):
-            archive_path.unlink(missing_ok=True)
-            self.skip(prog, f"{asset}.tar.gz is not available in {tag}")
-        staged = self.stage_file(self.dest, f".{prog}.")
-        member = self.tar_member(archive_path, f"{asset}/{prog}")
-        archive_path.unlink(missing_ok=True)
-        if member is None:
-            staged.unlink(missing_ok=True)
-            self.skip(prog, f"{asset}.tar.gz does not contain {prog}")
-        staged.write_bytes(member)
-        self.install_binary(prog, staged, record)
+        self.install_buildlib_command(prog, prog, prog)
 
     def install_mold(self) -> None:
         if (self.os_name, self.arch) not in (("linux", "x86_64"), ("linux", "aarch64")):
             self.skip("mold", "only x86_64 and aarch64 Linux are published")
-        tag = ""
-        for entry in _ENTRY.findall(self.fetch_text("https://github.com/joshuarli/mold/releases.atom")):
-            tag_match = _TAG_LINK.search(entry)
-            if tag_match and tag_match.group(1).startswith("mold-musl-"):
-                tag = tag_match.group(1)
-                break
-        if not tag:
-            self.unchecked("mold", "no release found")
-            return
-        version = tag.removeprefix("mold-musl-").rsplit("-", 1)[0]
-        asset = f"mold-{version}-{self.arch}-linux-musl"
-        url = f"https://github.com/joshuarli/mold/releases/download/{tag}/{asset}.tar.gz"
-        record = self.asset_id(url)
-        if not record:
-            self.unchecked("mold", f"{asset}.tar.gz is not available in {tag}")
+        self.install_buildlib_command("mold", "mold", "mold")
+        if not (self.dest / "mold").is_symlink():
             return
         ld_mold = self.dest / "ld.mold"
-        if self.is_current("mold", record) and ld_mold.is_symlink() \
-                and os.readlink(ld_mold) == "mold":
-            self.own_file(ld_mold)
-            self.current(f"mold is current ({tag})")
-            return
-        self.fetch_msg(f"Downloading {asset}.tar.gz ...")
-        with tempfile.NamedTemporaryFile(delete=False) as stream:
-            archive_path = Path(stream.name)
-        if not self.download(url, archive_path):
-            archive_path.unlink(missing_ok=True)
-            self.skip("mold", f"{asset}.tar.gz is not available in {tag}")
-        staged = self.stage_file(self.dest, ".mold.")
-        member = self.tar_member(archive_path, f"{asset}/bin/mold")
-        archive_path.unlink(missing_ok=True)
-        if member is None:
-            staged.unlink(missing_ok=True)
-            self.skip("mold", f"{asset}.tar.gz does not contain bin/mold")
-        staged.write_bytes(member)
-        self.install_binary("mold", staged, record)
         if ld_mold.is_symlink() or ld_mold.exists():
             ld_mold.unlink()
         ld_mold.symlink_to("mold")
         self.own_file(ld_mold)
+        self.changed = True
 
     def install_jaq(self) -> None:
-        if (self.os_name, self.arch) == ("linux", "x86_64"):
-            target = "x86_64-unknown-linux-musl"
-        elif (self.os_name, self.arch) == ("linux", "aarch64"):
-            self.skip("jaq", "no musl release for aarch64; install jq instead")
-        elif self.os_name == "linux":
-            target = f"{self.arch}-unknown-linux-gnu"
-        else:
-            target = f"{self.arch}-apple-darwin"
-        self.install_direct("jaq", f"https://github.com/01mf02/jaq/releases/latest/download/jaq-{target}")
+        self.install_buildlib_command("jaq", "jaq", "jaq")
 
     def install_cargo_llvm_cov(self) -> None:
         name = "cargo-llvm-cov"
@@ -1046,7 +1113,7 @@ class Installer:
         folder = self.home / ".fx"
         path = folder / "settings.json"
         folder.mkdir(mode=0o700, exist_ok=True)
-        current: dict = {}
+        current: dict[str, Any] = {}
         if path.is_symlink():
             path.unlink()
         elif path.is_file():
@@ -1217,24 +1284,35 @@ class Installer:
         if self.os_name == "linux" and not self.musl_loader:
             self.install_python3_with_uv()
             return
-        triples = {("darwin", "aarch64"): "aarch64-apple-darwin",
-                   ("linux", "x86_64"): "x86_64-unknown-linux-musl",
-                   ("linux", "aarch64"): "aarch64-unknown-linux-musl"}
-        if (self.os_name, self.arch) not in triples:
+        triple = self.buildlib_triple()
+        if not triple:
             self.skip("python3", f"no python-build release for {self.os_name}/{self.arch}")
+        got = self.buildlib_bins("cpython", "python3")
+        if got is None:
             return
-        triple = triples[(self.os_name, self.arch)]
-        found = self.build_release(PYTHON_BUILD_REPO, "cpython", triple)
-        if found is None:
-            self.unchecked("python3", "no release found")
+        bindir, record = got
+        payload = self.buildlib_payload(bindir)
+        interpreter = bindir / "python3.15"
+        if not interpreter.is_file():
+            self.skip("python3", "the cpython payload has no bin/python3.15")
+        if self.run([str(interpreter), "-c", PYTHON_SMOKE], capture=True).returncode:
+            self.skip("python3", "the cpython interpreter failed its sqlite3/ssl/subprocess smoke test (built for a newer OS?)")
+        links = {name: str(interpreter) for name in ("python3", "python3.15")}
+        if self._state_text("python3") == record \
+                and all((self.dest / name).is_symlink() and os.readlink(self.dest / name) == links[name]
+                        for name in links):
+            self.own_dir(payload)
+            for name in links:
+                self.own_file(self.dest / name)
+            self.own_file(self.state / "python3")
+            self.current("python3 is current")
             return
-        tag, asset, version, base, sums = found
-        expected = self.sums_for(sums, asset)
-        self._install_python_build(
-            "python3", self.python_build_root, triples, "python/bin/python3.15",
-            [("python3", "python/bin/python3.15"), ("python3.15", "python/bin/python3.15")],
-            release=(tag, PYTHON_BUILD_REPO, {triple: (asset, expected)}),
-            manifest=lambda: self.check_release_manifest("python3", base, tag, "cpython", triple, version, asset, sums))
+        for name in ("python3", "python3.15"):
+            self.link_symlink(self.dest / name, str(interpreter))
+        self.write_state("python3", record)
+        self.own_dir(payload)
+        self.changed = True
+        self.ok(f"Installed {self.dest}/python3")
 
     def install_python3_with_uv(self) -> None:
         if self.arch not in ("x86_64", "aarch64"):
@@ -2377,42 +2455,10 @@ class Installer:
         return True
 
     def install_git(self) -> None:
-        triples = {("darwin", "aarch64"): "aarch64-apple-darwin",
-                   ("linux", "x86_64"): "x86_64-unknown-linux-musl",
-                   ("linux", "aarch64"): "aarch64-unknown-linux-musl"}
-        if (self.os_name, self.arch) not in triples:
-            self.skip("git", f"no git-build release for {self.os_name}/{self.arch}")
-        triple = triples[(self.os_name, self.arch)]
-        release = self.build_release("laputa-systems/git-build", "git", triple)
-        if release is None:
-            self.unchecked("git", "no release found")
-            return
-        tag, asset, version, base, sums = release
-        def validate(staged: Path) -> bool:
-            if not (staged / "git").is_file() or not os.access(staged / "git", os.X_OK):
-                return False
-            if not (staged / "git-shell").is_file() or not os.access(staged / "git-shell", os.X_OK):
-                return False
-            for helper in ("git-upload-archive", "git-upload-pack", "git-receive-pack", "git-submodule--helper"):
-                link = staged / helper
-                if not link.is_symlink() or os.readlink(link) != "git":
-                    return False
-            if not (staged / "git-submodule").is_file() or not os.access(staged / "git-submodule", os.X_OK):
-                return False
-            for lib in ("git-sh-setup", "git-sh-i18n"):
-                if not (staged / lib).is_file():
-                    return False
-            if not (staged / "git-sh-i18n--envsubst").is_file() or not os.access(staged / "git-sh-i18n--envsubst", os.X_OK):
-                return False
-            return True
-        self._archive_bundle("git", self.git_home, GIT_COMMANDS, "git", in_bin=False,
-                             asset=asset, url=f"{base}/{asset}", sums_url=f"{base}/SHA256SUMS",
-                             release_dir=self.git_home / "releases" / f"{tag}-{triple}",
-                             validate=validate, ok_message=f"git is current ({tag})",
-                             install_message=f"Installed {self.dest}/git",
-                             on_current=self.ensure_git_templates,
-                             manifest=lambda: self.check_release_manifest(
-                                 "git", base, tag, "git", triple, version, asset, sums))
+        self.install_buildlib_bundle(
+            "git", self.git_home, GIT_COMMANDS, "git",
+            ok_message="git is current", install_message=f"Installed {self.dest}/git",
+            on_current=self.ensure_git_templates)
 
     def install_ssh(self) -> None:
         triples = {("darwin", "aarch64"): "aarch64-apple-darwin",
@@ -2436,25 +2482,6 @@ class Installer:
                              install_message=f"Installed {self.dest}/ssh",
                              manifest=lambda: self.check_release_manifest(
                                  "ssh", base, tag, "ssh", triple, version, asset, sums))
-
-    def prune_gluon_releases(self) -> None:
-        home = self.gluon_home
-        releases = home / "releases"
-        if not releases.is_dir() or releases.is_symlink():
-            return
-        keep = set()
-        current = home / "current"
-        if current.is_symlink():
-            keep.add(Path(os.readlink(current)).name)
-        for entry in sorted(releases.iterdir()):
-            if entry.is_symlink() or not entry.is_dir():
-                continue
-            if entry.name in keep:
-                self.own_dir(entry)
-            elif entry.name.startswith(".gluon.") or entry.name.startswith("release-"):
-                shutil.rmtree(entry, ignore_errors=True)
-                self.removed.add(entry)
-                self.changed = True
 
     def prune_bctl_releases(self) -> None:
         releases = self.bctl_releases_home / "releases"
@@ -2575,34 +2602,10 @@ class Installer:
         self.prune_bctl_releases()
 
     def install_gluon(self) -> None:
-        triples = {("darwin", "aarch64"): "aarch64-apple-darwin",
-                   ("linux", "x86_64"): "x86_64-unknown-linux-musl",
-                   ("linux", "aarch64"): "aarch64-unknown-linux-musl"}
-        if (self.os_name, self.arch) not in triples:
-            self.skip("gluon", f"no gluon release for {self.os_name}/{self.arch}")
-        triple = triples[(self.os_name, self.arch)]
-        tag = self.latest_tag("https://github.com/laputa-systems/gluon/releases.atom", prefix="release-")
-        if not tag:
-            self.unchecked("gluon", "no release found")
-            return
-        base = f"https://github.com/laputa-systems/gluon/releases/download/{tag}"
-        asset = self.available_archive(base, f"gluon-{triple}", "zip")
-        if not asset:
-            self.unchecked("gluon", f"gluon-{triple} archive is unavailable in {tag}")
-            return
-        def validate(staged: Path) -> bool:
-            for command in GLUON_COMMANDS:
-                path = staged / command
-                if not path.is_file():
-                    return False
-                path.chmod(0o755)
-            return True
-        self._archive_bundle("gluon", self.gluon_home, GLUON_COMMANDS, "gluon", in_bin=False,
-                             asset=asset, url=f"{base}/{asset}", sums_url=f"{base}/SHA256SUMS",
-                             release_dir=self.gluon_home / "releases" / f"{tag}-{triple}",
-                             validate=validate, ok_message=f"gluon is current ({tag})",
-                             install_message=f"Installed meson, ninja, and gluon-build ({tag})")
-        self.prune_gluon_releases()
+        self.install_buildlib_bundle(
+            "gluon", self.gluon_home, GLUON_COMMANDS, "gluon",
+            ok_message="gluon is current",
+            install_message="Installed meson, ninja, and gluon-build")
 
     def install_oxish(self) -> None:
         triples = {("darwin", "aarch64"): "aarch64-apple-darwin",
@@ -3403,6 +3406,9 @@ class Installer:
             return Path(target.removesuffix(inner))
         if target.startswith(str(self.uv_python_root) + os.sep) and target.endswith("/bin/python3.15"):
             return self.uv_python_root
+        prefix = str(self.buildlib_cache / "cpython") + os.sep
+        if target.startswith(prefix) and target.endswith("/bin/python3.15"):
+            return Path(target.removesuffix("/bin/python3.15"))
         return None
 
     def record_python3_install(self) -> None:
@@ -3535,14 +3541,30 @@ class Installer:
                 for command in FFMPEG_COMMANDS:
                     if (self.dest / command).is_symlink() and os.readlink(self.dest / command) == str(self.ffmpeg_home / "current/bin" / command):
                         self.own_file(self.dest / command)
-        if (self.state / "gluon").is_file() and (self.state / "gluon").stat().st_size > 0:
-            target = os.readlink(self.gluon_home / "current") if (self.gluon_home / "current").is_symlink() else ""
-            if self._own_release_target(self.gluon_home, GLUON_COMMANDS, f"{target}/meson", in_bin=False) and Path(target).is_dir():
-                self.own_file(self.state / "gluon")
-                self.own_file(self.gluon_home / "current")
-                for command in GLUON_COMMANDS:
-                    if (self.dest / command).is_symlink() and os.readlink(self.dest / command) == str(self.gluon_home / "current" / command):
-                        self.own_file(self.dest / command)
+        for state_name, tool, home, commands in (
+                ("git", "git", self.git_home, GIT_COMMANDS),
+                ("gluon", "gluon", self.gluon_home, GLUON_COMMANDS)):
+            record = self._state_text(state_name)
+            payload = self.buildlib_cache / tool / record if record else None
+            current = home / "current"
+            if payload is None or not payload.is_dir() or payload.is_symlink() \
+                    or not current.is_symlink() or os.readlink(current) != str(payload):
+                continue
+            self.own_dir(payload)
+            self.own_file(current)
+            self.own_file(self.state / state_name)
+            for command in commands:
+                launcher = self.dest / command
+                if launcher.is_symlink() and os.readlink(launcher) == str(current / command):
+                    self.own_file(launcher)
+        for state_name, tool in (("fd", "fd"), ("rg", "rg"), ("jaq", "jaq"),
+                                 ("mold", "mold"), ("python3", "cpython")):
+            record = self._state_text(state_name)
+            if not record:
+                continue
+            payload = self.buildlib_cache / tool / record
+            if payload.is_dir() and not payload.is_symlink():
+                self.own_dir(payload)
         bctl_current = self.bctl_releases_home / "current"
         if (self.state / "bctl").is_file() and (self.state / "bctl").stat().st_size > 0 and bctl_current.is_symlink():
             target = os.readlink(bctl_current)
@@ -3587,7 +3609,7 @@ def musl_loader_present(os_name: str, arch: str, root: Path = Path("/")) -> bool
 def default_tools(os_name: str, arch: str, profile: str, server_tools: Path | None = None,
                   *, musl_loader: bool | None = None, rustup: bool = False) -> list[str]:
     tools = ["fd", "rg"]
-    if not (os_name == "linux" and arch == "aarch64"):
+    if (os_name, arch) in (("darwin", "aarch64"), ("linux", "x86_64"), ("linux", "aarch64")):
         tools.append("jaq")
     tools += "codex claude devin opencode pi fastermod tm ish stuff e fz srv git python3 uv cf agent-browser rage vault".split()
     if (os_name, arch) in (("darwin", "aarch64"), ("linux", "x86_64"), ("linux", "aarch64")):

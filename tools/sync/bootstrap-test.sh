@@ -37,6 +37,14 @@ EOF
 fake_sums=$work/SHA256SUMS
 printf '%s  %s\n' "$digest" "$asset" > "$fake_sums"
 
+wheel=$work/laputa_buildlib-0.3.1-py3-none-any.whl
+printf 'fake buildlib wheel' > "$wheel"
+wheel_digest=$(sha256sum "$wheel")
+wheel_digest=${wheel_digest%% *}
+wheel_size=$(wc -c < "$wheel" | tr -d ' ')
+wheel_url="https://wheel.test/laputa_buildlib-0.3.1-py3-none-any.whl"
+export BUILDLIB_WHEEL_URL="$wheel_url" BUILDLIB_WHEEL_SHA256="$wheel_digest" BUILDLIB_WHEEL_SIZE="$wheel_size"
+
 mkdir -p "$stub"
 cat > "$stub/curl" <<'EOS'
 #!/bin/sh
@@ -55,6 +63,7 @@ case "$url" in
     */cpython-*.tar.xz)
         if [ "${FAKE_CURL_CORRUPT:-}" = 1 ]; then printf 'corrupt' > "$out"; exit 0; fi
         cat "$FAKE_PAYLOAD" > "$out" ;;
+    */laputa_buildlib-*.whl) cat "$FAKE_WHEEL" > "$out" ;;
     *) exit 1 ;;
 esac
 EOS
@@ -67,12 +76,14 @@ setup() {
     printf '%s' "$home"
 }
 run_bootstrap() {
-    HOME=$1 FAKE_ATOM=$fake_atom FAKE_SUMS=$fake_sums FAKE_PAYLOAD=$2 PATH="$stub:$PATH" sh "$work/bootstrap.sh" python3
+    HOME=$1 FAKE_ATOM=$fake_atom FAKE_SUMS=$fake_sums FAKE_PAYLOAD=$2 FAKE_WHEEL=$wheel \
+        PATH="$stub:$PATH" sh "$work/bootstrap.sh" python3
 }
 
 home=$(setup install)
 run_bootstrap "$home" "$payload" >/dev/null
 [ -L "$home/.local/bin/python3" ] || fail "python3 launcher was not installed"
+[ -f "$home/.local/share/buildlib/laputa_buildlib-0.3.1-py3-none-any.whl" ] || fail "buildlib wheel was not installed"
 [ "$(cat "$home/.local/state/dl/python3")" = "$digest" ] || fail "state does not record the asset digest"
 "$home/.local/bin/python3" -c 'import sqlite3, ssl' || fail "installed python3 does not run its smoke import"
 run_bootstrap "$home" "$payload" > "$work/second.log"
@@ -81,7 +92,7 @@ grep -q "is current" "$work/second.log" || fail "second run was not idempotent: 
 home=$(setup mismatch)
 mkdir -p "$home/.local/bin"
 printf 'keep' > "$home/.local/bin/python3"
-if FAKE_CURL_CORRUPT=1 HOME=$home FAKE_ATOM=$fake_atom FAKE_SUMS=$fake_sums FAKE_PAYLOAD=$payload PATH="$stub:$PATH" sh "$work/bootstrap.sh" python3 >"$work/mismatch.log" 2>&1; then
+if FAKE_CURL_CORRUPT=1 HOME=$home FAKE_ATOM=$fake_atom FAKE_SUMS=$fake_sums FAKE_PAYLOAD=$payload FAKE_WHEEL=$wheel PATH="$stub:$PATH" sh "$work/bootstrap.sh" python3 >"$work/mismatch.log" 2>&1; then
     fail "checksum mismatch was not rejected"
 fi
 [ "$(cat "$home/.local/bin/python3")" = "keep" ] || fail "checksum mismatch replaced an existing python3"
@@ -103,7 +114,7 @@ PY
 fake_sums_evil=$work/SHA256SUMS.evil
 printf '%s  %s\n' "$(sha256sum "$work/evil.tar.xz" | awk '{print $1}')" "cpython-3.15.1-${triple}.tar.xz" > "$fake_sums_evil"
 home=$(setup evil)
-if HOME=$home FAKE_ATOM=$fake_atom FAKE_SUMS=$fake_sums_evil FAKE_PAYLOAD=$work/evil.tar.xz PATH="$stub:$PATH" sh "$work/bootstrap.sh" python3 >"$work/evil.log" 2>&1; then
+if HOME=$home FAKE_ATOM=$fake_atom FAKE_SUMS=$fake_sums_evil FAKE_PAYLOAD=$work/evil.tar.xz FAKE_WHEEL=$wheel PATH="$stub:$PATH" sh "$work/bootstrap.sh" python3 >"$work/evil.log" 2>&1; then
     fail "archive with an unsafe path was not rejected"
 fi
 [ ! -e "$home/.local/bin/python3" ] || fail "unsafe archive installed a python3 launcher"
