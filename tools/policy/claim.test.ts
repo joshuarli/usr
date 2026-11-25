@@ -296,13 +296,20 @@ test("truly parallel claimants in two worktrees are serialized: exactly one wins
 })
 
 test("the generator gate degrades with a warning outside a Git worktree instead of blocking", () => {
-  // The scratch directory must be outside this checkout, or Git discovery finds the outer repository.
+  // TMPDIR may sit inside a checkout (agents keep scratch under .work/tmp), so stop Git discovery at the scratch
+  // directory's parent instead of assuming the system temporary directory is outside every repository.
   const tmp = mkdtempSync(join(tmpdir(), "policy-claim-nogit-"))
+  const ceiling = process.env.GIT_CEILING_DIRECTORIES
+  process.env.GIT_CEILING_DIRECTORIES = dirname(tmp)
   try {
     const gate = gateGenerate(tmp)
     assert.equal(gate.proceed, true)
     if (gate.proceed) assert.match(gate.notices.join("\n"), /policy claim check skipped/)
-  } finally { rmSync(tmp, { recursive: true, force: true }) }
+  } finally {
+    if (ceiling === undefined) delete process.env.GIT_CEILING_DIRECTORIES
+    else process.env.GIT_CEILING_DIRECTORIES = ceiling
+    rmSync(tmp, { recursive: true, force: true })
+  }
 })
 
 test("owner identity prefers agent session environment identifiers and falls back to user@host", () => {
