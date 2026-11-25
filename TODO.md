@@ -1,5 +1,5 @@
 Prefix: USR
-Next: 148
+Next: 149
 
 ### USR-83 · P2 · running sessions on two hosts cannot reach each other over intercom
 
@@ -108,6 +108,15 @@ Next: 148
 - **Recommendation:** Treat the Command Code runner's own state directory as harness bookkeeping, not lane edits: exclude `.commandcode/` from the untouched-worktree check and the scope check (or have the runner write it outside the worktree), and remove it on fallback. Acceptance: a Command Code credit failure that leaves only `.commandcode/` falls back to the next route without parent action, and a real tracked edit still blocks.
 - **Fix with:** lifecycle-concurrency
 - **Effort:** S
+
+### USR-148 · P2 · Bridge cannot surface or answer a Pi worker's supervisor ask
+
+- **Area:** pi-subagent-bridge · pi
+- **Where:** tools/pi-subagent-bridge/src (worker_status, worker_steer); pi-subagents supervisor ask RPC
+- **Problem:** A Devin worker (session usrw_4dc92e04…, 2026-11-25) raised a `need_decision` supervisor ask. `worker_status` kept reporting state running with attention null and no pending-ask field, and `worker_steer` failed with 'blocked on a pending supervisor ask… Reply explicitly: subagent_supervisor(...)', a Pi-internal tool that bridge parents (Claude Code, Codex) cannot call. The parent can only find the question by grepping the Pi session JSONL under .work/worker-bridge/pi-sessions/ and must cancel the worker to proceed.
+- **Recommendation:** Report pending asks in worker_status (attention needs_attention, the ask id, reason and body) and add a parent-only `worker_reply` MCP tool and CLI command that forwards to the supervisor reply RPC, with a test that a blocked fixture run resumes after the reply.
+- **Fix with:** none
+- **Effort:** M
 
 ### USR-75 · P3 · clang plus mold host links intermittently segfault and leave truncated artifacts
 
@@ -495,4 +504,3 @@ Next: 148
 - **Recommendation:** Exercise the supported setup and preference changes on a disposable macOS host and verify their resulting state and recovery.
 - **Fix with:** none
 - **Effort:** M
-
