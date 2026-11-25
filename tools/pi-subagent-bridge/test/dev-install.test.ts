@@ -34,7 +34,8 @@ function fixture() {
 }
 
 function run(checkout: string, env: NodeJS.ProcessEnv) {
-  return spawnSync("sh", [join(checkout, "dev-install.sh")], { cwd: checkout, env, encoding: "utf8" })
+  // POSIX /bin/sh, not whichever sh is first on PATH: a user shell shim may rewrite XDG variables.
+  return spawnSync("/bin/sh", [join(checkout, "dev-install.sh")], { cwd: checkout, env, encoding: "utf8" })
 }
 
 test("creates a runtime symlink from XDG_DATA_HOME when node_modules is absent", () => {
