@@ -87,7 +87,7 @@ class FakeBuildlib:
 
     LAYOUTS = {
         "fd": ("", False), "rg": ("", False), "jaq": ("", False), "gluon": ("", False),
-        "git": ("", False), "cpython": ("bin", True), "mold": ("bin", True),
+        "git": ("bin", False), "cpython": ("bin", True), "mold": ("bin", True),
     }
 
     def __init__(self, routes):
@@ -1219,14 +1219,16 @@ sys.exit(1)
     def _git_tar(self):
         buffer = io.BytesIO()
         with tarfile.open(fileobj=buffer, mode="w:xz") as archive:
-            for name, mode in (("git", 0o755), ("git-shell", 0o755), ("git-submodule", 0o755),
-                               ("git-sh-i18n--envsubst", 0o755), ("git-sh-setup", 0o644), ("git-sh-i18n", 0o644)):
+            for name, mode in (("bin/git", 0o755), ("bin/git-shell", 0o755),
+                               ("libexec/git-core/git-submodule", 0o755),
+                               ("libexec/git-core/git-sh-setup", 0o644),
+                               ("share/git-core/templates/info/exclude", 0o644)):
                 info = tarfile.TarInfo(name)
                 info.size = 1
                 info.mode = mode
                 archive.addfile(info, io.BytesIO(b"g"))
-            for helper in ("git-upload-archive", "git-upload-pack", "git-receive-pack", "git-submodule--helper"):
-                info = tarfile.TarInfo(helper)
+            for helper in ("git-upload-archive", "git-upload-pack", "git-receive-pack"):
+                info = tarfile.TarInfo(f"bin/{helper}")
                 info.type = tarfile.SYMTYPE
                 info.linkname = "git"
                 info.mode = 0o777
@@ -1258,9 +1260,10 @@ sys.exit(1)
         sha = hashlib.sha256(payload).hexdigest()
         current = self.home / ".local/share/git/current"
         self.assertEqual(os.readlink(current), str(inst.buildlib_cache / "git" / sha))
-        self.assertTrue((current / "git").is_file())
-        self.assertTrue((current / "git-upload-pack").is_symlink())
-        self.assertTrue((self.dest_path("git").parent.parent / "share/git-core/templates/info/exclude").is_file())
+        self.assertTrue((current / "bin/git").is_file())
+        self.assertEqual(os.readlink(self.dest_path("git")), str(current / "bin/git"))
+        self.assertEqual(os.readlink(self.dest_path("git-upload-pack")), str(current / "bin/git-upload-pack"))
+        self.assertFalse(self.dest_path("git-submodule").exists())
         self.assertEqual(self.state("git"), sha)
         again = self.buildlib_make(self._git_entries(payload))
         again.install_git()
@@ -1309,8 +1312,23 @@ sys.exit(1)
         self.assertIn("no git asset", str(ctx.exception))
         self.assertFalse((self.home / ".local/share/git/current").exists())
 
+    def test_git_retires_flat_bundle_helper_launchers_and_templates(self):
+        payload = self._git_tar()
+        inst = self.buildlib_make(self._git_entries(payload))
+        current = inst.git_home / "current"
+        self.dest_path("git").parent.mkdir(parents=True, exist_ok=True)
+        os.symlink(str(current / "git-submodule"), self.dest_path("git-submodule"))
+        os.symlink("/elsewhere/git-sh-setup", self.dest_path("git-sh-setup"))
+        exclude = self.dest_path("git").parent.parent / "share/git-core/templates/info/exclude"
+        exclude.parent.mkdir(parents=True)
+        exclude.write_text(installer.FLAT_GIT_EXCLUDE_TEMPLATE + "\n")
+        inst.install_git()
+        self.assertFalse(self.dest_path("git-submodule").is_symlink())
+        self.assertEqual(os.readlink(self.dest_path("git-sh-setup")), "/elsewhere/git-sh-setup")
+        self.assertFalse(exclude.exists())
+
     def test_git_rejects_a_payload_missing_commands(self):
-        payload = make_tar({"git": b"g"}, "w:xz")
+        payload = make_tar({"bin/git": b"g"}, "w:xz")
         inst = self.buildlib_make(self._git_entries(payload))
         with self.assertRaises(SkipInstall):
             inst.install_git()
