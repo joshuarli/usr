@@ -1,5 +1,5 @@
 Prefix: USR
-Next: 150
+Next: 151
 
 ### USR-83 · P2 · running sessions on two hosts cannot reach each other over intercom
 
@@ -370,6 +370,15 @@ Next: 150
 - **Fix with:** none
 - **Effort:** S
 
+### USR-150 · P3 · Install the owned ast-grep build on dev hosts
+
+- **Area:** sync · owned tools
+- **Where:** tools/sync/installer.py; laputa-systems/ast-grep releases
+- **Problem:** stuff's `repomod deps snapshot` (make deps) now parses fleet shell with the owned ast-grep and refuses to run without ast-grep 0.51.3 on PATH or REPOMOD_AST_GREP. laputa-systems/ast-grep publishes static Linux musl and macOS builds (release-ece6c9546dd52b2644d217c66bf107c08b83b87f) and buildlib.tools can install it, but sync installs nothing for it, so a fresh host cannot refresh the dependency inventory.
+- **Recommendation:** Install ast-grep from the pinned owned release in sync (through buildlib.tools once OT11 lands, or the installer's existing bare-archive path until then), with its version pinned to stuff's fleet/policy/command-baseline.toml `ast_grep_version`.
+- **Fix with:** none
+- **Effort:** S
+
 ### USR-73 · P4 · The refactor-web-ui skill has only been applied to agentctl
 
 - **Area:** Skills
@@ -513,4 +522,3 @@ Next: 150
 - **Recommendation:** Exercise the supported setup and preference changes on a disposable macOS host and verify their resulting state and recovery.
 - **Fix with:** none
 - **Effort:** M
-
