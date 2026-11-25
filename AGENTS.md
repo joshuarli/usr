@@ -51,7 +51,7 @@ it instead of touching it.
 
 Private GitHub repos can run Actions on GitHub Free within the account’s included compute allowance. Check the actual workflow or quota before calling CI unavailable, and run the equivalent checks locally when hosted execution is unavailable.
 
-Test tiers are local unit and CLI fixture tests, subprocess integration tests, and a separate Alpine VM journey. The [deslop inventory](docs/verification/deslop-test-inventory.md) records boundaries and gaps; [scanner observations](docs/verification/deslop-scans.md) record the type, dead-code and duplication scans.
+Test tiers are local unit and CLI fixture tests, subprocess integration tests, and a separate Alpine VM journey.
 
 Run with `TMPDIR="$PWD/.work/tmp"`, Python 3.11+, and pinned Node 26.13.1 for the offline bridge fixture.
 - `make test`: cache-empty 230s, warm 265s and 283s; `make lint`: 12s. Busy-host observations, not performance gates. The Pi offline SDK check isolates coordinator role markers from the invoking worker.

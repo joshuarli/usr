@@ -1,5 +1,5 @@
 Prefix: USR
-Next: 139
+Next: 148
 
 ### USR-83 · P2 · running sessions on two hosts cannot reach each other over intercom
 
@@ -307,6 +307,51 @@ Next: 139
 - **Fix with:** none
 - **Effort:** S
 
+### USR-139 · P3 · Triage first-party Python type diagnostics
+
+- **Area:** Types
+- **Where:** ty.toml; tools/; src/; host/
+- **Problem:** The recorded first-party ty diagnostics were not triaged; current error-level checks leave their causes and impact unclassified.
+- **Recommendation:** Run the configured checker on first-party code, distinguish real type contract defects from false positives, and file or fix actionable findings.
+- **Fix with:** typing-audit
+- **Effort:** L
+
+### USR-141 · P3 · Verify su-exec privilege transition behavior
+
+- **Area:** Tests · privilege transitions
+- **Where:** src/su-exec.c
+- **Problem:** The utility changes supplementary groups, gid, uid and HOME before exec, but no test verifies these privileged runtime transitions.
+- **Recommendation:** Exercise named and numeric identities, explicit groups, exec and failure paths in an isolated privileged environment.
+- **Fix with:** none
+- **Effort:** M
+
+### USR-142 · P3 · Verify tailnet policy operations in an isolated environment
+
+- **Area:** Tests · tailnet
+- **Where:** tailscale/Makefile; tailscale/policy.json
+- **Problem:** The policy check validates JSON syntax; fetch and apply behavior against the tailnet API is not covered by an isolated live test.
+- **Recommendation:** Qualify fetch, conditional apply and error handling against a disposable tailnet with authorized credentials.
+- **Fix with:** none
+- **Effort:** M
+
+### USR-143 · P3 · Qualify external GitHub and download integrations
+
+- **Area:** Tests · external services
+- **Where:** tools/close-stale-prs/tests/test_close_stale_prs.py; tools/pinact/tests/; tools/sync/test_installer.py
+- **Problem:** Local fixtures and mocks do not establish GitHub branch operations, remote action metadata or live installer download behavior.
+- **Recommendation:** Run bounded checks against disposable GitHub resources and authorized download endpoints, preserving destructive-operation safeguards.
+- **Fix with:** none
+- **Effort:** M
+
+### USR-144 · P3 · Qualify live provider and usage integrations
+
+- **Area:** Tests · providers
+- **Where:** tools/decide/tests/test_decide.py; tools/usage/tests/test_usage.py; tools/pi-subagent-bridge/test/
+- **Problem:** Fixture coverage does not establish live provider requests, account usage responses or bridge provider behavior.
+- **Recommendation:** Exercise each supported integration with authorized accounts and bounded requests, distinguishing provider failures from fixture regressions.
+- **Fix with:** none
+- **Effort:** L
+
 ### USR-73 · P4 · The refactor-web-ui skill has only been applied to agentctl
 
 - **Area:** Skills
@@ -414,4 +459,40 @@ Next: 139
 - **Recommendation:** Send progress lines to stderr, or suppress them under --json. Acceptance: stdout of sh sync links --json into a scratch TARGET parses as one JSON value.
 - **Fix with:** design-cli
 - **Effort:** S
+
+### USR-140 · P4 · Triage remaining dead-code scanner findings
+
+- **Area:** Maintainability
+- **Where:** tools/; src/; host/
+- **Problem:** The Vulture findings were not individually triaged, so unused owned code may remain alongside legitimate framework callbacks and dynamic consumers.
+- **Recommendation:** Recheck current findings and trace consumers before removing confirmed dead code; retain dynamic entry points.
+- **Fix with:** dead-code-archaeology
+- **Effort:** L
+
+### USR-145 · P4 · Qualify the installed Muse host bootstrap
+
+- **Area:** Tests · Pi runtime
+- **Where:** tools/pi/test_offline.py:183
+- **Problem:** The real Muse host bootstrap test skips when the separately installed executable is unavailable, leaving that host path unverified.
+- **Recommendation:** Run the existing scoped-workspace test with an installed Muse executable and investigate any failure.
+- **Fix with:** none
+- **Effort:** S
+
+### USR-146 · P4 · Measure test coverage and repeatability
+
+- **Area:** Tests · assessment
+- **Where:** Makefile; tools/sync/checks.py
+- **Problem:** The prior inventory did not measure branch coverage or establish a repeat-run flake baseline, leaving blind spots and intermittent failures uncharacterized.
+- **Recommendation:** Measure branch coverage for the relevant behavior suites and repeat them under stable conditions; investigate actionable gaps or flakes.
+- **Fix with:** test-audit
+- **Effort:** L
+
+### USR-147 · P4 · Verify macOS setup mutations on a disposable host
+
+- **Area:** Tests · macOS setup
+- **Where:** host/macos/sync-test.py; host/macos/macos-test.py; host/macos/lean-test.py
+- **Problem:** Fixture tests mock preference writes and host commands, so actual macOS setup mutations and recovery are not established by them.
+- **Recommendation:** Exercise the supported setup and preference changes on a disposable macOS host and verify their resulting state and recovery.
+- **Fix with:** none
+- **Effort:** M
 
