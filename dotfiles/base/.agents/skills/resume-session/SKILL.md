@@ -39,6 +39,7 @@ If the user explicitly wants to reopen the original agent, provide the correct h
 | Antigravity CLI | `agy --conversation <ID>` |
 | DeepSeek Harness | `dsh tui --resume <ID>` |
 | fx | `fx resume <ID>` |
+| Devin | `devin --resume <ID>` |
 
 These commands require the relevant CLI, its own surviving session data/service, and often the original workspace. Do not try to run an interactive nested agent through a non-interactive shell tool.
 
