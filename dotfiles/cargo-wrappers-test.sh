@@ -8,7 +8,6 @@ set -u
 script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 repo_root=$(CDPATH='' cd -- "$script_dir/.." && pwd)
 wrappers="$script_dir/base/.local/bin"
-rustc_wrapper="$script_dir/base/.local/lib/cargo-kache/kache"
 work_root="$repo_root/.work/tmp"
 mkdir -p "$work_root"
 scratch=$(mktemp -d "$work_root/cargo-wrappers.XXXXXX") || exit 1
@@ -69,8 +68,7 @@ expect_argv() {
 
 case_config_names_the_wrappers() {
     config="$script_dir/base/.cargo/config.toml"
-    grep -Fx 'rustc-wrapper = ".local/lib/cargo-kache/kache"' "$config" >/dev/null
-    [ "$(basename "$rustc_wrapper")" = kache ] && [ -x "$rustc_wrapper" ]
+    grep -Fx 'rustc-wrapper = ".cargo/bin/kache"' "$config" >/dev/null
     grep -Fx 'HOST_CC = "cargo-wrapper-cc"' "$config" >/dev/null
     grep -Fx 'HOST_CXX = "cargo-wrapper-cxx"' "$config" >/dev/null
     grep -Fx 'CC_KNOWN_WRAPPER_CUSTOM = "kache"' "$config" >/dev/null
@@ -84,8 +82,6 @@ case_config_names_the_wrappers() {
 
 case_kache_wraps_every_compiler() {
     log="$scratch/full.log"
-    run_wrapper "$full" "$rustc_wrapper" "$log" "$full/rustc" --edition 2024
-    expect_argv "$log" "$full/kache" "$full/rustc" --edition 2024
     run_wrapper "$full" cargo-wrapper-cc "$log" -c "a file.c"
     expect_argv "$log" "$full/kache" clang -c "a file.c"
     run_wrapper "$full" cargo-wrapper-cxx "$log" -c "b file.cc"
@@ -94,8 +90,6 @@ case_kache_wraps_every_compiler() {
 
 case_clang_without_kache_is_used_directly() {
     log="$scratch/clang-only.log"
-    run_wrapper "$clang_only" "$rustc_wrapper" "$log" "$clang_only/rustc" --edition 2024
-    expect_argv "$log" "$clang_only/rustc" --edition 2024
     run_wrapper "$clang_only" cargo-wrapper-cc "$log" -c "a file.c"
     expect_argv "$log" "$clang_only/clang" -c "a file.c"
     run_wrapper "$clang_only" cargo-wrapper-cxx "$log" -c "b file.cc"
@@ -104,12 +98,20 @@ case_clang_without_kache_is_used_directly() {
 
 case_plain_host_tools_are_the_last_resort() {
     log="$scratch/plain.log"
-    run_wrapper "$plain" "$rustc_wrapper" "$log" "$plain/rustc" --edition 2024
-    expect_argv "$log" "$plain/rustc" --edition 2024
     run_wrapper "$plain" cargo-wrapper-cc "$log" -c "a file.c"
     expect_argv "$log" "$plain/cc" -c "a file.c"
     run_wrapper "$plain" cargo-wrapper-cxx "$log" -c "b file.cc"
     expect_argv "$log" "$plain/c++" -c "b file.cc"
+}
+
+case_rustc_wrapper_keeps_hyphenated_cargo_variables() {
+    command -v python3 >/dev/null
+    home="$scratch/home"
+    mkdir -p "$home/.cargo/bin"
+    wrapper=$(sed -n 's/^rustc-wrapper = "\(.*\)"$/\1/p' "$script_dir/base/.cargo/config.toml")
+    printf '%s\n' '#!/usr/bin/env python3' 'import os' 'print(os.environ.get("CARGO_BIN_EXE_hyphen-bin", "missing"))' > "$home/$wrapper"
+    chmod +x "$home/$wrapper"
+    [ "$(env 'CARGO_BIN_EXE_hyphen-bin=/target/hyphen-bin' "$home/$wrapper")" = /target/hyphen-bin ]
 }
 
 case_n=0
@@ -127,7 +129,8 @@ run_case() {
 }
 
 run_case 'the cargo config names the wrapper programs' case_config_names_the_wrappers
-run_case 'kache wraps rustc, clang, and clang++ with unchanged argv' case_kache_wraps_every_compiler
+run_case 'kache wraps clang and clang++ with unchanged argv' case_kache_wraps_every_compiler
+run_case 'the rustc wrapper is a program that keeps hyphenated Cargo variables' case_rustc_wrapper_keeps_hyphenated_cargo_variables
 run_case 'clang is used directly when kache is absent' case_clang_without_kache_is_used_directly
 run_case 'cc and c++ are the last resort when clang is absent' case_plain_host_tools_are_the_last_resort
 

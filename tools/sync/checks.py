@@ -184,7 +184,7 @@ REGISTRY: tuple[Check, ...] = (
     Check("setup-kache", (KACHE,), py("dotfiles/setup-kache-test.py"), ("dotfiles/base/.local/bin/setup-kache", "dotfiles/setup-kache-test.py")),
     Check("cargo-wrappers", (KACHE,), ("sh", "dotfiles/cargo-wrappers-test.sh"),
           ("dotfiles/cargo-wrappers-test.sh", "dotfiles/base/.cargo/config.toml",
-           "dotfiles/base/.local/lib/cargo-kache/kache", "dotfiles/base/.local/bin/cargo-wrapper-cc",
+           "dotfiles/base/.local/bin/cargo-wrapper-cc",
            "dotfiles/base/.local/bin/cargo-wrapper-cxx")),
     Check("pinact", (PINACT,), py("tools/pinact/test_pinact.py"), ("tools/pinact/", "dotfiles/base/.local/bin/pinact"), tmpdir=True),
     Check("pinact-yaml", (PINACT,), py("tools/pinact/tests/test_yaml.py"), ("tools/pinact/",), tmpdir=True),

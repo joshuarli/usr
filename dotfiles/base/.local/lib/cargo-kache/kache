@@ -1,6 +1,0 @@
-#!/bin/sh
-
-if command -v kache >/dev/null 2>&1; then
-    exec kache "$@"
-fi
-exec "$@"

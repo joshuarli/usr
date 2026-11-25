@@ -1,8 +1,11 @@
 [build]
-# The wrapper keeps the file name kache: cc-rs reuses RUSTC_WRAPPER as the C
-# compiler wrapper only for known cache names, which caches cross-target C
-# builds that set no TARGET_CC. It runs rustc directly when kache is absent.
-rustc-wrapper = ".local/lib/cargo-kache/kache"
+# Cargo runs the kache binary directly, relative to $HOME: a shell launcher
+# drops environment names that are not shell identifiers, such as Cargo's
+# CARGO_BIN_EXE_<bin> for a hyphenated binary, so integration tests could not
+# compile. cc-rs reuses RUSTC_WRAPPER as the C compiler wrapper only for known
+# cache names, so the file must be named kache. sync installs kache whenever
+# rustup is present; a host without it sets CARGO_BUILD_RUSTC_WRAPPER=.
+rustc-wrapper = ".cargo/bin/kache"
 
 [env]
 # kache init adds this key when it is missing. cc-rs reads it only when a
