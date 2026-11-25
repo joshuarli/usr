@@ -6,12 +6,12 @@ summary = "Durable state has explicit contracts: transactions follow invariants,
 paths = ["migrations/", "migration/", "*.sql", "*.proto", "*.avsc", "schema.*", "!*.md"]
 
 [[trigger]]
-paths = ["*", "!*.md", "!*.txt", "!*.rst"]
+paths = ["*", "!*.md", "!*.txt", "!*.rst", "!*.json", "!*.jsonl", "!*.log", "!*.csv", "!*.tsv", "!*.svg", "!*.snap", "!*.lock"]
 content = ['(?i)\b(CREATE|ALTER|DROP)\s+(TABLE|INDEX|VIEW)\b', '(?i)\b(transaction|savepoint|begin\s+immediate)\b', '\b(Serialize|Deserialize)\b', '\b(sqlite3|rusqlite|sqlx|diesel|psycopg|sqlalchemy|prisma|drizzle)\b', '\b(lease|leased_at|idempoten\w*)\b', '\bschema_version\b']
 
 [examples]
 match = ["db/migrations/0003_add_jobs.sql", "proto/api.proto", { path = "src/store.rs", text = "#[derive(Serialize, Deserialize)]\n" }, { path = "app/db.py", text = "import sqlite3\n" }]
-skip = [{ path = "src/math.rs", text = "fn add() {}\n" }, { path = "docs/schema.md", text = "CREATE TABLE jobs\n" }]
+skip = [{ path = "fixtures/data.json", text = "CREATE TABLE jobs\n" }, { path = "src/math.rs", text = "fn add() {}\n" }, { path = "docs/schema.md", text = "CREATE TABLE jobs\n" }]
 +++
 
 # Durable State

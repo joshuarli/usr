@@ -1,5 +1,5 @@
 Prefix: USR
-Next: 149
+Next: 150
 
 ### USR-83 · P2 · running sessions on two hosts cannot reach each other over intercom
 
@@ -361,6 +361,15 @@ Next: 149
 - **Fix with:** none
 - **Effort:** L
 
+### USR-149 · P3 · standards hook is unverified against live Codex apply_patch events
+
+- **Area:** Agent setup
+- **Where:** tools/standards/standards.py edited_paths; dotfiles/base/.codex/config.toml PostToolUse standards hook
+- **Problem:** The standards PostToolUse hook finds edited files from tool_input.file_path and from apply_patch "*** Add/Update File:" headers in any string field of tool_input. Tests feed a synthetic event with the patch in a command field; no live Codex PostToolUse event for apply_patch has been captured, so the field that carries the patch and the presence of session_id and cwd in Codex events are assumed from Claude Code's schema.
+- **Recommendation:** Capture one real Codex PostToolUse event for apply_patch (for example with a temporary hook that writes stdin to .work/tmp), add it as a fixture in tools/standards/test_standards.py, and adjust edited_paths if the shape differs. Acceptance: the fixture test passes and a fresh Codex session editing a shell script receives the shell standard announcement once.
+- **Fix with:** none
+- **Effort:** S
+
 ### USR-73 · P4 · The refactor-web-ui skill has only been applied to agentctl
 
 - **Area:** Skills
@@ -504,3 +513,4 @@ Next: 149
 - **Recommendation:** Exercise the supported setup and preference changes on a disposable macOS host and verify their resulting state and recovery.
 - **Fix with:** none
 - **Effort:** M
+

@@ -67,7 +67,7 @@ When the user grants run-until-done authority ("don't stop until it's done", "I'
 - The fleet runs on its own stack so every consumer tests and improves its producers: prefer tools, toolchains, runtimes, images and libraries the `joshuarli` and `laputa-systems` namespaces produce over upstream packages. Before installing or adding one (CI workflows, Dockerfiles, Makefiles, build scripts, dependency manifests, or a host install), or when one fails or lacks an operation the task needs, read `~/.agents/instructions/owned-tools.md` and follow it: file nonblocking problems in that tool's repository and continue; repair a blocker there under its standing authorization, then resume the task.
 - Never open issues, pull requests, comments or reviews in repositories outside `joshuarli` and `laputa-systems` without Joshua's explicit consent for that post; a general grant of authority is not consent. For a defect in a third-party project, follow the third-party section of `~/.agents/instructions/owned-tools.md`: fix it in a `laputa-systems` fork, consume the fork, and leave an upstream draft there.
 - Reserve release builds for final verification, or when performance is the primary concern.
-- Before reporting code changes done, run `standards select` and apply each standard it lists through the gate in `~/.agents/instructions/coding-standards.md`.
+- Before reporting code changes done, run `standards select --base <revision before your work>` and apply each standard it lists through the gate in `~/.agents/instructions/coding-standards.md`.
 
 ## Environment
 

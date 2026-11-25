@@ -6,12 +6,12 @@ summary = "A command-line tool's help is its complete contract: one schema drive
 paths = ["bin/", "cli/", "cmd/", "cli.py", "__main__.py", "**/src/main.rs", "**/src/bin/"]
 
 [[trigger]]
-paths = ["*", "!*.md", "!*.txt", "!*.rst"]
+paths = ["*", "!*.md", "!*.txt", "!*.rst", "!*.json", "!*.jsonl", "!*.log", "!*.csv", "!*.tsv", "!*.svg", "!*.snap", "!*.lock"]
 content = ['\bargparse\b', '\bclap::', '\blexopt\b', '\b(commander|yargs)\b', '\bprocess\.argv\b', '\bflag\.(String|Bool|Int|Parse)\b', '\bgetopts?\b', '\bArgumentParser\b']
 
 [examples]
 match = ["dotfiles/base/.local/bin/standards", "cmd/tool/main.go", { path = "tools/report.py", text = "import argparse\n" }]
-skip = ["README.md", "src/lib.rs", { path = "docs/cli.md", text = "argparse\n" }]
+skip = [{ path = "fixtures/data.json", text = "import argparse\n" }, "README.md", "src/lib.rs", { path = "docs/cli.md", text = "argparse\n" }]
 +++
 
 # Command-Line Interface Design

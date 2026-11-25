@@ -171,7 +171,10 @@ class SelectTests(unittest.TestCase):
         self.repo.write("cli.py", "import argparse\n")
         self.repo.commit()
         self.assertEqual({}, self.select())
-        self.assertEqual({"cli-interrupt", "shell"}, set(self.select("--tree")))
+        tree = self.select("--tree")
+        self.assertEqual({"cli-interrupt", "shell"}, set(tree))
+        self.repo.write("more.sh", "#!/bin/sh\n")
+        self.assertEqual([1, 1], [len(reasons) for reasons in self.select("--tree").values()])
         self.assertEqual(2, self.cli("select", "--tree", "tool").returncode)
 
     def test_explicit_files_match_whole_content(self):

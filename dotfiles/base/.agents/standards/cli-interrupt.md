@@ -6,7 +6,7 @@ summary = "CLIs, long-running scripts, background jobs, and interactive terminal
 paths = ["bin/", "cli/", "cli.py", "__main__.py", "**/src/main.rs", "**/src/bin/"]
 
 [[trigger]]
-paths = ["*", "!*.md", "!*.txt", "!*.rst"]
+paths = ["*", "!*.md", "!*.txt", "!*.rst", "!*.json", "!*.jsonl", "!*.log", "!*.csv", "!*.tsv", "!*.svg", "!*.snap", "!*.lock"]
 content = [
   '\bSIG(INT|TERM)\b',
   '\bKeyboardInterrupt\b',
@@ -25,8 +25,7 @@ match = [
   "src/bin/extra.rs",
   { path = "tools/report.py", text = "import argparse\n" },
 ]
-skip = [
-  "README.md",
+skip = [{ path = "fixtures/data.json", text = "import argparse\n" }, "README.md",
   "src/lib.rs",
   { path = "docs/signals.md", text = "Handle SIGINT.\n" },
   { path = "tools/util.py", text = "def f():\n    return 1\n" },

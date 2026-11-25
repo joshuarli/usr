@@ -3,12 +3,12 @@ name = "os-boundaries"
 summary = "Code treats the filesystem and OS as concurrent external systems: paths stay paths, symlink policy and atomic replacement are explicit, supported targets are named, unsafe holds only the unsafe operation, and signal handlers stay async-signal-safe."
 
 [[trigger]]
-paths = ["*", "!*.md", "!*.txt", "!*.rst"]
+paths = ["*", "!*.md", "!*.txt", "!*.rst", "!*.json", "!*.jsonl", "!*.log", "!*.csv", "!*.tsv", "!*.svg", "!*.snap", "!*.lock"]
 content = ['\b(symlink|readlink|realpath|canonicalize|lstat|O_NOFOLLOW|openat|fsync|mkstemp|tempfile|NamedTemporaryFile|TemporaryDirectory|walkdir|os\.walk|read_dir)\b', '\b(os\.replace|os\.rename|fs::rename|renameat)\b', '\b(sigaction|libc::|ctypes|@cImport|syscall)\b', '\bextern\s+"C', '\bunsafe\b', '#\[cfg\(\s*(target_os|unix|windows)', '\b(sys\.platform|platform\.system|process\.platform|builtin\.os)\b']
 
 [examples]
 match = [{ path = "src/fsutil.rs", text = "std::fs::rename(&tmp, &dest)?;\n" }, { path = "tools/w.py", text = "fd, path = tempfile.mkstemp(dir=parent)\n" }, { path = "src/os.rs", text = "#[cfg(target_os = \"macos\")]\n" }]
-skip = [{ path = "src/x.py", text = "path = base / name\n" }, { path = "docs/fs.md", text = "fsync\n" }]
+skip = [{ path = "fixtures/data.json", text = "fsync\n" }, { path = "src/x.py", text = "path = base / name\n" }, { path = "docs/fs.md", text = "fsync\n" }]
 +++
 
 # OS Boundaries

@@ -13,6 +13,7 @@ import sys
 import time
 import tomllib
 from dataclasses import dataclass
+from functools import cached_property
 from pathlib import Path
 from typing import Any, Iterable, Sequence
 
@@ -44,6 +45,7 @@ class Trigger:
     paths: tuple[PathPattern, ...]
     shebang: tuple[re.Pattern[str], ...]
     content: tuple[re.Pattern[str], ...]
+    content_any: re.Pattern[str] | None
 
 
 @dataclass(frozen=True)
@@ -51,6 +53,10 @@ class Changed:
     path: str
     first_line: str
     added: tuple[str, ...]
+
+    @cached_property
+    def text(self) -> str:
+        return "\n".join(self.added)
 
 
 @dataclass(frozen=True)
@@ -169,18 +175,26 @@ def evaluate(trigger: Trigger, change: Changed) -> tuple[Condition, ...]:
         hit = next((r.pattern for r in trigger.shebang if change.first_line.startswith("#!") and r.search(change.first_line)), None)
         conditions.append(Condition("shebang", hit is not None, hit))
     if trigger.content:
-        hit = next((r.pattern for r in trigger.content if any(r.search(line) for line in change.added)), None)
+        hit = next((r.pattern for r in trigger.content if r.search(change.text)), None)
         conditions.append(Condition("content", hit is not None, hit))
     return tuple(conditions)
 
 
+def fires(trigger: Trigger, change: Changed) -> bool:
+    if trigger.paths and not paths_match(trigger.paths, change.path)[0]:
+        return False
+    if trigger.shebang and not (change.first_line.startswith("#!") and any(r.search(change.first_line) for r in trigger.shebang)):
+        return False
+    if trigger.content:
+        if trigger.content_any is not None:
+            return trigger.content_any.search(change.text) is not None
+        return any(r.search(change.text) for r in trigger.content)
+    return True
+
+
 def reasons_for(standard: Standard, change: Changed) -> list[Reason]:
-    reasons = []
-    for index, trigger in enumerate(standard.triggers, 1):
-        conditions = evaluate(trigger, change)
-        if all(c.matched for c in conditions):
-            reasons.append(Reason(change.path, index, conditions))
-    return reasons
+    return [Reason(change.path, index, evaluate(trigger, change))
+            for index, trigger in enumerate(standard.triggers, 1) if fires(trigger, change)]
 
 
 def split_frontmatter(path: Path) -> tuple[str, str]:
@@ -204,7 +218,7 @@ def regexes(path: Path, where: str, value: Any) -> tuple[re.Pattern[str], ...]:
     compiled = []
     for pattern in string_list(path, where, value):
         try:
-            compiled.append(re.compile(pattern))
+            compiled.append(re.compile(pattern, re.M))
         except re.error as error:
             raise Failure(f"{path}: invalid {where} regex {pattern!r}: {error}") from None
     return tuple(compiled)
@@ -230,7 +244,21 @@ def load_trigger(path: Path, index: int, table: Any) -> Trigger:
             raise Failure(f"{path}: {where} paths need at least one positive pattern")
     shebang = regexes(path, f"{where} shebang", table["shebang"]) if "shebang" in table else ()
     content = regexes(path, f"{where} content", table["content"]) if "content" in table else ()
-    return Trigger(tuple(patterns), shebang, content)
+    return Trigger(tuple(patterns), shebang, content, combine(content))
+
+
+LEADING_FLAGS = re.compile(r"^\(\?([aiLmsux]+)\)")
+
+
+def combine(patterns: Sequence[re.Pattern[str]]) -> re.Pattern[str] | None:
+    if not patterns:
+        return None
+    scoped = [LEADING_FLAGS.sub(lambda m: f"(?{m.group(1)}:", p.pattern) + (")" if LEADING_FLAGS.match(p.pattern) else "")
+              for p in patterns]
+    try:
+        return re.compile("|".join(f"(?:{s})" for s in scoped), re.M)
+    except re.error:
+        return None
 
 
 def example_change(path: Path, item: Any) -> Changed:
@@ -364,12 +392,17 @@ def from_files(files: Iterable[str]) -> list[Changed]:
     return changed
 
 
-def select(standards: Sequence[Standard], changes: Sequence[Changed]) -> list[Selected]:
+def select(standards: Sequence[Standard], changes: Sequence[Changed], first_only: bool = False) -> list[Selected]:
     selected = []
     for standard in standards:
-        reasons = tuple(r for change in changes for r in reasons_for(standard, change))
+        reasons: list[Reason] = []
+        for change in changes:
+            reasons.extend(reasons_for(standard, change))
+            if first_only and reasons:
+                reasons = reasons[:1]
+                break
         if reasons:
-            selected.append(Selected(standard, reasons))
+            selected.append(Selected(standard, tuple(reasons)))
     return selected
 
 
@@ -551,7 +584,7 @@ def parser() -> TopParser:
     pick = command("select", "Print the standards a change, tree, or file list triggers.")
     source = pick.add_mutually_exclusive_group()
     source.add_argument("--base", metavar="REV", help="diff the working tree against REV instead of HEAD; untracked files always count")
-    source.add_argument("--tree", action="store_true", help="match every tracked and untracked non-ignored file in full")
+    source.add_argument("--tree", action="store_true", help="match every tracked and untracked non-ignored file in full, reporting the first matching file per standard")
     pick.add_argument("--json", action="store_true", help="print a JSON array")
     pick.add_argument("files", nargs="*", metavar="FILE", help="match these whole files instead of the Git diff")
     why = command("explain", "Show how every trigger evaluates for each file.")
@@ -599,7 +632,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 changes = from_tree(repo_root())
             else:
                 changes = from_diff(repo_root(), args.base or "HEAD")
-            sys.stdout.write(render_select(select(standards, changes), args.json))
+            sys.stdout.write(render_select(select(standards, changes, first_only=args.tree), args.json))
         return 0
     except Failure as error:
         print(f"standards: {error}", file=sys.stderr)

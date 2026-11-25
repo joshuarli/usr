@@ -3,12 +3,12 @@ name = "lifecycle-concurrency"
 summary = "Whatever code starts has an owner that ends it: structured cleanup, owned tasks, bounded queues and retries, cancellation that reaches children, terminal restoration, and the signal policy for graceful shutdown and signal death."
 
 [[trigger]]
-paths = ["*", "!*.md", "!*.txt", "!*.rst"]
+paths = ["*", "!*.md", "!*.txt", "!*.rst", "!*.json", "!*.jsonl", "!*.log", "!*.csv", "!*.tsv", "!*.svg", "!*.snap", "!*.lock"]
 content = ['\b(spawn|spawn_blocking|thread::|threading\.|Thread\(|Task\.detached|TaskGroup|create_task|gather|Promise\.(all|race|allSettled|any)|new Worker|go\s+func)\b', '\b(subprocess\.|Popen|child_process|Command::new|std\.process\.Child)', '\b(Mutex|RwLock|Semaphore|Condvar|mpsc|channel|Queue)\b', '\b(signal\.signal|sigaction|SIG(INT|TERM|HUP|QUIT|CHLD))\b', '\btrap\b.*\b(INT|TERM|HUP|EXIT)\b', '\b(retry|retries|backoff)\b', '\b(enable_raw_mode|tcsetattr|termios|alternate.?screen)\b']
 
 [examples]
 match = [{ path = "src/worker.rs", text = "let handle = tokio::spawn(job);\n" }, { path = "tools/run.py", text = "proc = subprocess.Popen(argv)\n" }, { path = "bin/svc", text = "trap cleanup INT TERM\n" }]
-skip = [{ path = "src/math.rs", text = "fn add(a: u32, b: u32) -> u32 { a + b }\n" }, { path = "docs/threads.md", text = "tokio::spawn\n" }]
+skip = [{ path = "fixtures/data.json", text = "proc = subprocess.Popen(argv)\n" }, { path = "src/math.rs", text = "fn add(a: u32, b: u32) -> u32 { a + b }\n" }, { path = "docs/threads.md", text = "tokio::spawn\n" }]
 +++
 
 # Lifecycle and Concurrency
