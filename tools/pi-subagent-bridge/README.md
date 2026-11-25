@@ -4,13 +4,13 @@ One shared delegation bridge for coding harnesses except top-level Antigravity, 
 
 <!-- policy:begin routing-summary -->
 <!-- Generated from tools/pi-subagent-bridge/src/policy.ts; run make generate. -->
-Bridge tiers: `scout`, `mechanic`, `worker`, `expert`. The `expert` tier has one route, Pi `devin/swe-2.1` (`max`), and no fallback: when that route is unavailable or exhausted the expert lane is blocked, never moved to another model. Top-level OpenCode, Devin, Command Code, Antigravity and Copilot CLI parents keep their native expert agents (below). There is no `god` tier. The model families `gemini-3.8` and `gemini-4-argon` and `gemini-4-carbon` and `gpt-6-astra` and `gpt-6.1-astra` and `gpt-6.2-astra` and `claude-fable` and `fable` are prohibited, including every effort variant.
+Bridge tiers: `scout`, `mechanic`, `worker`, `expert`. The `expert` tier has one route, Pi `devin/swe-2.1` (`max`), and no fallback: when that route is unavailable or exhausted the expert lane is blocked, never moved to another model. Devin bridge lanes are currently disabled because the free tier admits about one concurrent lane and throttles mid-run, stopping lanes with partial edits, so the bridge's expert tier is blocked and the lower tiers' ladders omit Devin; Claude Code parents run expert work as native subagents (below). Top-level OpenCode, Devin, Command Code, Antigravity and Copilot CLI parents keep their native expert agents (below). There is no `god` tier. The model families `gemini-3.8` and `gemini-4-argon` and `gemini-4-carbon` and `gpt-6-astra` and `gpt-6.1-astra` and `gpt-6.2-astra` and `claude-fable` and `fable` are prohibited, including every effort variant.
 
 | Tier | Primary | Fallback (in order) |
 | --- | --- | --- |
-| scout | Command Code `meta/muse-ember` (`medium`) | Pi `opencode-go/muse-spark-1.3-contributor` (`medium`); Pi `devin/swe-2.1` (`low`); Codex `gpt-6-luna` (`medium`) |
-| mechanic | Command Code `meta/muse-ember` (`xhigh`) | Pi `opencode-go/muse-spark-1.3-contributor` (`high`); Pi `devin/swe-2.1` (`medium`); Codex `gpt-6-luna` (`high`) |
-| worker | Command Code `deepseek/deepseek-v4.1-flash` (`high`) | Pi `opencode-go/deepseek-v4.1-flash` (`high`); Pi `devin/swe-2.1` (`high`); Codex `gpt-6.1-terra` (`high`) |
+| scout | Command Code `meta/muse-ember` (`medium`) | Pi `opencode-go/muse-spark-1.3-contributor` (`medium`); Codex `gpt-6-luna` (`medium`) |
+| mechanic | Command Code `meta/muse-ember` (`xhigh`) | Pi `opencode-go/muse-spark-1.3-contributor` (`high`); Codex `gpt-6-luna` (`high`) |
+| worker | Command Code `deepseek/deepseek-v4.1-flash` (`high`) | Pi `opencode-go/deepseek-v4.1-flash` (`high`); Codex `gpt-6.1-terra` (`high`) |
 | expert | Pi `devin/swe-2.1` (`max`) | **None. Fail closed.** |
 <!-- policy:end routing-summary -->
 

@@ -10,7 +10,7 @@ import { codexAvailable, codexResult, codexSession, cancelCodex, startCodex } fr
 import { activeWorktreeOwner, claimWorktree, ensureWorktree, releaseWorktree } from "./worktree-lease.ts"
 import { releaseOwnTerminalLease } from "./inspect.ts"
 
-import { DELEGATION, isBridgeTier, type BridgeTier } from "./tier-policy.ts"
+import { DELEGATION, DEVIN_BRIDGE_DISABLED, isBridgeTier, type BridgeTier } from "./tier-policy.ts"
 import { diagnoseGoModel } from "./optional-pi.ts"
 import { devinPreflight } from "./devin-provider.ts"
 import { changes, currentBranch, git, laneHead, outside, readStateDir, stateDir } from "./git.ts"
@@ -473,14 +473,7 @@ export function makeHybridBridge(api: PiAdapter, command = {
         catch (e) { goIssue = String(e) }
       }
       if (goModel && !goAvailable && !goIssue) goIssue = await diagnoseGoModel(goModel)
-      let devinAvailable = false, devinIssue: string | null = null
-      if (devinModel) {
-        try { devinAvailable = (await api(devinModel).modelCheck(dir)).available }
-        catch (e) { devinIssue = String(e) }
-        if (!devinAvailable && !devinIssue)
-          devinIssue = devinPreflight().issue ?? "Devin SWE-2.1 is not authenticated in the Pi SDK"
-      }
-      const devinInfo = { available: devinAvailable, issue: devinIssue }
+      const devinInfo = { available: false, issue: DEVIN_BRIDGE_DISABLED }
       const goInfo = { available: goAvailable, issue: goIssue }
       const piLane = { backend: "pi", model: firstPi,
         available: firstPi.providerID === "devin" ? devinInfo.available : goInfo.available,
@@ -552,6 +545,7 @@ export function makeHybridBridge(api: PiAdapter, command = {
         let selection: PiSelection | undefined
         for (const candidate of plan.pi) {
           const target = { executor: "pi" as const, selection: candidate }
+          if (candidate.providerID === "devin") { blocked.push("devin/" + candidate.id + " (" + DEVIN_BRIDGE_DISABLED + ")"); continue }
           const exhausted = store.activeRoute(routeRef(target)!)
           if (exhausted) { blocked.push(exhaustionLabel(target, exhausted)); continue }
           if (contributorModel(candidate.providerID, candidate.id) && !contributorAllowed(dir)) {

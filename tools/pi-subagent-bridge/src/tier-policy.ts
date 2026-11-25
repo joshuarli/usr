@@ -54,6 +54,15 @@ export const DEVIN_TIER_MODELS = {
   readonly expert: { readonly providerID: "devin"; readonly id: "swe-2.1"; readonly variant: "max" }
 }
 export type DevinTier = keyof typeof DEVIN_TIER_MODELS
+/**
+ * Devin's free tier admits about one concurrent lane and throttles mid-run with
+ * short resets, stopping lanes that already have edits. Until that changes, no
+ * bridge tier routes to Devin: the lower tiers' ladders omit it and the expert
+ * tier, whose only route is Devin, is blocked. Devin stays usable as a
+ * top-level native harness.
+ */
+export const DEVIN_BRIDGE_DISABLED =
+  "Devin free-tier bridge lanes are disabled: the free tier admits about one concurrent lane and throttles mid-run, stopping lanes with partial edits; use Devin only as a top-level native harness"
 export const DEVIN_AGENT_NAMES = {
   scout: "devin-scout",
   mechanic: "devin-mechanic",

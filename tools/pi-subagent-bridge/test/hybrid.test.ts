@@ -160,35 +160,21 @@ test("model check reports Command Code primary, its pins, and Codex as the final
   } finally { f.close() }
 })
 
-test("expert admits only on Devin SWE-2.1 max and is blocked, never substituted, when Devin is unavailable", async () => {
+test("expert stays on its Devin SWE-2.1 max route and is blocked while Devin bridge lanes are disabled", async () => {
   const devinMax = { providerID: "devin", id: "swe-2.1", variant: "max" }
   const f = fixture()
   try {
     const m = fake(f.cwd), bridge = makeHybridBridge(piAdapter(m.api), m.command, noCodex)
-    const blocked = await bridge.modelCheck(f.cwd, "expert")
-    assert.equal(blocked.primary.backend, "pi")
-    assert.deepEqual(blocked.primary.model, devinMax)
-    assert.equal(blocked.primary.available, false)
-    assert.equal(blocked.fallback, null)
-    assert.equal(blocked.command_code, null)
-    assert.equal(blocked.codex, null)
-    await assert.rejects(bridge.start(f.cwd, "escalate", "expert", f.scope, "Work"), /blocked.*devin\/swe-2\.1.*max/s)
-    assert.equal(m.calls.some(call => (call as { command?: boolean }).command === true), false)
-    assert.equal(m.calls.length, 0)
     m.withDevin()
-    const ready = await bridge.modelCheck(f.cwd, "expert")
-    assert.equal(ready.primary.available, true)
-    const admitted = await bridge.start(f.cwd, "escalate", "expert", f.scope, "Work")
-    assert.equal(admitted.backend, "pi")
-    assert.equal(admitted.fallback_reason, null)
-    const created = m.calls.find(call => (call as { model?: unknown }).model !== undefined) as { model: unknown }
-    assert.deepEqual(created.model, devinMax)
-    m.failPi("usage limit reached")
-    const failed = await bridge.status(f.cwd, admitted.session_id)
-    assert.equal(failed.backend, "pi")
-    assert.deepEqual(failed.model, devinMax)
-    assert.equal(failed.fallback_reason, null)
-    assert.equal(m.calls.some(call => (call as { command?: boolean }).command === true), false)
+    const check = await bridge.modelCheck(f.cwd, "expert")
+    assert.deepEqual(check.primary.model, devinMax)
+    assert.equal(check.primary.available, false)
+    assert.match(JSON.stringify(check.primary), /Devin free-tier bridge lanes are disabled/)
+    assert.equal(check.fallback, null)
+    assert.equal(check.command_code, null)
+    assert.equal(check.codex, null)
+    await assert.rejects(bridge.start(f.cwd, "escalate", "expert", f.scope, "Work"), /blocked.*Devin free-tier bridge lanes are disabled/s)
+    assert.equal(m.calls.length, 0)
   } finally { f.close() }
 })
 

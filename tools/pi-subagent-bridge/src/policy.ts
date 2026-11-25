@@ -96,21 +96,21 @@ export const COMMAND_TIER_MODELS = {
 
 /**
  * Ordered admission plan per admitted bridge tier. The lower tiers climb the
- * codex-last ladder; expert is pi-only on the pinned Devin SWE-2.1 max lane
- * and fails closed when that lane is unavailable or exhausted.
+ * codex-last ladder without Devin; expert is pi-only on the pinned Devin SWE-2.1
+ * max lane, which DEVIN_BRIDGE_DISABLED keeps blocked.
  */
 export const ROOT_PLANS = {
   scout: {
     kind: "codex-last", command: COMMAND_TIER_MODELS.scout,
-    pi: [GO_TIER_MODELS.scout, DEVIN_TIER_MODELS.scout], codex: CODEX_TIER_MODELS.scout,
+    pi: [GO_TIER_MODELS.scout], codex: CODEX_TIER_MODELS.scout,
   },
   mechanic: {
     kind: "codex-last", command: COMMAND_TIER_MODELS.mechanic,
-    pi: [GO_TIER_MODELS.mechanic, DEVIN_TIER_MODELS.mechanic], codex: CODEX_TIER_MODELS.mechanic,
+    pi: [GO_TIER_MODELS.mechanic], codex: CODEX_TIER_MODELS.mechanic,
   },
   worker: {
     kind: "codex-last", command: COMMAND_TIER_MODELS.worker,
-    pi: [GO_TIER_MODELS.worker, DEVIN_TIER_MODELS.worker], codex: CODEX_TIER_MODELS.worker,
+    pi: [GO_TIER_MODELS.worker], codex: CODEX_TIER_MODELS.worker,
   },
   expert: { kind: "pi-only", pi: [DEVIN_TIER_MODELS.expert] },
 } as const satisfies Record<BridgeTier, AdmissionPlan>

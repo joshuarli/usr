@@ -20,12 +20,6 @@
         "effort": "medium"
       },
       {
-        "executor": "pi",
-        "providerID": "devin",
-        "model": "swe-2.1",
-        "effort": "low"
-      },
-      {
         "executor": "codex",
         "model": "gpt-6-luna",
         "effort": "medium"
@@ -44,12 +38,6 @@
         "effort": "high"
       },
       {
-        "executor": "pi",
-        "providerID": "devin",
-        "model": "swe-2.1",
-        "effort": "medium"
-      },
-      {
         "executor": "codex",
         "model": "gpt-6-luna",
         "effort": "high"
@@ -65,12 +53,6 @@
         "executor": "pi",
         "providerID": "opencode-go",
         "model": "deepseek-v4.1-flash",
-        "effort": "high"
-      },
-      {
-        "executor": "pi",
-        "providerID": "devin",
-        "model": "swe-2.1",
         "effort": "high"
       },
       {
