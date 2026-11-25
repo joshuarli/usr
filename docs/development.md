@@ -24,7 +24,7 @@ Local tests cover CLI and filesystem behavior with fixtures. Network services, p
 | Pi bridge installation or MCP registration | `python3 -I tools/pi/test_sync_bridge_offline.py` (in a disposable checkout), `python3 -I tools/sync/claude-worker-test.py`, `python3 -I tools/sync/pi-worker-test.py`, and `python3 -I tools/sync/opencode-worker-test.py` |
 | Intercom companion installation or MCP/plugin registration | `TMPDIR="$PWD/.work/tmp" python3 -I tools/sync/test_companions.py` |
 | Tailnet Intercom coordinator launcher | `python3 -I tools/intercom-tailnet/test_intercom_tailnet.py` and `node --experimental-strip-types --test tools/pi-subagent-bridge/test/worker-env.test.ts` |
-| `tools/pi-subagent-bridge` | `node --experimental-strip-types --test tools/pi-subagent-bridge/test/worker-env.test.ts` and `(export TMPDIR="$PWD/.work/tmp"; cd tools/pi-subagent-bridge && npm test)`; run `./dev-install.sh` once first |
+| `tools/pi-subagent-bridge` | `node --experimental-strip-types --test tools/pi-subagent-bridge/test/worker-env.test.ts` and `(export TMPDIR="$PWD/.work/tmp"; cd tools/pi-subagent-bridge && npm test)`; run `./dev-install.sh` once first to install dev tooling and link the Pi runtime |
 | Pi profile and extensions | `python3 -I dotfiles/pi-test.py` and `python3 -I tools/sync/test_pi_extensions.py` |
 | `sync` Pi auth wiring | `python3 -I tools/sync/test_pi_auth.py` |
 | Alpine provisioner (`host/alpine`) | `python3 -I host/alpine/tests/test_tuning.py` and `TMPDIR="$PWD/.work/tmp" python3 -I host/alpine/tests/test_provision.py`; run `sh host/alpine/tests/vm.sh` for behavior changes |

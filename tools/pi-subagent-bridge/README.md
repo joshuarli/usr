@@ -236,7 +236,7 @@ State, prompt job files, SDK JSONL transcripts, Codex and Command Code NDJSON re
 
 ```
 cd tools/pi-subagent-bridge
-./dev-install.sh   # once; installs the dev toolchain into .dev/ (never touches node_modules)
+./dev-install.sh   # once; installs the dev toolchain into .dev/ and links the installed Pi runtime
 npm test
 cd ../..
 python3 -I dotfiles/pi-test.py
