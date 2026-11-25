@@ -85,6 +85,17 @@ class SelectTests(unittest.TestCase):
         self.assertEqual({"github-actions", "shell"}, set(result))
         self.assertEqual("path", result["shell"][0]["trigger"])
 
+    def test_quoted_paths_and_plus_prefixed_content_keep_their_added_lines(self):
+        for name in ("a b.py", "é.py"):
+            self.repo.write(name, "x\n")
+        self.repo.commit()
+        self.repo.write("a b.py", "x\nimport argparse\n")
+        result = self.select()
+        self.assertEqual([("a b.py", "content")], [(r["file"], r["trigger"]) for r in result["cli-interrupt"]])
+        self.repo.write("a b.py", "x\n")
+        self.repo.write("é.py", "x\n++ import argparse\n")
+        self.assertEqual(["é.py"], [r["file"] for r in self.select()["cli-interrupt"]])
+
     def test_deleted_files_select_nothing(self):
         self.repo.write("build.sh", "#!/bin/sh\n")
         self.repo.commit()

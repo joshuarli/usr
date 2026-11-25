@@ -146,25 +146,30 @@ def first_line(text: str | None) -> str:
     return text.split("\n", 1)[0] if text else ""
 
 
-def added_lines(diff: str) -> dict[str, list[str]]:
-    added: dict[str, list[str]] = {}
-    current: list[str] | None = None
-    for line in diff.splitlines():
-        if line.startswith("+++ "):
-            target = line[4:]
-            current = added.setdefault(target[2:], []) if target.startswith("b/") else None
-        elif line.startswith("+") and current is not None:
-            current.append(line[1:])
-    return added
+def added_lines(diff: str, names: Sequence[str]) -> list[tuple[str, ...]]:
+    sections: list[list[str]] = []
+    in_hunk = False
+    for line in diff.split("\n"):
+        if line.startswith("diff --git "):
+            sections.append([])
+            in_hunk = False
+        elif line.startswith("@@"):
+            in_hunk = True
+        elif in_hunk and line.startswith("+"):
+            sections[-1].append(line[1:])
+    if len(sections) != len(names):
+        raise Failure(f"git diff listed {len(names)} files but printed {len(sections)} patches")
+    return [tuple(section) for section in sections]
 
 
 def from_diff(root: Path, base: str) -> list[Changed]:
-    names = [n for n in git(root, "diff", "--name-only", "-z", "--no-renames", "--diff-filter=d", base, "--").split("\0") if n]
-    added = added_lines(git(root, "diff", "-U0", "--no-color", "--no-ext-diff", "--no-renames", "--diff-filter=d", base, "--"))
-    changed = [Changed(name, first_line(read_text(root / name)), tuple(added.get(name, ()))) for name in names]
+    options = ("--no-renames", "--diff-filter=d", "--no-ext-diff", "--no-textconv", base, "--")
+    names = [n for n in git(root, "diff", "--name-only", "-z", *options).split("\0") if n]
+    added = added_lines(git(root, "diff", "-U0", "--no-color", *options), names)
+    changed = [Changed(name, first_line(read_text(root / name)), lines) for name, lines in zip(names, added)]
     for name in (n for n in git(root, "ls-files", "-z", "--others", "--exclude-standard").split("\0") if n):
         text = read_text(root / name)
-        changed.append(Changed(name, first_line(text), tuple(text.splitlines()) if text else ()))
+        changed.append(Changed(name, first_line(text), tuple(text.split("\n")) if text else ()))
     return changed
 
 
@@ -175,7 +180,7 @@ def from_files(files: Iterable[str]) -> list[Changed]:
         if not path.is_file():
             raise Failure(f"{name}: not a file")
         text = read_text(path)
-        changed.append(Changed(path.as_posix(), first_line(text), tuple(text.splitlines()) if text else ()))
+        changed.append(Changed(path.as_posix(), first_line(text), tuple(text.split("\n")) if text else ()))
     return changed
 
 
