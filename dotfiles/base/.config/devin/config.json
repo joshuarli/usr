@@ -26,5 +26,11 @@
         ]
       }
     ]
+  },
+  "agent": {
+    "model": "swe-2-1-max",
+    "preferred_family_models": {
+      "swe-2-1": "swe-2-1-max"
+    }
   }
 }
