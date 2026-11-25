@@ -172,7 +172,7 @@ export class ExhaustionStore {
       const existing = data.routes[key]
       if (existing && existing.until > now) return existing
       const entry: ExhaustedRoute = {
-        until: now + (resetDurationMs(error) ?? (credit ? ACCOUNT_EXHAUSTION_MS : DEFAULT_EXHAUSTION_MS)),
+        until: credit ? now + (resetDurationMs(error) ?? ACCOUNT_EXHAUSTION_MS) : exhaustionUntil(error, now),
         reason: errorText(error).slice(0, 500),
         recorded_at: new Date(now).toISOString(),
       }
