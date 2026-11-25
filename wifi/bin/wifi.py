@@ -151,7 +151,7 @@ def cmd_bench(args):
     bench.metric("LINK_TX_RATE_MBPS", first(r"Transmit Rate:\s*(\d+)", cur))
     bench.metric("LINK_MCS", first(r"MCS Index:\s*(\d+)", cur))
     errs = bench.cap(["netstat", "-i", "-I", IF])
-    fields = [l.split() for l in errs.splitlines() if l.strip().startswith(IF)]
+    fields = [line.split() for line in errs.splitlines() if line.strip().startswith(IF)]
     row = fields[0] if fields else []
     bench.metric("IF_ERRORS_IN", row[5] if len(row) > 5 else "NA")
     bench.metric("IF_ERRORS_OUT", row[7] if len(row) > 7 else "NA")
@@ -187,7 +187,7 @@ def cmd_bench(args):
         stats = ping_stats(text)
         for name, value in stats.items():
             bench.metric("%s_PING_%s" % (key, ping_suffix[name]), value)
-    v6 = [l.split()[1] for l in sh(["ifconfig", IF]).splitlines() if "inet6" in l and not l.split()[1].startswith("fe80")]
+    v6 = [line.split()[1] for line in sh(["ifconfig", IF]).splitlines() if "inet6" in line and not line.split()[1].startswith("fe80")]
     if v6:
         text = bench.cap(["ping6", "-c", "30", "2606:4700:4700::1111"])
         bench.metric("V6_PING_AVG_MS", ping_stats(text)["avg"])
