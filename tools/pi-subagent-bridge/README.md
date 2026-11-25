@@ -4,16 +4,17 @@ One shared delegation bridge for coding harnesses except top-level Antigravity, 
 
 <!-- policy:begin routing-summary -->
 <!-- Generated from tools/pi-subagent-bridge/src/policy.ts; run make generate. -->
-Bridge tiers: `scout`, `mechanic`, `worker`. Native-only tier: `expert`, which always runs as a harness-native subagent and never through the bridge. There is no `god` tier. The model families `gemini-3.8` and `gemini-4-argon` and `gemini-4-carbon` and `gpt-6-astra` and `gpt-6.1-astra` and `gpt-6.2-astra` and `claude-fable` and `fable` are prohibited, including every effort variant.
+Bridge tiers: `scout`, `mechanic`, `worker`, `expert`. There is no `god` tier. The model families `gemini-3.8` and `gemini-4-argon` and `gemini-4-carbon` and `gpt-6-astra` and `gpt-6.1-astra` and `gpt-6.2-astra` and `claude-fable` and `fable` are prohibited, including every effort variant.
 
 | Tier | Primary | Fallback (in order) |
 | --- | --- | --- |
 | scout | Command Code `meta/muse-ember` (`medium`) | Pi `opencode-go/muse-spark-1.3-contributor` (`medium`); Pi `devin/swe-2.1` (`low`); Codex `gpt-6-luna` (`medium`) |
 | mechanic | Command Code `meta/muse-ember` (`xhigh`) | Pi `opencode-go/muse-spark-1.3-contributor` (`high`); Pi `devin/swe-2.1` (`medium`); Codex `gpt-6-luna` (`high`) |
 | worker | Command Code `deepseek/deepseek-v4.1-flash` (`high`) | Pi `opencode-go/deepseek-v4.1-flash` (`high`); Pi `devin/swe-2.1` (`high`); Codex `gpt-6.1-terra` (`high`) |
+| expert | Command Code `tencent/hy4` (`high`) | Pi `opencode-go/deepseek-v4.1-flash` (`max`); Pi `devin/swe-2.1` (`max`); Codex `gpt-6.1-terra` (`max`) |
 <!-- policy:end routing-summary -->
 
-Expert assignments never enter the bridge. Antigravity, Command Code, OpenCode and Devin top-level sessions delegate only through native subagents; Codex uses its configured native subagents (no per-tier pin); Claude Code pins `opus` at `xhigh` effort for expert work; Pi launches its native `expert` profile. `scope-check CWD SCOPE_JSON_FILE [BRANCH] --register TITLE` records a native lane, and `scope-check --lane ID` from its repository records its latest Git scope check. `campaign list` includes these lanes. `scope-check` applies the bridge's Git scope check to such a native lane (see `pi-subagent-bridge scope-check -h`). See [orchestrate](../../dotfiles/base/.agents/skills/orchestrate/SKILL.md).
+Antigravity, Command Code, OpenCode and Devin top-level sessions delegate only through native subagents. Other parents use the bridge for every tier, including expert. `scope-check CWD SCOPE_JSON_FILE [BRANCH] --register TITLE` records a native lane, and `scope-check --lane ID` from its repository records its latest Git scope check. `campaign list` includes these lanes. `scope-check` applies the bridge's Git scope check to such a native lane (see `pi-subagent-bridge scope-check -h`). See [orchestrate](../../dotfiles/base/.agents/skills/orchestrate/SKILL.md).
 
 ## Setup
 
@@ -66,12 +67,12 @@ New ordinary sessions write schema 4 (`codex-last`); sessions admitted under the
 
 `devin/swe-2.1` is an explicitly pinned **last** Pi fallback for every bridge
 tier, each at its own free thinking level: `low` for `devin-scout`, `medium`
-for `devin-mechanic` and `high` for `devin-worker`. Expert stays harness-native
-and has no Devin lane. The default Codex/Command/OpenCode routes and the other
-Pi routes are unchanged. The provider is supplied by a hash-verified `pi-build`
-release, never a local `pi install`. See [pi-build PR #5](https://github.com/joshuarli/pi-build/pull/5).
-Only the three admitted variants are allowed by the typed tier policy; the
-free-but-not-pinned `xhigh`/`max` and the metered `-lightning` variants are not
+for `devin-mechanic`, `high` for `devin-worker` and `max` for `devin-expert`.
+The default Codex/Command/OpenCode routes and the other Pi routes are
+unchanged. The provider is supplied by a hash-verified `pi-build` release,
+never a local `pi install`. See [pi-build PR #5](https://github.com/joshuarli/pi-build/pull/5).
+Only the four admitted variants are allowed by the typed tier policy; the
+free-but-not-pinned `xhigh` and the metered `-lightning` variants are not
 admitted. Unavailability cannot authorize another effort level or tier.
 
 On the target machine, `sh sync` installs the Devin CLI (`sh sync tools
@@ -188,9 +189,9 @@ explains generated ownership and read-only drift checks.
 
 Codex and Command Code record process start time (Linux `/proc/<pid>/stat` field 22; macOS `ps -o lstart=`) to distinguish the owned child from a reused PID. An alive process with that identity keeps its lease; proven interruption releases it. `--verbose` records the Command Code session identity before the result so steering can resume the same session. Cross-process worktree leases and locks sit at the MCP/CLI boundary.
 
-Codex runs use the signed-in ChatGPT account and do not use API keys. Codex runs with `--sandbox danger-full-access`, like every other backend. Codex write runs load the user's Codex config, so its goals, memories and instructions apply, with goals enabled and subagents disabled; the launch flags still pin the model, effort, sandbox and approval policy. Their prompt asks the worker to call `create_goal` with the acceptance proof as its objective. Codex scouts pass `--ignore-user-config`, because the user config can add plugins and MCP servers. Codex scouts disable shell, unified exec, computer-use, and browser tools (the code-mode host stays enabled because Codex routes every tool call, including the scout's MCP tools, through it) and expose read-only tools through a dedicated local MCP server; Codex's built-in patch tool cannot be disabled, so a scout write is caught by the Git scope check (scouts own no paths) rather than prevented. The routing policy permits switching only for a missing executable, unavailable exact model/provider, or recognized usage limit before edits and with unambiguous admission. Scout/mechanic/worker admit `codex-last` plans: Command Code first, then their approved Pi fallbacks, then Codex as the final route. A pre-edit provider failure on Command Code moves to Pi, and one on a Pi run moves to Codex when Codex is available; a Pi run otherwise never switches, and admission may save a Command Code transition between Pi candidates after a pre-admission failure. Sessions admitted under the earlier codex-first `fallback` plan keep that order. An admitted Pi session retains its provider. Task failures, uncertain admissions, missing completion receipts, and partial work do not authorize another start. `fallback_reason` summarizes a switch, `fallback_notice` describes its automatic handling, and `fallback_detail` retains the original provider diagnostic; a successful switch clears `error`.
+Codex runs use the signed-in ChatGPT account and do not use API keys. Codex runs with `--sandbox danger-full-access`, like every other backend. Codex write runs load the user's Codex config, so its goals, memories and instructions apply, with goals enabled and subagents disabled; the launch flags still pin the model, effort, sandbox and approval policy. Their prompt asks the worker to call `create_goal` with the acceptance proof as its objective. Codex scouts pass `--ignore-user-config`, because the user config can add plugins and MCP servers. Codex scouts disable shell, unified exec, computer-use, and browser tools (the code-mode host stays enabled because Codex routes every tool call, including the scout's MCP tools, through it) and expose read-only tools through a dedicated local MCP server; Codex's built-in patch tool cannot be disabled, so a scout write is caught by the Git scope check (scouts own no paths) rather than prevented. The routing policy permits switching only for a missing executable, unavailable exact model/provider, or recognized usage limit before edits and with unambiguous admission. Every tier admits a `codex-last` plan: Command Code first, then its approved Pi fallbacks, then Codex as the final route. A pre-edit provider failure on Command Code moves to Pi, and one on a Pi run moves to Codex when Codex is available; a Pi run otherwise never switches, and admission may save a Command Code transition between Pi candidates after a pre-admission failure. Sessions admitted under the earlier codex-first `fallback` plan keep that order. An admitted Pi session retains its provider. Task failures, uncertain admissions, missing completion receipts, and partial work do not authorize another start. `fallback_reason` summarizes a switch, `fallback_notice` describes its automatic handling, and `fallback_detail` retains the original provider diagnostic; a successful switch clears `error`.
 
-Exception recovery accepts only the admitted run's matching metadata and paired output. Uncertain create or prompt dispatch retains the transition and lease without provider replay. New lower-tier sessions snapshot their root plan at admission, including every pending Pi destination, and record the exact selection of each active state. The bridge admits no expert tier; removed tiers cannot be admitted.
+Exception recovery accepts only the admitted run's matching metadata and paired output. Uncertain create or prompt dispatch retains the transition and lease without provider replay. New sessions snapshot their root plan at admission, including every pending Pi destination, and record the exact selection of each active state. Removed tiers cannot be admitted.
 
 ### Provider exhaustion memory
 

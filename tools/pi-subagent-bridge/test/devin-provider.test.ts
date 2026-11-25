@@ -23,6 +23,8 @@ test("Devin preflight is read-only and requires official CLI credentials plus ca
     writeFileSync(cache, JSON.stringify(catalog(["swe-2-1-high"])))
     assert.equal(devinPreflight(env, home, resolveExtension).available, false)
     writeFileSync(cache, JSON.stringify(catalog(["swe-2-1-low", "swe-2-1-medium", "swe-2-1-high"])))
+    assert.equal(devinPreflight(env, home, resolveExtension).available, false)
+    writeFileSync(cache, JSON.stringify(catalog(["swe-2-1-low", "swe-2-1-medium", "swe-2-1-high", "swe-2-1-max"])))
     assert.deepEqual(devinPreflight(env, home, resolveExtension), { available: true, issue: null })
     assert.match(devinPreflight(env, home, () => { throw Error("not installed") }).issue ?? "", /pi-devin-local missing/)
   } finally {

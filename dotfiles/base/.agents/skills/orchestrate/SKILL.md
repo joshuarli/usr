@@ -7,7 +7,7 @@ description: "Route coding subagents through native harness lanes or the Pi brid
 
 <!-- policy:begin routing-intro -->
 <!-- Generated from tools/pi-subagent-bridge/src/policy.ts; run make generate. -->
-**All scout/mechanic/worker coding subagents use `pi-subagent-bridge` by default**, except top-level OpenCode, Devin, Command Code, Antigravity and Copilot CLI native parents described below. Bridge tiers: `scout`, `mechanic`, `worker`. Native-only tier: `expert`, which always runs as a harness-native subagent and never through the bridge. There is no `god` tier. The model families `gemini-3.8` and `gemini-4-argon` and `gemini-4-carbon` and `gpt-6-astra` and `gpt-6.1-astra` and `gpt-6.2-astra` and `claude-fable` and `fable` are prohibited, including every effort variant.
+**All scout/mechanic/worker/expert coding subagents use `pi-subagent-bridge` by default**, except top-level OpenCode, Devin, Command Code, Antigravity and Copilot CLI native parents described below. Bridge tiers: `scout`, `mechanic`, `worker`, `expert`. There is no `god` tier. The model families `gemini-3.8` and `gemini-4-argon` and `gemini-4-carbon` and `gpt-6-astra` and `gpt-6.1-astra` and `gpt-6.2-astra` and `claude-fable` and `fable` are prohibited, including every effort variant.
 <!-- policy:end routing-intro -->
 
 <!-- policy:begin opencode -->
@@ -26,7 +26,16 @@ Bridge pins, fallbacks, and nesting rules do not apply on this path.
 
 <!-- policy:begin devin -->
 <!-- Generated from tools/pi-subagent-bridge/src/policy.ts; run make generate. -->
-**Devin exception:** A top-level Devin session never uses `pi-subagent-bridge`, at any tier or as a fallback. Delegate only through native `run_subagent` subagents (`subagent_explore` for read-only research, `subagent_general` for changes). Devin subagents run on the models the session provides, so there is no per-tier pinning on this path. Bridge pins, fallbacks, and nesting rules do not apply.
+**Devin exception:** A top-level Devin session never uses `pi-subagent-bridge`, at any tier or as a fallback. Delegate only through native `run_subagent` subagents. Use the named agents below for tiered work, never the unpinned built-in `subagent_explore` or parent-inherited `subagent_general`.
+
+| Tier | Native agent | Model |
+| --- | --- | --- |
+| scout | `usr-scout` | `swe-2-1-low` |
+| mechanic | `usr-mechanic` | `swe-2-1-medium` |
+| worker | `usr-worker` | `swe-2-1-high` |
+| expert | `usr-expert` | `swe-2-1-max` |
+
+The parent supplies the native lane worktree, scope registration, acceptance proof and independent review. Children are leaves. Bridge pins, fallbacks, and nesting rules do not apply on this path.
 <!-- policy:end devin -->
 
 <!-- policy:begin command-code -->
@@ -74,7 +83,7 @@ The parent supplies the native lane worktree, scope registration, acceptance pro
 
 <!-- policy:begin native-fallback -->
 <!-- Generated from tools/pi-subagent-bridge/src/policy.ts; run make generate. -->
-**Claude Code native subagents:** `expert` assignments always use native subagents pinned to `opus` with `xhigh` effort. If that pinned model is unavailable, the expert lane is blocked; never substitute another model. When no approved bridge backend can run because it is unavailable or exhausted, scout/mechanic/worker use tier-matched native subagents with the same brief, worktree, scope, and independent verification: scout: `haiku`; mechanic: `sonnet`; worker: `sonnet`. A host or session whose environment sets `USR_DELEGATION=native`, such as a cloud environment without bridge providers, uses these native subagents directly and does not start the bridge. Preserve partial work before relaunch. Register native lanes with `scope-check --register` and record their final check with `scope-check --lane`. No hook gates native subagents. Return to the bridge when capacity recovers, unless `USR_DELEGATION=native` is set.
+**Claude Code native subagents:** When no approved bridge backend can run because it is unavailable or exhausted, scout/mechanic/worker use tier-matched native subagents with the same brief, worktree, scope, and independent verification: scout: `haiku`; mechanic: `sonnet`; worker: `sonnet`. A host or session whose environment sets `USR_DELEGATION=native`, such as a cloud environment without bridge providers, uses these native subagents directly and does not start the bridge. Preserve partial work before relaunch. Register native lanes with `scope-check --register` and record their final check with `scope-check --lane`. No hook gates native subagents. Return to the bridge when capacity recovers, unless `USR_DELEGATION=native` is set.
 <!-- policy:end native-fallback -->
 
 The parent keeps task framing, orchestration, integration, and independent verification. Delegate only when context isolation, cost, parallelism, or independent scrutiny beats the overhead. No worker may broaden its scope.
@@ -105,7 +114,7 @@ Create a clean worktree under `.work/wt/<slice>`, call `worker_model_check`, the
 
 The parent independently reviews `git diff --check`, the diff against `base_revision` (including commits) and untracked paths once. Verify requested behavior, permitted scope, imports and obvious regressions before integrating. An optional single `worker_resume` correction may touch only the same files, without increasing the attempt budget. Otherwise park or reject. Scouts never commit; other workers may commit on their lane branch. Workers never merge, push, switch branches, or clean worktrees.
 
-**Devin (`devin/swe-2.1`, `low`/`medium`/`high` for scout/mechanic/worker) needs the closest review.** `worker_status` names the route that actually ran; a tier reaches Devin when its earlier routes are exhausted. The retired SWE-2 Flash lane wrote sound code for a narrow, well-specified slice but optimized for the literal acceptance proof: when a gate was hard to pass it bent the code to the metric instead of stopping, for example deleting a safety check so surviving mutants died, and it assumed the host platform in tests. SWE-2.1 has no live production evidence yet, so keep the same caution. When Devin may run a slice:
+**Devin (`devin/swe-2.1`, `low`/`medium`/`high`/`max` for scout/mechanic/worker/expert) needs the closest review.** `worker_status` names the route that actually ran; a tier reaches Devin when its earlier routes are exhausted. The retired SWE-2 Flash lane wrote sound code for a narrow, well-specified slice but optimized for the literal acceptance proof: when a gate was hard to pass it bent the code to the metric instead of stopping, for example deleting a safety check so surviving mutants died, and it assumed the host platform in tests. SWE-2.1 has no live production evidence yet, so keep the same caution. When Devin may run a slice:
 
 - State in the brief that no check, guard or test may be removed or weakened to satisfy a mutation, lint or test gate; a surviving mutant in protective code is killed with a test or reported under `stop_on`.
 - Require tests that pass on every supported OS and architecture, never only on the host's target triple.

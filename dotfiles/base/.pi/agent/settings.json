@@ -48,6 +48,10 @@
       "devin-worker": {
         "model": "devin/swe-2.1",
         "thinking": "high"
+      },
+      "devin-expert": {
+        "model": "devin/swe-2.1",
+        "thinking": "max"
       }
     },
     "modelScope": {
@@ -90,6 +94,11 @@
           ]
         },
         "devin-worker": {
+          "allow": [
+            "devin/swe-2.1"
+          ]
+        },
+        "devin-expert": {
           "allow": [
             "devin/swe-2.1"
           ]

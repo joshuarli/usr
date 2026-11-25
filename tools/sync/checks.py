@@ -104,7 +104,7 @@ CONTRACTS = ("dotfiles/base/.agents/instructions/", "dotfiles/base/.codex/AGENTS
              "dotfiles/base/.config/muse/AGENTS.md", "dotfiles/base/.config/opencode/AGENTS.md", "dotfiles/base/.dsh/AGENTS.md",
              "dotfiles/base/.fx/AGENTS.md", "dotfiles/base/.gemini/config/AGENTS.md", "dotfiles/base/.pi/agent/AGENTS.md")
 GENERATED_POLICY = ("dotfiles/base/.agents/instructions/lean.md", "dotfiles/base/.codex/AGENTS.md", "dotfiles/base/.agents/skills/orchestrate/SKILL.md",
-                    "dotfiles/base/.copilot/agents/", "dotfiles/base/.commandcode/agents/", "dotfiles/base/.gemini/config/agents/",
+                    "dotfiles/base/.copilot/agents/", "dotfiles/base/.commandcode/agents/", "dotfiles/base/.config/devin/agents/", "dotfiles/base/.gemini/config/agents/",
                     "dotfiles/base/.pi/agent/", "dotfiles/base/.config/opencode/opencode.json", "tools/pi-subagent-bridge/README.md", "docs/pi.md", "docs/agent-setup.md")
 LINK_CODE = ("tools/sync/links.py", "tools/sync/link_plan.py", "tools/sync/link_apply.py", "tools/sync/link_recovery.py", "tools/sync/ownership.py")
 SYNC_CORE = ("sync", "tools/sync/main.py", "tools/sync/dag.py", "tools/sync/bootstrap.sh", "tools/sync/pi_auth.py")

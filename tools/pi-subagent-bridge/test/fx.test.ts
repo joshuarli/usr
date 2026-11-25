@@ -685,7 +685,7 @@ test("controlled FX children obey the admission snapshot, replay one effect and 
   assert.match((await controller.tool("spawn", { tier: "worker", task: "x", intent_id: "a", model: "other" })).value, /cannot set model/)
   assert.match((await controller.tool("spawn", { tier: "worker", task: "x", intent_id: "a", cwd: "/" })).value, /cannot set cwd/)
   assert.match((await controller.tool("spawn", { tier: "mechanic", task: "x", intent_id: "a" })).value, /cannot delegate to mechanic/)
-  assert.match((await controller.tool("spawn", { tier: "expert", task: "x", intent_id: "a" })).value, /unknown tier/)
+  assert.match((await controller.tool("spawn", { tier: "expert", task: "x", intent_id: "a" })).value, /cannot delegate to expert/)
   const scout = await controller.tool("spawn", { tier: "scout", task: "inspect", intent_id: "scout-1" })
   assert.equal(scout.error, false)
   const replay = await controller.tool("spawn", { tier: "scout", task: "inspect", intent_id: "scout-1" })

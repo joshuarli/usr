@@ -4,8 +4,8 @@
  */
 export const TIERS = ["scout", "mechanic", "worker", "expert"] as const
 export type Tier = (typeof TIERS)[number]
-/** The bridge admits only these tiers; expert is a harness-native lane with no bridge route. */
-export const BRIDGE_TIERS = ["scout", "mechanic", "worker"] as const
+/** The bridge admits every tier; no god tier exists. */
+export const BRIDGE_TIERS = ["scout", "mechanic", "worker", "expert"] as const
 export type BridgeTier = (typeof BRIDGE_TIERS)[number]
 export type Effort = "low" | "medium" | "high" | "xhigh" | "max"
 
@@ -46,21 +46,25 @@ export const DEVIN_TIER_MODELS = {
   scout: { ...PI_MODELS.devinSwe21, variant: "low" },
   mechanic: { ...PI_MODELS.devinSwe21, variant: "medium" },
   worker: { ...PI_MODELS.devinSwe21, variant: "high" },
+  expert: { ...PI_MODELS.devinSwe21, variant: "max" },
 } as const satisfies {
   readonly scout: { readonly providerID: "devin"; readonly id: "swe-2.1"; readonly variant: "low" }
   readonly mechanic: { readonly providerID: "devin"; readonly id: "swe-2.1"; readonly variant: "medium" }
   readonly worker: { readonly providerID: "devin"; readonly id: "swe-2.1"; readonly variant: "high" }
+  readonly expert: { readonly providerID: "devin"; readonly id: "swe-2.1"; readonly variant: "max" }
 }
 export type DevinTier = keyof typeof DEVIN_TIER_MODELS
 export const DEVIN_AGENT_NAMES = {
   scout: "devin-scout",
   mechanic: "devin-mechanic",
   worker: "devin-worker",
+  expert: "devin-expert",
 } as const satisfies Record<BridgeTier, string>
 export const DEVIN_DELEGATION = {
   scout: DELEGATION.scout.map(tier => tier === "scout" ? DEVIN_AGENT_NAMES.scout : tier),
   mechanic: DELEGATION.mechanic.map(tier => tier === "mechanic" ? DEVIN_AGENT_NAMES.mechanic : tier),
   worker: DELEGATION.worker.map(tier => tier === "worker" ? DEVIN_AGENT_NAMES.worker : tier),
+  expert: DELEGATION.expert.map(tier => tier === "expert" ? DEVIN_AGENT_NAMES.expert : tier),
 } as const satisfies Record<BridgeTier, readonly string[]>
 export function isDevinTier(tier: Tier): tier is DevinTier {
   return tier in DEVIN_TIER_MODELS

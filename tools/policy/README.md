@@ -41,8 +41,8 @@ badges mark the fallback order, and tier pills mark the assignment tier.
 
 Edit the policy, run `make generate`, and review the generated diff. Session
 defaults, profile descriptions, unrelated harness settings and authored
-instructions remain outside generator ownership. Pi expert profiles are the
-first-class native Pi expert lane; the bridge admits no expert tier.
+instructions remain outside generator ownership. Pi expert profiles back the
+first-class Pi expert bridge lane.
 
 Named `policy:begin` / `policy:end` blocks are the only Markdown template
 mechanism. Rendering rejects missing, duplicate, nested, malformed and unknown

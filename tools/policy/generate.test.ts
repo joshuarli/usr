@@ -196,7 +196,7 @@ test("prohibited native Claude aliases cannot be projected", () => {
   try {
     for (const model of ["fable", "claude-fable-5-2"]) {
       const policy = structuredClone(POLICY)
-      Reflect.set(policy.nativeFallback.claudeModels, "expert", model)
+      Reflect.set(policy.nativeFallback.claudeModels, "worker", model)
       assert.throws(() => renderOutputs(f.root, policy), /Prohibited model in active policy/)
     }
   } finally { f.close() }
@@ -212,6 +212,7 @@ type MutablePolicy = {
   }
   opencode: { model: string; efforts: Record<string, string> }
   commandNative: Record<string, { name: string; model: string; effort?: string }>
+  devinNative: Record<string, { name: string; model: string; effort: string }>
   copilotNative: Record<string, { name: string; model: string; effort: string }>
   nativeFallback: { tiers: string[]; claudeModels: Record<string, string>; claudeEffort: Record<string, string> }
   antigravityDirect: { models: string[]; main: { model: string; effort: string }; god: { model: string; effort: string }; tiers: Record<string, { name: string; model: string; effort: string; selector: string }>; manualCarbon: string; retired: string[] }
@@ -238,6 +239,12 @@ const dimensions: Dimension[] = [
   { name: "pi worker second effort", mutate: p => { p.rootRoutes.worker[2].effort = "low" } },
   { name: "pi worker order", mutate: p => { p.rootRoutes.worker.splice(2, 0, ...p.rootRoutes.worker.splice(1, 1)) } },
   { name: "pi worker list length", mutate: p => { p.rootRoutes.worker.splice(1, 1) } },
+  { name: "command expert model", mutate: p => { p.rootRoutes.expert[0].model = FIXTURE_MODEL } },
+  { name: "command expert effort", mutate: p => { p.rootRoutes.expert[0].effort = "medium" } },
+  { name: "pi expert model", mutate: p => { p.rootRoutes.expert[1].model = FIXTURE_MODEL } },
+  { name: "pi expert Devin effort", mutate: p => { p.rootRoutes.expert[2].effort = "high" } },
+  { name: "codex expert model", mutate: p => { p.rootRoutes.expert.at(-1)!.model = FIXTURE_MODEL } },
+  { name: "codex expert effort", mutate: p => { p.rootRoutes.expert.at(-1)!.effort = "high" } },
 
   { name: "codex scout model", mutate: p => { p.rootRoutes.scout.at(-1)!.model = FIXTURE_MODEL } },
   { name: "codex scout effort", mutate: p => { p.rootRoutes.scout.at(-1)!.effort = "xhigh" } },
@@ -264,6 +271,11 @@ const dimensions: Dimension[] = [
   { name: "command native HY4 pilot model", mutate: p => { p.commandNative.pilot.model = FIXTURE_MODEL } },
   { name: "command native HY4 pilot effort", mutate: p => { p.commandNative.pilot.effort = "high" } },
   { name: "command native banned model", mutate: p => { p.commandNative.worker.model = "gemini-4-argon-high" }, rejects: /Prohibited model in active policy/ },
+  ...(["scout", "mechanic", "worker", "expert"] as const).flatMap(tier => [
+    { name: "Devin native " + tier + " model", mutate: (p: MutablePolicy) => { p.devinNative[tier].model = FIXTURE_MODEL }, rejects: /does not pin the matching SWE-2\.1 variant/ },
+    { name: "Devin native " + tier + " effort", mutate: (p: MutablePolicy) => { p.devinNative[tier].effort = otherEffort(p.devinNative[tier].effort) }, rejects: /does not pin the matching SWE-2\.1 variant/ },
+  ]),
+  { name: "Devin native mismatched pin", mutate: p => { p.devinNative.expert.model = "swe-2-1-high" }, rejects: /does not pin the matching SWE-2\.1 variant/ },
   { name: "opencode model", mutate: p => { p.opencode.model = "opencode/fixture-free" } },
   { name: "opencode scout effort", mutate: p => { p.opencode.efforts.scout = otherEffort(p.opencode.efforts.scout) } },
   { name: "opencode mechanic effort", mutate: p => { p.opencode.efforts.mechanic = otherEffort(p.opencode.efforts.mechanic) } },
@@ -274,8 +286,6 @@ const dimensions: Dimension[] = [
   { name: "native fallback scout Claude model", mutate: p => { p.nativeFallback.claudeModels.scout = "opus" } },
   { name: "native fallback mechanic Claude model", mutate: p => { p.nativeFallback.claudeModels.mechanic = "haiku" } },
   { name: "native fallback worker Claude model", mutate: p => { p.nativeFallback.claudeModels.worker = "opus" } },
-  { name: "native fallback expert Claude model", mutate: p => { p.nativeFallback.claudeModels.expert = "fixture-model" } },
-  { name: "native fallback expert Claude effort", mutate: p => { p.nativeFallback.claudeEffort.expert = "high" } },
 
   { name: "antigravity direct first model", mutate: p => { p.antigravityDirect.models[0] = "fixture-direct-a" } },
   { name: "antigravity direct second model", mutate: p => { p.antigravityDirect.models[1] = "fixture-direct-b" } },

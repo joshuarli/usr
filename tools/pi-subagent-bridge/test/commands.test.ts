@@ -60,7 +60,7 @@ test("MCP input schemas are derived from the shared field list", () => {
   assert.equal(start.additionalProperties, false)
   assert.deepEqual(start.properties.scope, SCOPE_SCHEMA)
   assert.deepEqual(start.properties.tier, { type: "string", minLength: 1, maxLength: 8, enum: BRIDGE_TIERS })
-  assert.match(COMMANDS.start.description, /scout: command-code then pi then pi then codex; mechanic: command-code then pi then pi then codex; worker: command-code then pi then pi then codex\)/)
+  assert.match(COMMANDS.start.description, /scout: command-code then pi then pi then codex; mechanic: command-code then pi then pi then codex; worker: command-code then pi then pi then codex; expert: command-code then pi then pi then codex\)/)
   assert.deepEqual(toolSchema("steer").required, ["cwd", "session_id", "note"])
   for (const name of COMMAND_NAMES) {
     const sample = { cwd: "/w", title: "t", tier: "scout", scope: { ...scope, writable_paths: [] }, brief: "b", session_id, feedback: "f", note: "n" }

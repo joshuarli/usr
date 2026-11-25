@@ -145,6 +145,7 @@ class PiTests(unittest.TestCase):
             "devin-scout": (DEVIN, "low", ["devin-scout"], SCOUT_TOOLS),
             "devin-mechanic": (DEVIN, "medium", ["scout", "devin-mechanic"], WRITER_TOOLS),
             "devin-worker": (DEVIN, "high", ["scout", "mechanic", "devin-worker"], WRITER_TOOLS),
+            "devin-expert": (DEVIN, "max", ["scout", "mechanic", "worker", "devin-expert"], WRITER_TOOLS),
         }
         for name, (model, effort, children, tools) in expected.items():
             self.assertEqual(sub["agentOverrides"][name], {"model": model, "thinking": effort})
