@@ -14,7 +14,7 @@ The one entry point for improving how agents work here. Instructions drift, skil
 ## Invocation
 
 - `/audit-jstack`: the whole loop over the agent system in `~/usr`.
-- `/audit-jstack past 2h` (any window): stages 2 and 3 over sessions in that window only, across harnesses and repos, including delegation and qualification tooling friction.
+- `/audit-jstack past 2h` (any window): stages 2 and 3 over sessions in that window only, across harnesses and repos, including delegation, qualification, and custom-tool adoption and friction.
 - `/audit-jstack <repo>`: stages 3, 4 and 6 for that repository, from its history, reviews and sessions, plus its `AGENTS.md` chain and repo-local skills. A window may be combined with it.
 
 Before stage 1, ask the owner whether to run `cleanup-sessions` (default: data older than 7 days; `cleanup-sessions --dry-run` previews) so stale sessions do not dominate the sample; run it only on their yes.
@@ -28,7 +28,7 @@ Start cheap and deepen only where evidence warrants. The first pass is an invent
 ## Stages
 
 1. **Instruction audit.** Contradictions, rules without one owner, restated enforcement, procedures that belong in tooling, bloat, misplacement, unclear wording, and imprecise descriptions. Read [instructions](references/instructions.md).
-2. **Empirical evaluation.** From existing sessions: does each skill load when it should and stay silent when it should not, and was the work better or cheaper for it. Delegation and qualification tooling are judged the same way, from what sessions did. Read [sessions](references/sessions.md).
+2. **Empirical evaluation.** From existing sessions: does each skill load when it should and stay silent when it should not, and was the work better or cheaper for it. Delegation, qualification, and custom tools named in the contract are judged the same way, from what sessions did. Read [sessions](references/sessions.md).
 3. **Recurring failures.** Group the mistakes agents repeat, from user corrections in sessions, fix and revert commits, review comments, and workaround comments. A class counts once it has happened twice. Read [failures](references/failures.md).
 4. **Enforcement.** Fix each class at the highest level that works: architecture, then types, then a lint or check, then a behavior test, then documentation. Read [failures](references/failures.md).
 5. **Consolidation.** Merge skills that always load together or share an owner, demote or delete skills sessions never needed, retire rules a new guard made redundant, and delete the old way an agent would copy.
@@ -40,6 +40,6 @@ Check every claim against the files or logs before reporting; lanes misread, and
 
 Keep transcripts private: counts, dates and one-line paraphrases, never prompts or code pasted from a session into a skill, doc, or ticket.
 
-**The test:** every finding cites evidence that survived verification and ends at the strongest level that works; no two files give conflicting orders; each shared rule has one owner; every applied guard was shown to fail on a real past mistake; and no skill decision treats a higher invocation rate as success.
+**The test:** every finding cites evidence that survived verification and ends at the strongest level that works; no two files give conflicting orders; each shared rule has one owner; every applied guard was shown to fail on a real past mistake; no skill decision treats a higher invocation rate as success; and no tool finding treats more invocations as success without an outcome.
 
 **Report:** the target, window and session counts; findings ranked with evidence and chosen level; owner decisions listed separately; skills with too little data; after applying, the commits, guards and tools added with the instructions they replaced, bytes before and after for the contract, descriptions and total, removed tokens, checks run, and what to re-measure and when.

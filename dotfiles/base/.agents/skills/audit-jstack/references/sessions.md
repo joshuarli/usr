@@ -38,6 +38,15 @@ Judge `pi-subagent-bridge`, `agentctl`, and harness MCP registrations from what 
 2. Back each candidate friction with the log or job file that shows it. Confirm jobs share the host before reading retry storms as flakiness.
 3. Tag each item defect, guard firing correctly, or operator papercut, and separate tool defects from host noise (a noisy machine, a wedged `agent-browser` daemon).
 
+## Custom tools
+
+Judge the CLI tools the contract tells agents to use from the tool calls that ran them, not from contract text or a file's own docs. A skill listing names every skill in every session; likewise every session loads the contract line naming `fastermod`, `standards`, `todo`, `pinact` and their kin. Count command strings, and exclude sessions whose only mention is an injected instruction or a tool output.
+
+1. **Count.** Per tool, count invocations and their mode flags in the window. Compare against the contract's guidance: a tool the contract names but agents never invoke is an adoption question, not a success.
+2. **Sample outcomes.** Read up to 5 invocations per tool. Note date, harness, project, mode, whether output was suppressed, and the next action. Classify each as right, wrong (guessed flag, silent fallback, bypassed for `sed`/`perl`), or forced. A guessed flag that exits non-zero and is followed by a manual edit is a defect, not a papercut.
+3. **Check friction.** Search the owning repo's `TODO.md` and history for a ticket the incident already produced. Tag each item defect, guard firing correctly, or operator papercut, and separate tool defects from host noise.
+4. **Decide each tool,** with counts and one example: keep the guidance, retune the contract or injection text, add a mechanism (alias, error message, check), or file friction in the owning repo. One incident is friction; a class needs two independent occurrences before it is recurring.
+
 ## Report rows
 
-A table of skill, listed, loaded, and rate per harness; costly misses and harmless skips; each decision with its evidence. For tooling, a per-harness table of admissions, successes, retries, fallbacks and blocks, then friction ranked by severity with the evidence line or job id and its tag. Name what could not be verified.
+A table of skill, listed, loaded, and rate per harness; costly misses and harmless skips; each decision with its evidence. For tooling, a per-harness table of admissions, successes, retries, fallbacks and blocks, then friction ranked by severity with the evidence line or job id and its tag. For custom tools, invocations and modes per tool, outcomes and fallbacks, filed tickets, and each decision with its evidence. Name what could not be verified.
