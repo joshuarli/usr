@@ -18,6 +18,7 @@ const DEVIN_GUARDS = {
   scout: new URL("./guards/devin-scout.ts", import.meta.url),
   mechanic: new URL("./guards/devin-mechanic.ts", import.meta.url),
   worker: new URL("./guards/devin-worker.ts", import.meta.url),
+  expert: new URL("./guards/devin-expert.ts", import.meta.url),
 } as const satisfies Record<keyof typeof DEVIN_TIER_MODELS, URL>
 export function tierGuardPath(tier: Tier, model?: { providerID: string }): URL {
   if (model?.providerID === "devin") {

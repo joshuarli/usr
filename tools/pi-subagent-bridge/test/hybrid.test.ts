@@ -143,6 +143,7 @@ test("model check reports Command Code primary, its pins, and Codex as the final
       ["scout", "meta/muse-ember", "medium"],
       ["mechanic", "meta/muse-ember", "xhigh"],
       ["worker", "deepseek/deepseek-v4.1-flash", "high"],
+      ["expert", "tencent/hy4", "high"],
     ] as const
     for (const [tier, model, effort] of expected) {
       const status = await bridge.modelCheck(f.cwd, tier)
@@ -154,8 +155,6 @@ test("model check reports Command Code primary, its pins, and Codex as the final
       assert.equal(status.command_code.effort, effort)
       assert.equal(status.command_code.available, true)
     }
-    await assert.rejects(bridge.modelCheck(f.cwd, "expert"), /Unknown bridge tier/)
-    await assert.rejects(bridge.start(f.cwd, "escalate", "expert", f.scope, "Work"), /Unknown bridge tier/)
   } finally { f.close() }
 })
 

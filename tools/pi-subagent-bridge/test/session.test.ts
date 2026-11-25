@@ -116,7 +116,6 @@ test("legacy records whose Pi fallback cannot be resolved still decode, keeping 
   const onPi = roundTrip(lower({ schema_version: undefined, execution_order: "command-first", codex_model: undefined, codex_effort: undefined,
     backend: "pi", command_run: undefined, pi_id: "ses_fixture", primary_model: GO, pi_candidates: undefined, remaining_pi: [] }))
   assert.deepEqual(onPi.plan, { kind: "command-first", command: COMMAND, pi: [GO] })
-  assert.throws(() => roundTrip(lower({ schema_version: undefined, tier: "expert", backend: "codex" })), /Unsupported persisted worker tier/)
 })
 
 test("incomplete or prohibited legacy records are refused for manual reconciliation", () => {
@@ -129,7 +128,6 @@ test("incomplete or prohibited legacy records are refused for manual reconciliat
     [lower({ backend: "pi", command_run: undefined, pi_id: "ses_fixture", primary_model: { providerID: "opencode-go", id: "deepseek-v4.1-flash" } }), /Missing admitted Pi effort; manual reconciliation required/],
     [lower({ pi_candidates: [{ providerID: "opencode-go", id: "deepseek-v4.1-flash" }] }), /Missing admitted Pi effort; manual reconciliation required/],
     [lower({ schema_version: undefined, execution_order: undefined, backend: "pi", pi_id: "ses_legacy", command_run: undefined, primary_model: undefined }), /Missing admitted Pi pin; manual reconciliation required/],
-    [lower({ tier: "expert" }), /Unsupported persisted worker tier/],
     [record({ backend: "antigravity" }), /Invalid persisted worker lifecycle; manual reconciliation required/],
     [record({ backend: "hydrogen" }), /Invalid persisted worker lifecycle; manual reconciliation required/],
     [lower({ backend: "pi", command_run: undefined, pi_id: "ses_fixture", primary_model: GO, command_model: undefined, command_effort: undefined }), /Missing admitted Command Code pin; manual reconciliation required/],

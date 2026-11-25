@@ -138,8 +138,6 @@ test("real YAML profiles are validated as runtime policy; drift fails before spa
     assert.throws(() => assertTierProfile(tier,
       profile(tier, "devin").replace("thinking: " + DEVIN_TIER_MODELS[tier].variant, "thinking: xhigh"), "devin"), /Unapproved/)
   }
-  assert.throws(() => assertTierProfile("expert", profile("expert"), "devin"), /Unapproved/)
-  assert.throws(() => tierGuardPath("expert", { providerID: "devin" }), /Devin cannot/)
 })
 
 test("profile checks enforce one exact pinned scope and one max depth", () => {
@@ -198,7 +196,7 @@ test("Devin pins SWE-2.1 thinking by tier; escapes fail closed", () => {
     const pin = DEVIN_TIER_MODELS[tier]
     assert.equal(tierForModel(pin, tier === "scout"), tier)
     assert.throws(() => tierForModel(pin, tier !== "scout"), /Unapproved/)
-    for (const variant of ["off", "minimal", "xhigh", "max"])
+    for (const variant of ["off", "minimal", "xhigh"])
       assert.throws(() => tierForModel({ ...pin, variant }, tier === "scout"), /Unapproved/)
     assert.equal(nestedCallRefusal(tier, "subagent", {
       agent: DEVIN_AGENT_NAMES[tier], task: "Implement", options: { agentScope: "user" },

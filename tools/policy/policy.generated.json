@@ -3,7 +3,8 @@
   "tiers": [
     "scout",
     "mechanic",
-    "worker"
+    "worker",
+    "expert"
   ],
   "rootRoutes": {
     "scout": [
@@ -77,6 +78,30 @@
         "model": "gpt-6.1-terra",
         "effort": "high"
       }
+    ],
+    "expert": [
+      {
+        "executor": "command-code",
+        "model": "tencent/hy4",
+        "effort": "high"
+      },
+      {
+        "executor": "pi",
+        "providerID": "opencode-go",
+        "model": "deepseek-v4.1-flash",
+        "effort": "max"
+      },
+      {
+        "executor": "pi",
+        "providerID": "devin",
+        "model": "swe-2.1",
+        "effort": "max"
+      },
+      {
+        "executor": "codex",
+        "model": "gpt-6.1-terra",
+        "effort": "max"
+      }
     ]
   },
   "nativePi": {
@@ -117,12 +142,18 @@
         "providerID": "devin",
         "id": "swe-2.1",
         "variant": "high"
+      },
+      "expert": {
+        "providerID": "devin",
+        "id": "swe-2.1",
+        "variant": "max"
       }
     },
     "devinAgentNames": {
       "scout": "devin-scout",
       "mechanic": "devin-mechanic",
-      "worker": "devin-worker"
+      "worker": "devin-worker",
+      "expert": "devin-expert"
     },
     "delegation": {
       "scout": [
@@ -156,6 +187,12 @@
         "scout",
         "mechanic",
         "devin-worker"
+      ],
+      "expert": [
+        "scout",
+        "mechanic",
+        "worker",
+        "devin-expert"
       ]
     },
     "tools": {
@@ -243,6 +280,28 @@
       "effort": "medium"
     }
   },
+  "devinNative": {
+    "scout": {
+      "name": "usr-scout",
+      "model": "swe-2-1-low",
+      "effort": "low"
+    },
+    "mechanic": {
+      "name": "usr-mechanic",
+      "model": "swe-2-1-medium",
+      "effort": "medium"
+    },
+    "worker": {
+      "name": "usr-worker",
+      "model": "swe-2-1-high",
+      "effort": "high"
+    },
+    "expert": {
+      "name": "usr-expert",
+      "model": "swe-2-1-max",
+      "effort": "max"
+    }
+  },
   "copilotNative": {
     "scout": {
       "name": "usr-scout",
@@ -274,12 +333,9 @@
     "claudeModels": {
       "scout": "haiku",
       "mechanic": "sonnet",
-      "worker": "sonnet",
-      "expert": "opus"
+      "worker": "sonnet"
     },
-    "claudeEffort": {
-      "expert": "xhigh"
-    }
+    "claudeEffort": {}
   },
   "antigravityDirect": {
     "models": [

@@ -43,6 +43,7 @@ export const CODEX_TIER_MODELS = {
   scout: { model: codexModels.small, effort: "medium" },
   mechanic: { model: codexModels.small, effort: "high" },
   worker: { model: codexModels.coding, effort: "high" },
+  expert: { model: codexModels.coding, effort: "max" },
 } as const satisfies Record<BridgeTier, CliPin>
 
 /** Native Command Code parent agents; HY4 medium is an explicit comparison lane. */
@@ -53,6 +54,18 @@ export const COMMAND_NATIVE = {
   expert: { name: "usr-expert", model: "tencent/hy4", effort: "high" },
   pilot: { name: "usr-worker-hy4", model: "tencent/hy4", effort: "medium" },
 } as const
+
+
+function devinNativeModel(tier: keyof typeof DEVIN_TIER_MODELS): string {
+  const pin = DEVIN_TIER_MODELS[tier]
+  return `${pin.id.replace(".", "-")}-${pin.variant}`
+}
+export const DEVIN_NATIVE = {
+  scout: { name: "usr-scout", model: devinNativeModel("scout"), effort: DEVIN_TIER_MODELS.scout.variant },
+  mechanic: { name: "usr-mechanic", model: devinNativeModel("mechanic"), effort: DEVIN_TIER_MODELS.mechanic.variant },
+  worker: { name: "usr-worker", model: devinNativeModel("worker"), effort: DEVIN_TIER_MODELS.worker.variant },
+  expert: { name: "usr-expert", model: devinNativeModel("expert"), effort: DEVIN_TIER_MODELS.expert.variant },
+} as const satisfies Record<Tier, CliPin & { name: string }>
 
 export const COPILOT_NATIVE = {
   scout: { name: "usr-scout", model: "mai-code-2-flash", effort: "low" },
@@ -67,9 +80,10 @@ export const COMMAND_TIER_MODELS = {
   scout: { model: COMMAND_EMBER_MODEL, effort: "medium" },
   mechanic: { model: COMMAND_EMBER_MODEL, effort: "xhigh" },
   worker: { model: COMMAND_MODEL, effort: "high" },
+  expert: { model: COMMAND_NATIVE.expert.model, effort: COMMAND_NATIVE.expert.effort },
 } as const satisfies Record<BridgeTier, CliPin>
 
-/** Ordered admission plan per admitted bridge tier. Expert is a harness-native lane and has no plan here. */
+/** Ordered admission plan per admitted bridge tier. */
 export const ROOT_PLANS = {
   scout: {
     kind: "codex-last", command: COMMAND_TIER_MODELS.scout,
@@ -82,6 +96,10 @@ export const ROOT_PLANS = {
   worker: {
     kind: "codex-last", command: COMMAND_TIER_MODELS.worker,
     pi: [GO_TIER_MODELS.worker, DEVIN_TIER_MODELS.worker], codex: CODEX_TIER_MODELS.worker,
+  },
+  expert: {
+    kind: "codex-last", command: COMMAND_TIER_MODELS.expert,
+    pi: [GO_TIER_MODELS.expert, DEVIN_TIER_MODELS.expert], codex: CODEX_TIER_MODELS.expert,
   },
 } as const satisfies Record<BridgeTier, RootPlan>
 
@@ -102,8 +120,8 @@ export const OPENCODE_NATIVE = {
 } as const satisfies { model: string; efforts: Record<Tier, Effort> }
 export const NATIVE_FALLBACK = {
   tiers: ["scout", "mechanic", "worker"],
-  claudeModels: { scout: "haiku", mechanic: "sonnet", worker: "sonnet", expert: "opus" },
-  claudeEffort: { expert: "xhigh" },
+  claudeModels: { scout: "haiku", mechanic: "sonnet", worker: "sonnet" },
+  claudeEffort: {},
 } as const
 /** Family prefixes are prohibited, including all effort-suffixed variants. */
 export const BANNED_MODELS = [
@@ -122,6 +140,7 @@ export const POLICY = {
     scout: routesOf(ROOT_PLANS.scout),
     mechanic: routesOf(ROOT_PLANS.mechanic),
     worker: routesOf(ROOT_PLANS.worker),
+    expert: routesOf(ROOT_PLANS.expert),
   },
   nativePi: {
     goModels: GO_TIER_MODELS,
@@ -135,6 +154,7 @@ export const POLICY = {
   },
   opencode: OPENCODE_NATIVE,
   commandNative: COMMAND_NATIVE,
+  devinNative: DEVIN_NATIVE,
   copilotNative: COPILOT_NATIVE,
   nativeFallback: NATIVE_FALLBACK,
   antigravityDirect: ANTIGRAVITY_DIRECT,

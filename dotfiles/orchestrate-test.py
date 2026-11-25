@@ -13,14 +13,14 @@ class OrchestrateTests(unittest.TestCase):
         cls.text = (ROOT / "dotfiles/base/.agents/skills/orchestrate/SKILL.md").read_text()
 
     def test_every_harness_uses_shared_bridge(self):
-        self.assertIn("all scout/mechanic/worker coding subagents", self.text.lower())
+        self.assertIn("all scout/mechanic/worker/expert coding subagents", self.text.lower())
         self.assertIn("pi-subagent-bridge", self.text)
         for method in ("worker_model_check", "worker_start", "worker_status", "worker_resume"):
             self.assertIn(method, self.text)
 
     def test_generated_policy_has_distinct_root_and_native_domains(self):
-        self.assertEqual(POLICY["tiers"], ["scout", "mechanic", "worker"])
-        self.assertNotIn("expert", POLICY["rootRoutes"])
+        self.assertEqual(POLICY["tiers"], ["scout", "mechanic", "worker", "expert"])
+        self.assertIn("expert", POLICY["rootRoutes"])
         self.assertNotIn("antigravity", [route["executor"] for routes in POLICY["rootRoutes"].values() for route in routes])
         self.assertIn("expert", POLICY["nativePi"]["goModels"])
         self.assertNotIn("god", POLICY["rootRoutes"])
@@ -59,8 +59,6 @@ class OrchestrateTests(unittest.TestCase):
         for harness in ("OpenCode", "Devin", "Codex", "Pi", "Claude Code"):
             self.assertIn(harness, self.text)
         self.assertIn("Claude Code native subagents:", self.text)
-        self.assertIn("`expert` assignments always use native subagents pinned to `opus` with `xhigh` effort.", self.text)
-        self.assertIn("If that pinned model is unavailable, the expert lane is blocked; never substitute another model.", self.text)
         self.assertIn("pi-subagent-bridge scope-check CWD SCOPE_JSON_FILE BRANCH --register TITLE", self.text)
         self.assertIn("pi-subagent-bridge scope-check --lane ID", self.text)
         self.assertIn("No hook gates native subagents.", self.text)
@@ -97,6 +95,31 @@ class OrchestrateTests(unittest.TestCase):
         for path in ("dotfiles/base/.codex/AGENTS.md", "dotfiles/base/.agents/instructions/lean.md"):
             content = (ROOT / path).read_text()
             self.assertIn("OpenCode", content)
+
+
+    def test_devin_native_agents_pin_swe21_variants(self):
+        self.assertIn("Devin exception:", self.text)
+        self.assertIn("never uses `pi-subagent-bridge`", self.text)
+        self.assertIn("never the unpinned built-in `subagent_explore`", self.text)
+        pins = POLICY["devinNative"]
+        self.assertEqual(set(pins), {"scout", "mechanic", "worker", "expert"})
+        expected = {
+            "scout": ("low", "swe-2-1-low"),
+            "mechanic": ("medium", "swe-2-1-medium"),
+            "worker": ("high", "swe-2-1-high"),
+            "expert": ("max", "swe-2-1-max"),
+        }
+        for tier, (effort, model) in expected.items():
+            pin = pins[tier]
+            self.assertEqual(pin["model"], model)
+            self.assertEqual(pin["effort"], effort)
+            content = (ROOT / "dotfiles/base/.config/devin/agents" / (pin["name"] + ".md")).read_text()
+            self.assertIn("model: " + model, content)
+            self.assertIn("# policy:begin native-agent", content)
+        scout = (ROOT / "dotfiles/base/.config/devin/agents/usr-scout.md").read_text()
+        self.assertNotIn("  - exec\n", scout)
+        self.assertNotIn("  - edit\n", scout)
+        self.assertNotIn("  - write\n", scout)
 
     def test_copilot_native_pilot_has_required_pins_and_leaf_tools(self):
         directory = ROOT / "dotfiles/base/.copilot"
