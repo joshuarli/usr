@@ -233,7 +233,7 @@ def render_list(standards: Sequence[Standard], as_json: bool) -> str:
 def parser() -> argparse.ArgumentParser:
     top = argparse.ArgumentParser(
         prog="standards", description="Select the coding standards that apply to a change.",
-        epilog=f"Exit status: 0 success (selecting nothing is success), 1 invalid standards from check, 2 usage or operational error, 130 interrupted.\n\n{FOOTER}",
+        epilog=f"Exit status: 0 success (selecting nothing is success), 1 invalid standards from check, 2 usage or operational error, 130 interrupted.\nCtrl-C stops at once; standards writes nothing, so re-running is always safe.\n\n{FOOTER}",
         formatter_class=argparse.RawDescriptionHelpFormatter)
     top.add_argument("--dir", type=Path, default=DEFAULT_DIR, help=f"standards directory (default: {DEFAULT_DIR})")
     commands = top.add_subparsers(dest="command", required=True, metavar="COMMAND")
