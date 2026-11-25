@@ -43,6 +43,7 @@ Local tests cover CLI and filesystem behavior with fixtures. Network services, p
 | Lean harness launchers and shell PATH | `python3 -I dotfiles/harness-lean-test.py` and `shellcheck -s sh FILE` for each changed match |
 | `ghostty-fda-check` | `sh dotfiles/ghostty-fda-test.sh` and `shellcheck -s sh dotfiles/base/.local/bin/ghostty-fda-check dotfiles/ghostty-fda-test.sh` |
 | a skill or agent definition | `node tools/skills/skills.ts check`, `node tools/skills/skills.ts check --root .agents/skills`, `node --test tools/skills/skills.test.ts`, `python3 -I tools/skills/test_usage.py`, and `python3 -I dotfiles/skills-campaign-test.py`; `node tools/skills/skills.ts generate` refreshes invocation adapters; use the focused check for other agent configuration |
+| coding standards or the `standards` selector | `TMPDIR="$PWD/.work/tmp" python3 -I tools/standards/test_standards.py` |
 | model routes, native Pi policy, or generated policy blocks | `node tools/policy/generate.ts --check`, `node --test tools/policy/generate.test.ts`, `node tools/policy/subagent-visualization.ts --check`, and `node --test tools/policy/subagent-visualization.test.ts`; use `make generate` to refresh projections |
 | `orchestrate` skill | `python3 -I dotfiles/orchestrate-test.py` |
 | instruction profiles and their harness adapters | `TMPDIR="$PWD/.work/tmp" python3 -I dotfiles/instructions-test.py` |

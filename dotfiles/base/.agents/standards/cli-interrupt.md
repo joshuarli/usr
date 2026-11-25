@@ -1,11 +1,28 @@
 ---
-name: cooperative-cli-interrupt
-description: "Apply when writing or changing any CLI, subcommand, long-running script, background job, or interactive terminal tool that a user can interrupt with Ctrl-C/SIGINT or a supervisor can terminate. Interruption must be cooperative: save state, discard partial work, and exit 130. Skip only instantaneous commands with no I/O or locks."
+name: cli-interrupt
+summary: CLIs, long-running scripts, background jobs, and interactive terminal tools stop cooperatively on Ctrl-C or SIGTERM, discard partial work, and exit 130.
+paths:
+  - "bin/*"
+  - "cli/*"
+  - "cli.py"
+  - "__main__.py"
+  - "src/main.rs"
+  - "src/bin/*"
+content:
+  - '\bSIG(INT|TERM)\b'
+  - '\bKeyboardInterrupt\b'
+  - '\bAbortController\b'
+  - '\bAbortSignal\b'
+  - '\bprocess\.argv\b'
+  - '\bargparse\b'
+  - '\blexopt\b'
+  - '\bclap::'
+  - '\btrap\b.*\b(INT|TERM|EXIT)\b'
 ---
 
-# Cooperative CLI Interruption
+# Cooperative CLI interruption
 
-Ctrl-C is a user request to stop, not a reason to abort mid-write. A tool that exits immediately on the first signal can leave partial files, unreleased resources, or a checkpoint that never landed. Treat interruption as a first-class control flow path from the start.
+Ctrl-C is a user request to stop, not a reason to abort mid-write. A tool that exits immediately on the first signal can leave partial files, unreleased resources, or a checkpoint that never landed. Treat interruption as a first-class control flow path from the start. This applies to any CLI, subcommand, long-running script, background job, or interactive terminal tool. It does not apply to instantaneous commands with no I/O or locks.
 
 ## Standard
 

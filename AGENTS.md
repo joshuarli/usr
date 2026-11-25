@@ -34,6 +34,7 @@ Each path belongs to one sync layer (see [sync](docs/sync.md)). Do not `cat` or 
 | Tailnet hardening runbook | [tailscale/TAILSCALE.md](tailscale/TAILSCALE.md) |
 | Alpine provisioner | [host/alpine/README.md](host/alpine/README.md) |
 | Skills guide | [SKILLS.md](SKILLS.md) |
+| Coding standards and the completion gate | [docs/agent-setup.md](docs/agent-setup.md#coding-standards) |
 | Deferred work | [TODO.md](TODO.md) |
 | Backlog commands and record format | [tools/todo/README.md](tools/todo/README.md) |
 

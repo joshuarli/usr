@@ -77,6 +77,10 @@ Antigravity CLI reads skill descriptions and may activate eligible skills automa
 
 Harnesses use native skill metadata and discovery paths. The checker at [`skills.ts`](../tools/skills/skills.ts) validates tracked skill metadata. See [the skills guide](../SKILLS.md) for invocation rules.
 
+### Coding standards
+
+Coding standards are plain files in [`dotfiles/base/.agents/standards/`](../dotfiles/base/.agents/standards/), linked to `~/.agents/standards/`, not skills. A skill's description sits in every session's context and loads only when the model decides it applies; a standard costs nothing until a change triggers it. Each standard's frontmatter lists the paths, shebangs, and added-line patterns that trigger it, and `standards select` matches them against the working tree diff. Both contracts tell the agent to run it before reporting code changes done and to apply what it lists through the [gate](../dotfiles/base/.agents/instructions/coding-standards.md): one scout-tier reviewer reads the standards and the diff and returns findings, so the main session never loads the standard text. `do` and `review` run the same gate. Prefer a lint or test for any rule a tool can check.
+
 ## Harness configuration
 
 The [lean harness defaults](harness-lean.md) use small launch shims alongside native settings to disable unwanted daemon and startup work. OpenCode and Codex retain native browsing; Claude keeps native Chrome off and uses agent-browser. Web search, coding tools, MCP, subagents and session hooks remain available. The shims live separately from native launchers.
