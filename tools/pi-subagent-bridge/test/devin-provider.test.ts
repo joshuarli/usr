@@ -31,3 +31,14 @@ test("Devin preflight is read-only and requires official CLI credentials plus ca
     rmSync(home, { recursive: true, force: true })
   }
 })
+
+test("the Pi port advertises every pinned Devin variant, so each Devin tier passes model check", async () => {
+  const { devinModelEntry } = await import("../src/pi-port.ts")
+  const { DEVIN_TIER_MODELS } = await import("../src/tier-policy.ts")
+  const entry = devinModelEntry()
+  assert.equal(entry.providerID, "devin")
+  assert.deepEqual(entry.variants.map(v => v.id).sort(),
+    [...new Set(Object.values(DEVIN_TIER_MODELS).map(pin => pin.variant))].sort())
+  for (const pin of Object.values(DEVIN_TIER_MODELS))
+    assert.ok(entry.id === pin.id && entry.variants.some(v => v.id === pin.variant), pin.variant)
+})

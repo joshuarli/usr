@@ -118,6 +118,13 @@ function verifiedSessionPath(s: Stored, value: string | null): string {
   return value
 }
 
+/** The Devin model as the bridge's model check sees it: every pinned tier variant, each once. */
+export function devinModelEntry() {
+  const variants = [...new Set(Object.values(DEVIN_TIER_MODELS).map(pin => pin.variant))]
+  return { id: DEVIN_TIER_MODELS.worker.id, providerID: "devin", enabled: true, status: "active",
+    variants: variants.map(id => ({ id })) }
+}
+
 export function piPort(): OpenCodePort {
   return {
     async models() {
@@ -134,12 +141,7 @@ export function piPort(): OpenCodePort {
           id, providerID: config.providerID, enabled: true, status: "active",
           variants: [...config.variants].map((variant) => ({ id: variant })),
         }))
-      if (devinPreflight().available) {
-        available.push({
-          id: DEVIN_TIER_MODELS.worker.id, providerID: "devin", enabled: true, status: "active",
-          variants: [{ id: DEVIN_TIER_MODELS.worker.variant }],
-        })
-      }
+      if (devinPreflight().available) available.push(devinModelEntry())
       return { data: available }
     },
     async create(input) {
