@@ -180,6 +180,10 @@ sys.exit(1)
     def state(self, name):
         return (self.home / ".local/state/dl" / name).read_text().strip()
 
+    def npm_installs(self):
+        log = self.root / "npm.log"
+        return [json.loads(line) for line in log.read_text().splitlines()] if log.is_file() else []
+
     def test_cargo_mutants_installs_fork_prerelease(self):
         import hashlib
         for os_name, arch, target in (
@@ -940,57 +944,134 @@ sys.exit(1)
             again.install_pi()
             self.assertFalse(again.changed)
 
+    def pnpm_routes(self, version="12.16.1", digest=None, *, os_name="linux", arch="x86_64"):
+        import hashlib
+        asset = {("linux", "x86_64"): "pnpm-linux-x64-musl",
+                 ("linux", "aarch64"): "pnpm-linux-arm64-musl",
+                 ("darwin", "aarch64"): "pnpm-darwin-arm64",
+                 ("darwin", "x86_64"): "pnpm-darwin-x64"}[(os_name, arch)]
+        payload = make_tar({"pnpm": f'#!/bin/sh\n[ "$1" = "--version" ] && echo {version}\n'.encode()})
+        digest = digest or hashlib.sha256(payload).hexdigest()
+        tag = f"v{version}"
+        release = {"tag_name": tag, "assets": [{"name": asset, "digest": f"sha256:{digest}"}]}
+        routes = {"https://api.github.com/repos/pnpm/pnpm/releases/latest": json.dumps(release).encode(),
+                  f"https://github.com/pnpm/pnpm/releases/download/{tag}/{asset}": payload}
+        return routes, asset, tag, digest
+
+    def test_pnpm_native_release_replaces_npm_install(self):
+        routes, asset, tag, digest = self.pnpm_routes()
+        legacy = self.home / ".local/share/pnpm-npm"
+        (legacy / "lib/node_modules/pnpm/bin").mkdir(parents=True)
+        (legacy / "bin").mkdir()
+        (legacy / "bin/pnpm").symlink_to(legacy / "lib/node_modules/pnpm/bin/pnpm.cjs")
+        self.dest_path("pnpm").parent.mkdir(parents=True, exist_ok=True)
+        self.dest_path("pnpm").symlink_to(legacy / "bin/pnpm")
+        state = self.home / ".local/state/dl/pnpm"
+        state.parent.mkdir(parents=True, exist_ok=True)
+        state.write_text("12.16.0\n")
+
+        inst = self.make(routes)
+        inst.install_pnpm()
+        launcher = self.dest_path("pnpm")
+        self.assertTrue(launcher.is_symlink())
+        self.assertEqual(subprocess_run([str(launcher), "--version"]), "12.16.1")
+        self.assertEqual(self.state("pnpm"), f"{tag}:{digest}")
+        self.assertFalse(legacy.exists())
+        self.assertEqual(inst.fetched, ["https://api.github.com/repos/pnpm/pnpm/releases/latest",
+                                        f"https://github.com/pnpm/pnpm/releases/download/{tag}/{asset}"])
+        self.assertFalse(any(entry[0] == "install" for entry in self.npm_installs()))
+
+        again = self.make(routes)
+        again.install_pnpm()
+        self.assertFalse(again.changed)
+        self.assertEqual(again.fetched, ["https://api.github.com/repos/pnpm/pnpm/releases/latest"])
+
+    def test_pnpm_native_refuses_bad_digest_foreign_paths_and_unsupported_platform(self):
+        routes, _, _, _ = self.pnpm_routes()
+        api = "https://api.github.com/repos/pnpm/pnpm/releases/latest"
+        malformed = dict(routes)
+        release = json.loads(malformed[api].decode())
+        release["tag_name"] = 123
+        malformed[api] = json.dumps(release).encode()
+        with self.assertRaises(SkipInstall):
+            self.make(malformed).install_pnpm()
+        self.assertFalse(self.dest_path("pnpm").exists())
+
+        bad, _, _, _ = self.pnpm_routes(digest="0" * 64)
+        inst = self.make(bad)
+        with self.assertRaises(SkipInstall):
+            inst.install_pnpm()
+        self.assertFalse(self.dest_path("pnpm").exists())
+        self.assertEqual(list((self.home / ".local/share/pnpm-native").glob("releases/*")), [])
+
+        self.dest_path("pnpm").parent.mkdir(parents=True, exist_ok=True)
+        self.dest_path("pnpm").write_text("mine")
+        with self.assertRaises(SkipInstall):
+            self.make(routes).install_pnpm()
+        self.assertEqual(self.dest_path("pnpm").read_text(), "mine")
+        self.dest_path("pnpm").unlink()
+
+        root = self.home / ".local/share/pnpm-native"
+        root.parent.mkdir(parents=True, exist_ok=True)
+        root.symlink_to("foreign-target")
+        with self.assertRaises(SkipInstall):
+            self.make(routes).install_pnpm()
+        self.assertEqual(os.readlink(root), "foreign-target")
+        root.unlink()
+
+        with self.assertRaises(SkipInstall):
+            self.make(routes, os_name="linux", arch="riscv64").install_pnpm()
+
     def test_pnpm_beside_polluted_home(self):
         home_bin = self.home / ".local/share/pnpm/bin"
         home_bin.mkdir(parents=True)
         (home_bin / "pn").write_text("#!/bin/sh\nexec pnpm \"$@\"\n")
         (home_bin / "pn").chmod(0o755)
-        inst = self.make()
+        routes, _, _, _ = self.pnpm_routes()
+        inst = self.make(routes)
         inst.install_pnpm()
-        self.assertEqual(os.readlink(self.dest_path("pnpm")), str(self.home / ".local/share/pnpm-npm/bin/pnpm"))
+        self.assertEqual(os.readlink(self.dest_path("pnpm")), str(self.home / ".local/share/pnpm-native/bin/pnpm"))
         self.assertEqual((home_bin / "pn").read_text(), "#!/bin/sh\nexec pnpm \"$@\"\n")
 
     def test_pnpm_rejects_foreign_paths_before_install(self):
-        for fail in (False, True):
-            for kind in ("launcher_file", "launcher_dir", "launcher_link", "prefix_file", "prefix_dir", "prefix_link"):
-                with self.subTest(fail=fail, kind=kind), tempfile.TemporaryDirectory(dir=self.root) as scratch:
-                    old_home = self.home
-                    self.home = Path(scratch) / "home"
-                    try:
-                        inst = self.make()
-                        inst.env["MOCK_NPM_FAIL"] = "1" if fail else "0"
-                        path = self.dest_path("pnpm") if kind.startswith("launcher") else inst.pnpm_root
-                        path.parent.mkdir(parents=True, exist_ok=True)
-                        if kind.endswith("file"):
-                            path.write_text("foreign")
-                            path.chmod(0o755)
-                        elif kind.endswith("dir"):
-                            path.mkdir()
-                            (path / "sentinel").write_text("foreign")
-                        else:
-                            path.symlink_to("foreign-target")
-                        with self.assertRaises(SkipInstall):
-                            inst.install_pnpm()
-                        if kind.endswith("file"):
-                            self.assertEqual(path.read_text(), "foreign")
-                        elif kind.endswith("dir"):
-                            self.assertEqual((path / "sentinel").read_text(), "foreign")
-                        else:
-                            self.assertEqual(os.readlink(path), "foreign-target")
-                        self.assertFalse(any(json.loads(line)[0] == "install" for line in
-                                             (self.root / "npm.log").read_text().splitlines()))
-                    finally:
-                        self.home = old_home
+        routes, _, _, _ = self.pnpm_routes()
+        for kind in ("launcher_file", "launcher_dir", "launcher_link", "prefix_file", "prefix_dir", "prefix_link"):
+            with self.subTest(kind=kind), tempfile.TemporaryDirectory(dir=self.root) as scratch:
+                old_home = self.home
+                self.home = Path(scratch) / "home"
+                try:
+                    inst = self.make(routes)
+                    path = self.dest_path("pnpm") if kind.startswith("launcher") else inst.pnpm_root
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    if kind.endswith("file"):
+                        path.write_text("foreign")
+                        path.chmod(0o755)
+                    elif kind.endswith("dir"):
+                        path.mkdir()
+                        (path / "sentinel").write_text("foreign")
+                    else:
+                        path.symlink_to("foreign-target")
+                    with self.assertRaises(SkipInstall):
+                        inst.install_pnpm()
+                    if kind.endswith("file"):
+                        self.assertEqual(path.read_text(), "foreign")
+                    elif kind.endswith("dir"):
+                        self.assertEqual((path / "sentinel").read_text(), "foreign")
+                    else:
+                        self.assertEqual(os.readlink(path), "foreign-target")
+                    self.assertFalse(any(entry[0] == "install" for entry in self.npm_installs()))
+                finally:
+                    self.home = old_home
 
-    def test_dsh_install_and_patch_repair(self):
+    def test_dsh_is_disabled_and_patch_repair_is_kept(self):
         inst = self.make()
-        inst.install_dsh()
-        self.assertEqual(self.state("dsh"), "0.2.1")
-        self.assertEqual(self.state("dsh-tui"), "0.16.0")
+        with self.assertRaises(SkipInstall):
+            inst.install_dsh()
+        self.assertFalse((self.home / ".local/share/dsh/bin/dsh").exists())
+        self.assertFalse(any(entry[0] == "install" for entry in self.npm_installs()))
         patch_file = self.home / ".local/share/dsh/lib/node_modules/@deepseek-harness-tui/dsh-tui/cordis.patch.yml"
         patch_file.parent.mkdir(parents=True, exist_ok=True)
         patch_file.write_text("- id: tool-ralph\n  disabled: true\nkeep\n")
-        inst = self.make()
         inst.repair_dsh_tui_patch()
         self.assertEqual(patch_file.read_text(), "keep\n")
 

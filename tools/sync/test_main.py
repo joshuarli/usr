@@ -22,6 +22,10 @@ class MainTests(unittest.TestCase):
         names = [task.name for task in dag.order()]
         self.assertEqual(names, ["tool:nodejs", "tool:cmd"])
 
+    def test_pnpm_is_a_standalone_native_install(self):
+        dag = main.graph(self.ctx, ["pnpm"], setup=False).select(["tool:pnpm"])
+        self.assertEqual([task.name for task in dag.order()], ["tool:pnpm"])
+
     def test_dsh_requires_pnpm_and_node(self):
         dag = main.graph(self.ctx, ["dsh"], setup=False).select(["tool:dsh"])
         self.assertEqual([t.name for t in dag.order()], ["tool:nodejs", "tool:pnpm", "tool:dsh"])
