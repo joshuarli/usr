@@ -69,6 +69,7 @@ Platform-specific code is allowed where its location says so: a directory named 
 - Never assume `/proc`, `/sys`, `/dev/shm`, or `/run` (Linux), or `/private`, `/Volumes`, or `~/Library` (macOS), in shared code.
 - Never hardcode `/home`, `/Users`, `/opt/homebrew`, or `/usr/local`. Use `$HOME`, `command -v`, and the XDG variables with their documented defaults.
 - Use `$TMPDIR` (or the repository's scratch directory), not a literal `/tmp`; on macOS `/tmp` is a symlink to `/private/tmp`, which breaks path comparisons.
+- A script or test that sets its own `PATH` keeps `/usr/sbin` and `/sbin`: macOS installs `sha256sum` and `md5sum` in `/sbin`, so `PATH=/usr/bin:/bin` hides them.
 - Shebangs are `#!/bin/sh` or `#!/usr/bin/env NAME`. Alpine has no `/bin/bash` by default, and macOS's `/bin/bash` is 3.2.
 - Filenames must not differ only by case, because macOS volumes are case-insensitive by default. Do not rely on a filename's Unicode normalization form.
 - Do not call a platform's service or package manager (`systemctl`, `rc-service`, `launchctl`, `apk`, `brew`) or clipboard and opener tools (`pbcopy`, `xdg-open`) from shared code; put that code in a platform-specific location.

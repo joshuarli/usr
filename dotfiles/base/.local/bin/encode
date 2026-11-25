@@ -154,8 +154,10 @@ encode_one() {
         return 1
     fi
 
-    src_size=$(stat -f%z "$src")
-    out_size=$(stat -f%z "$output")
+    src_size=$(wc -c < "$src")
+    out_size=$(wc -c < "$output")
+    src_size=$((src_size))
+    out_size=$((out_size))
     echo "Size before: ${src_size} bytes"
     echo "Size after:  ${out_size} bytes"
     pct_change=$(awk -v s="$src_size" -v o="$out_size" 'BEGIN { if (s == 0) { print "0.00" } else { printf "%.2f", ((o - s) * 100.0) / s } }')

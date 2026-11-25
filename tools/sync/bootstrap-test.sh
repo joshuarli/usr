@@ -28,7 +28,8 @@ with tarfile.open(sys.argv[1], mode="w:xz") as archive:
     info.mode = 0o755
     archive.addfile(info, io.BytesIO(script))
 PY
-if command -v sha256sum >/dev/null 2>&1; then digest=$(sha256sum "$payload" | awk '{print $1}'); else digest=$(shasum -a 256 "$payload" | awk '{print $1}'); fi
+digest=$(sha256sum "$payload")
+digest=${digest%% *}
 fake_atom=$work/releases.atom
 cat > "$fake_atom" <<EOF
 <?xml version="1.0"?><feed><entry><link href="https://github.com/laputa-systems/python-build/releases/tag/${tag}"/><updated>2026-11-14T00:00:00Z</updated></entry></feed>

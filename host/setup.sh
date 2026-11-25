@@ -51,7 +51,7 @@ setup_github_ssh_key() {
     github_key=$setup_home/.ssh/github.pub
     [ -x "$setup_home/.local/bin/gh" ] || die 'gh is not installed for the setup user'
     [ -f "$github_key" ] && [ ! -L "$github_key" ] || die "missing public key: $github_key"
-    [ "$(stat -c %u "$github_key")" = "$setup_uid" ] || die "$github_key is not owned by $setup_user"
+    [ -n "$(find "$github_key" -prune -user "$setup_uid")" ] || die "$github_key is not owned by $setup_user"
 
     if [ "$(id -u)" -ne 0 ] && [ "$(id -u)" -ne "$setup_uid" ]; then
         say "GitHub login and key upload must run as $setup_user; run setup.sh from that account"

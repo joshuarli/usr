@@ -32,11 +32,8 @@ done
 printf '%s\n' "$url" >> "$SHIM_TEST_LOG"
 
 sha256_of() {
-    if command -v sha256sum >/dev/null 2>&1; then
-        sha256sum "$1" | awk '{print $1}'
-    else
-        shasum -a 256 "$1" | awk '{print $1}'
-    fi
+    sum=$(sha256sum "$1") || return 1
+    printf '%s\n' "${sum%% *}"
 }
 
 emit() {

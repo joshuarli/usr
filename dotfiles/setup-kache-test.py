@@ -84,7 +84,7 @@ class SetupKacheRecord(unittest.TestCase):
         (self.fixture / "assets/SHA256SUMS").write_text("".join(sums), encoding="utf-8")
         self.env = {
             "HOME": str(self.home),
-            "PATH": f"{self.home / '.cargo/bin'}:{fakes}:/usr/bin:/bin",
+            "PATH": f"{self.home / '.cargo/bin'}:{fakes}:/usr/bin:/bin:/usr/sbin:/sbin",
             "TMPDIR": str(root),
             "FIXTURE": str(self.fixture),
         }
