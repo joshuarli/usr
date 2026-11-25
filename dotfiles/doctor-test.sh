@@ -18,7 +18,7 @@ cp "$repo/tools/sync/main.py" "$repo/tools/sync/dag.py" "$repo/tools/sync/uninst
    "$repo/tools/sync/pi_extensions.py" "$repo/tools/sync/pi_auth.py" "$repo/tools/sync/auth.py" "$fixture/tools/sync/"
 cp "$repo/dotfiles/doctor" "$fixture/dotfiles/doctor"
 printf '#!/bin/sh\nexit 0\n' > "$fixture/dotfiles/migrate-pinact.sh"
-printf '%s\n' 'def default_tools(os_name, arch, profile, server_tools=None):' '    return ["testtool"]' '' 'class SkipInstall(Exception):' '    pass' '' 'class Installer:' '    def __init__(self, home, env=None):' '        self.claims = []' '        self.removed = set()' '        self.changed = False' '    def install(self, tool):' '        raise SkipInstall(tool, "fixture")' > "$fixture/tools/sync/installer.py"
+printf '%s\n' 'def default_tools(os_name, arch, profile, server_tools=None, *, musl_loader=None, rustup=False):' '    return ["testtool"]' '' 'class SkipInstall(Exception):' '    pass' '' 'class Installer:' '    def __init__(self, home, env=None):' '        self.claims = []' '        self.removed = set()' '        self.changed = False' '    def install(self, tool):' '        raise SkipInstall(tool, "fixture")' > "$fixture/tools/sync/installer.py"
 printf '#!/bin/sh\nprintf "Linux\\n"\n' > "$fixture/mock/uname"
 printf '#!/bin/sh\nexit 0\n' > "$fixture/home/.local/bin/testtool"
 printf '#!/bin/sh\nexit 0\n' > "$fixture/home/.local/bin/uv"
@@ -71,7 +71,7 @@ fi
 grep -q 'canonical agent instructions are unavailable' "$fixture/missing-agent"
 
 sh "$fixture/sync" links > "$fixture/relink-agents"
-printf '%s\n' 'def default_tools(os_name, arch, profile, server_tools=None):' '    return ["ffmpeg"]' '' 'class SkipInstall(Exception):' '    pass' '' 'class Installer:' '    def __init__(self, home, env=None):' '        self.claims = []' '        self.removed = set()' '        self.changed = False' '    def install(self, tool):' '        raise SkipInstall(tool, "fixture")' > "$fixture/tools/sync/installer.py"
+printf '%s\n' 'def default_tools(os_name, arch, profile, server_tools=None, *, musl_loader=None, rustup=False):' '    return ["ffmpeg"]' '' 'class SkipInstall(Exception):' '    pass' '' 'class Installer:' '    def __init__(self, home, env=None):' '        self.claims = []' '        self.removed = set()' '        self.changed = False' '    def install(self, tool):' '        raise SkipInstall(tool, "fixture")' > "$fixture/tools/sync/installer.py"
 printf '#!/bin/sh\nexit 0\n' > "$HOME/.local/bin/ffmpeg"
 chmod +x "$HOME/.local/bin/ffmpeg"
 if sh "$fixture/sync" doctor > "$fixture/half-pair"; then
@@ -86,7 +86,7 @@ chmod +x "$HOME/.local/bin/ffprobe"
 sh "$fixture/sync" doctor > "$fixture/full-pair"
 grep -q 'ok: doctor passed' "$fixture/full-pair"
 
-printf '%s\n' 'def default_tools(os_name, arch, profile, server_tools=None):' '    return ["gluon", "lz"]' '' 'class SkipInstall(Exception):' '    pass' '' 'class Installer:' '    def __init__(self, home, env=None):' '        self.claims = []' '        self.removed = set()' '        self.changed = False' '    def install(self, tool):' '        raise SkipInstall(tool, "fixture")' > "$fixture/tools/sync/installer.py"
+printf '%s\n' 'def default_tools(os_name, arch, profile, server_tools=None, *, musl_loader=None, rustup=False):' '    return ["gluon", "lz"]' '' 'class SkipInstall(Exception):' '    pass' '' 'class Installer:' '    def __init__(self, home, env=None):' '        self.claims = []' '        self.removed = set()' '        self.changed = False' '    def install(self, tool):' '        raise SkipInstall(tool, "fixture")' > "$fixture/tools/sync/installer.py"
 for launcher in meson ninja gluon-build less; do
     printf '#!/bin/sh\nexit 0\n' > "$HOME/.local/bin/$launcher"
     chmod +x "$HOME/.local/bin/$launcher"
