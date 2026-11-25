@@ -28,7 +28,8 @@ case "${1:-}" in
 esac
 
 [ "$#" -eq 0 ] || die "unexpected argument: $1"
-[ "$(uname -s)" = Darwin ] || die 'macOS only'
+os=$(uname -s) || die 'uname failed'
+[ "$os" = Darwin ] || die 'macOS only'
 
 pid=$(pgrep -x fseventsd || true)
 [ -n "$pid" ] || die 'fseventsd is not running'
@@ -37,18 +38,24 @@ printf 'fseventsd pid: %s\n' "$pid"
 ps -p "$pid" -o pid,etime,%cpu,%mem,rss,state,command
 
 printf '\nlaunchd state:\n'
-launchctl print system/com.apple.fseventsd 2>/dev/null |
+launchd_state=$(launchctl print system/com.apple.fseventsd) || die 'launchctl print failed'
+printf '%s\n' "$launchd_state" |
     grep -E '^[[:space:]]*(state|runs|pid|last exit code) =' ||
-    printf 'unavailable\n'
+    printf '  no state fields found\n'
 
 count_log() {
-    log show --predicate "$1" --last "$last" --style compact 2>/dev/null |
-        grep -c "$2" || true
+    log_output=$(log show --predicate "$1" --last "$last" --style compact) || return 1
+    count_status=0
+    count=$(printf '%s\n' "$log_output" | grep -c "$2") || count_status=$?
+    case $count_status in
+        0|1) printf '%s\n' "$count" ;;
+        *) return "$count_status" ;;
+    esac
 }
 
-scan_old=$(count_log 'process == "fseventsd" AND eventMessage CONTAINS "scan_old"' scan_old)
-leaked=$(count_log 'process == "fseventsd" AND eventMessage CONTAINS "did not find client"' 'did not find client')
-clients=$(count_log 'process == "fseventsd" AND eventMessage CONTAINS "fsevent_add_client"' fsevent_add_client)
+scan_old=$(count_log 'process == "fseventsd" AND eventMessage CONTAINS "scan_old"' scan_old) || die 'failed to read scan_old log'
+leaked=$(count_log 'process == "fseventsd" AND eventMessage CONTAINS "did not find client"' 'did not find client') || die 'failed to read client removal log'
+clients=$(count_log 'process == "fseventsd" AND eventMessage CONTAINS "fsevent_add_client"' fsevent_add_client) || die 'failed to read client log'
 
 printf '\nUnified log, last %s:\n' "$last"
 printf '  scan_old mount retries: %s\n' "$scan_old"
@@ -57,12 +64,14 @@ printf '  fsevent_add_client calls: %s\n' "$clients"
 
 if [ "$clients" -gt 0 ]; then
     printf '\nTop FSEvent client callers:\n'
-    log show --predicate 'process == "fseventsd" AND eventMessage CONTAINS "fsevent_add_client"' --last "$last" --style compact 2>/dev/null |
-        grep -oE 'pid [0-9]+' | sort | uniq -c | sort -rn | head -10 || true
+    caller_log=$(log show --predicate 'process == "fseventsd" AND eventMessage CONTAINS "fsevent_add_client"' --last "$last" --style compact) || die 'failed to read client log'
+    printf '%s\n' "$caller_log" | grep -oE 'pid [0-9]+' | sort | uniq -c | sort -rn | head -10 ||
+        printf '  none\n'
 fi
 
 printf '\nNon-APFS mounts (fseventsd cannot track these):\n'
-mount | grep -vE '^/dev/disk' || printf '  none\n'
+mounts=$(mount) || die 'mount failed'
+printf '%s\n' "$mounts" | grep -vE '^/dev/disk' || printf '  none\n'
 
 printf '\nAssessment:\n'
 if [ "$scan_old" -gt 0 ] || [ "$leaked" -gt 0 ]; then
