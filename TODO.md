@@ -475,7 +475,7 @@ Next: 153
 - **Where:** tools/sync/main.py:455; docs/development.md:5
 - **Problem:** sh sync check-parallel runs pytest over tools, dotfiles and host/macos through uvx with a pinned plugin and Python 3.15; it covers Python only but picks up suites the registry omits, and no Makefile target or CI job uses it, so the repository has two disagreeing definitions of the full suite. Unproven: not run.
 - **Recommendation:** Decide whether check-parallel becomes the documented full tier or is removed once the registry covers every suite. Acceptance: one documented full-suite entrypoint.
-- **Fix with:** debloat
+- **Fix with:** simplify
 - **Effort:** S
 
 ### USR-126 · P4 · sync links --json mixes LINK lines into its JSON output
