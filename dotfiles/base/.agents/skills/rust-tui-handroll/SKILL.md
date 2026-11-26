@@ -12,45 +12,25 @@ Remove the framework by making the old binary the oracle. Capture what it actual
 
 ## 1. Freeze the oracle first
 
-Add a PTY harness such as `laputa-ptytest` before touching the renderer. Keep the framework installed for this phase.
-
-- Run the real binary through a kernel PTY, not a test backend. The test backend shares the framework's own layout and diff logic, so it cannot prove the replacement matches the terminal.
-- Make the app deterministic: hermetic environment, isolated home/config/state, fixed locale and timezone, fixed terminal sizes, and a fixture session instead of the network. Use the app's existing session/API seam; add a feature-gated fixture binary or example only when no seam can be driven from a binary.
-- Capture start-up, every pane and modal, empty/loading/error states, long and wide text, narrow and short terminals, navigation, typed Unicode, resize, mouse, quit, and terminal restoration. Use at least one ordinary size, one cramped size, and one wide size.
-- Store semantic snapshots (text, attributes, cursor, modes) and commit them. Raw byte goldens are for lifecycle sequences only; a replacement may legitimately diff or batch output differently.
-- Run the suite against the untouched app and keep it green before replacing anything.
+Follow the [PTY oracle procedure](references/pty-oracle.md) to capture and verify the untouched binary before replacing the renderer. It owns the harness, fixture boundaries, scenario matrix, and snapshots.
 
 ## 2. Inventory the real surface
 
-List every framework item the app touches: terminal lifecycle, input decoding, layout constraints, text and width handling, blocks, paragraphs, tables, lists, scrolling, styles, cursor placement, and test-only backend calls. Read the framework version's source for the behaviors the snapshots depend on, especially layout distribution, wrapping, borders, table column allocation, and highlight spacing. Classify each item as required behavior or incidental API. Build only the required set.
-
-If the framework's layout is constraint-solver based, porting its setup against the same solver crate is usually smaller and truer than reimplementing distribution by hand. Ratatui 0.30's `Layout` is a Cassowary solve over `kasuari`, and a hand-written waterfill will not match it at tight widths.
+List every framework item the app touches: terminal lifecycle, input decoding, layout constraints, text and width handling, blocks, paragraphs, tables, lists, scrolling, styles, cursor placement, and test-only backend calls. Read the framework version's source for the behaviors the snapshots depend on, using [widget parity](references/widget-parity.md) for the layout and rendering rules to inspect. Classify each item as required behavior or incidental API. Build only the required set.
 
 Prefer a narrow in-repo module with the same concepts the app already uses (`Screen`, `Rect`, `Style`, `Line`, `Block`, `Table`, `Terminal`) over editing every call site at once. Keep the module framework-free; the app must compile with the dependency removed.
 
 ## 3. Build the terminal layer
 
-See [the terminal contract](references/terminal-layer.md) for rustix details.
-
-- Save and restore termios on every exit path, including errors, panic, and signals. Raw mode, alternate screen, cursor visibility, mouse reporting, and bracketed paste are one lifecycle contract.
-- Read the size with `tcgetwinsize`; treat a changed size as a resize event. Read input with `select`/`poll` plus an escape-sequence timeout so a lone Esc is not mistaken for a sequence prefix.
-- Decode the keys and mouse events the app uses, including modifiers, SGR mouse coordinates, paste, and fragmented reads.
-- Keep a cell buffer with symbol, foreground, background, and modifiers. Measure display width with `unicode-width`; handle wide glyphs, wide continuations, combining marks, and the right edge. Diff against the previous frame, or repaint deliberately, but never leave stale cells.
-- Serialize SGR with a reset before each run; do not rely on the terminal inheriting state.
+Implement [the terminal contract](references/terminal-layer.md): lifecycle, resize, input, cell model, and output. Keep these operations below the widgets, with one owner for terminal state.
 
 ## 4. Hillclimb to parity
 
-Run the oracle snapshots against the new binary after each slice, one behavior area at a time.
-
-1. Fix content and placement first, then colors and modifiers, then cursor position and visibility, then lifecycle bytes.
-2. Compare semantic screens; only when they match compare normalized raw output. Normalize only real nondeterminism (timing, diff strategy, cursor movement between equal cells), never visible content.
-3. When a screen differs, solve the smallest rule that explains it: a layout split, border cell, padding, column allocation, wrap point, clipping rule, or highlight column. Add a unit test for that rule before moving on.
-4. Keep the oracle snapshots passing while adding tests for the new layer's own edge cases (wide chars, zero-size areas, one-cell terminals, scrolling past the end).
-5. Do not tune to one terminal. Run the matrix at cramped, ordinary, and wide sizes; text that fits one size often wraps or clips differently at another.
-
-The loop ends when every scenario matches, not when the code compiles.
+Follow the [oracle comparison loop](references/pty-oracle.md#hillclimb-to-parity) after each slice. Use the [widget parity traps](references/widget-parity.md#parity-traps) to locate mismatches. Continue until every scenario matches.
 
 ## 5. Cut over
+
+Remove the framework only after the complete PTY scenario matrix matches.
 
 - Remove the framework, its re-exported backend/event crates, and test-only framework backends from `Cargo.toml` and the lockfile.
 - Keep the PTY fixtures, snapshots, and focused tests; delete throwaway comparison scripts and any fixture hook that is not needed by the retained suite.

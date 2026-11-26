@@ -8,7 +8,7 @@ depend on, then implement only those.
 
 - A split distributes an area along one axis. `Length` is fixed, `Fill` shares
   the remainder by weight, `Percentage` is proportional, `Min`/`Max` clamp.
-- Modern ratatui uses a Cassowary solver, not a waterfill. Constraints have
+- Ratatui's `Layout` uses a Cassowary solver, not a waterfill. Constraints have
   strengths: spacing and explicit lengths dominate `Fill`, and a short area can
   shrink any fixed segment while keeping the others. Do not infer a rule from a
   few widths; probe the real solver at cramped, ordinary, and wide sizes.

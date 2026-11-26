@@ -360,6 +360,19 @@ export function makeHybridBridge(api: PiAdapter, command = {
     if (holder === null) return
     try { await advance(dir, holder) } catch { /* claimWorktree reports the holder */ }
   }
+  /** Persist ownership before launch; execution failures stay outside this lease rollback boundary. */
+  async function claimAdmission(s: Session, leaseDir: string): Promise<void> {
+    await settleHolder(leaseDir, s.cwd)
+    claimWorktree(leaseDir, s.cwd, s.id)
+    try {
+      const owner = await ownerResolver?.(leaseDir)
+      if (owner) s.owner = owner
+      save(s)
+    } catch (error) {
+      releaseWorktree(leaseDir, s.cwd, s.id)
+      throw error
+    }
+  }
   async function advance(cwd: unknown, id: unknown, reconcileDetached = false): Promise<{ session: Session; known?: Known }> {
     return withSessionLock(cwd, id, async (s) => {
       if (s.pending_steer && (!callerAlive(s.pending_steer.caller_pid) || (reconcileDetached && s.pending_steer.phase === "relaunching"))) {
@@ -542,16 +555,7 @@ export function makeHybridBridge(api: PiAdapter, command = {
           task, lane_branch: currentBranch(dir), plan, execution: { kind: "transition", to: target }, attempts: 0,
           ...(admitting_parent === undefined ? {} : { admitting_parent }) }
         const leaseDir = stateDir(dir)
-        await settleHolder(leaseDir, dir)
-        claimWorktree(leaseDir, dir, s.id)
-        try {
-          const owner = await ownerResolver?.(leaseDir)
-          if (owner) s.owner = owner
-          save(s)
-        } catch (error) {
-          releaseWorktree(leaseDir, dir, s.id)
-          throw error
-        }
+        await claimAdmission(s, leaseDir)
         activateProcess(s, target, launch(s, target, prompt(s)))
         s.attempts = 1
         save(s)
@@ -596,16 +600,7 @@ export function makeHybridBridge(api: PiAdapter, command = {
           title: required(title, "title", 100), scope: scopeFor(scopeInput, tierInput, dir),
           task, lane_branch: currentBranch(dir), plan, execution: { kind: "transition", to: { executor: "pi", selection: admitted } }, attempts: 0,
           ...(admitting_parent === undefined ? {} : { admitting_parent }) }
-        await settleHolder(leaseDir, dir)
-        claimWorktree(leaseDir, dir, s.id)
-        try {
-          const owner = await ownerResolver?.(leaseDir)
-          if (owner) s.owner = owner
-          save(s)
-        } catch (error) {
-          releaseWorktree(leaseDir, dir, s.id)
-          throw error
-        }
+        await claimAdmission(s, leaseDir)
         try {
           const started = await api(admitted).start(s.cwd, s.title, prompt(s), s.tier === "scout")
           activatePi(s, admitted, started.session_id)
@@ -626,16 +621,7 @@ export function makeHybridBridge(api: PiAdapter, command = {
           task, lane_branch: currentBranch(dir), plan, execution: { kind: "transition", to: commandTarget }, attempts: 0,
           ...(admitting_parent === undefined ? {} : { admitting_parent }) }
         const leaseDir = stateDir(dir)
-        await settleHolder(leaseDir, dir)
-        claimWorktree(leaseDir, dir, s.id)
-        try {
-          const owner = await ownerResolver?.(leaseDir)
-          if (owner) s.owner = owner
-          save(s)
-        } catch (error) {
-          releaseWorktree(leaseDir, dir, s.id)
-          throw error
-        }
+        await claimAdmission(s, leaseDir)
         const store = new ExhaustionStore(leaseDir)
         const skipped: string[] = []
         const commandExhausted = targetEnabled(commandTarget) ? store.activeRoute(routeRef(commandTarget)!) : null
@@ -665,16 +651,7 @@ export function makeHybridBridge(api: PiAdapter, command = {
         task, lane_branch: currentBranch(dir), plan, execution: { kind: "transition", to: first }, attempts: 0,
         ...(admitting_parent === undefined ? {} : { admitting_parent }) }
       const leaseDir = stateDir(dir)
-      await settleHolder(leaseDir, dir)
-      claimWorktree(leaseDir, dir, s.id)
-      try {
-        const owner = await ownerResolver?.(leaseDir)
-        if (owner) s.owner = owner
-        save(s)
-      } catch (error) {
-        releaseWorktree(leaseDir, dir, s.id)
-        throw error
-      }
+      await claimAdmission(s, leaseDir)
       if (targetAvailable(first)) {
         activateProcess(s, first, launch(s, first, prompt(s)))
         s.attempts = 1

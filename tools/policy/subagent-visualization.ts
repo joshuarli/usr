@@ -3,9 +3,9 @@ import { dirname, join, resolve } from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
 import { POLICY, type Route } from "../pi-subagent-bridge/src/policy.ts"
 import { HARNESS_LABELS, type HarnessId } from "../pi-subagent-bridge/src/harnesses.ts"
+import { NATIVE_PARENTS } from "./harness-context.ts"
 
 type Policy = typeof POLICY
-const NATIVE_PARENTS = ["opencode", "devin", "command-code", "antigravity", "copilot"] as const
 
 function labels(policy: Policy, ids: readonly HarnessId[]): string {
   return ids.filter(id => policy.harnesses[id]).map(id => HARNESS_LABELS[id]).join(" · ")

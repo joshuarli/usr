@@ -5,7 +5,7 @@ import { POLICY, isBannedModel, type Route } from "../pi-subagent-bridge/src/pol
 import { isTier, PI_RUN_DEADLINE_MS, DEVIN_BRIDGE_DISABLED, type Tier, type BridgeTier } from "../pi-subagent-bridge/src/tier-policy.ts"
 import { gateGenerate } from "./claim.ts"
 import { harnessEnabled, HARNESS_LABELS, piProviderEnabled, type HarnessId } from "../pi-subagent-bridge/src/harnesses.ts"
-import { resumeCommands, resumeLocations, resumeDetails } from "./harness-context.ts"
+import { NATIVE_PARENTS, resumeCommands, resumeLocations, resumeDetails } from "./harness-context.ts"
 
 export type Policy = Omit<typeof POLICY, "rootRoutes" | "tiers"> & {
   readonly tiers: readonly BridgeTier[]
@@ -46,7 +46,9 @@ export function routingTable(policy: Policy): string {
   return ["| Tier | Primary | Fallback (in order) |", "| --- | --- | --- |", ...rows].join("\n")
 }
 
-const NATIVE_PARENTS: readonly HarnessId[] = ["opencode", "devin", "command-code", "antigravity", "copilot"]
+const NATIVE_DESCRIPTIONS: Record<typeof NATIVE_PARENTS[number], (policy: Policy) => string> = {
+  opencode: openCode, devin, "command-code": commandCode, antigravity, copilot,
+}
 
 function enabled(policy: Policy, id: HarnessId): boolean {
   return harnessEnabled(id, policy.harnesses)
@@ -276,7 +278,7 @@ function profiles(policy: Policy) {
   ]
 }
 
-function validatePolicy(policy: Policy): void {
+function validatePolicy(policy: Policy): ReturnType<typeof profiles> {
   if (new Set(policy.tiers).size !== policy.tiers.length) throw new Error("Duplicate policy tier")
   if (!Number.isSafeInteger(policy.nativePi.maxSubagentDepth) || policy.nativePi.maxSubagentDepth < 1)
     throw new Error("Invalid native Pi depth")
@@ -289,7 +291,8 @@ function validatePolicy(policy: Policy): void {
     code(tier)
     for (const route of policy.rootRoutes[tier]) { validateModel(route.model); code(route.effort) }
   }
-  for (const profile of profiles(policy)) {
+  const nativeProfiles = profiles(policy)
+  for (const profile of nativeProfiles) {
     code(profile.name)
     code(profile.pin.providerID)
     validateModel(profile.pin.id)
@@ -297,8 +300,8 @@ function validatePolicy(policy: Policy): void {
     if (!profile.allowed || !policy.nativePi.tools[profile.tier]) throw new Error(`Missing native constraints: ${profile.name}`)
     for (const value of [...profile.allowed, ...policy.nativePi.tools[profile.tier]]) code(value)
   }
-  const profileNames = new Set(profiles(policy).map(profile => profile.name))
-  for (const profile of profiles(policy))
+  const profileNames = new Set(nativeProfiles.map(profile => profile.name))
+  for (const profile of nativeProfiles)
     if (profile.allowed.some(name => !profileNames.has(name))) throw new Error(`Unknown descendant in ${profile.name}`)
   for (const value of policy.antigravityDirect.models) validateModel(value)
   validateModel(policy.antigravityDirect.main.model)
@@ -333,6 +336,7 @@ function validatePolicy(policy: Policy): void {
     code(pin.effort)
   }
   for (const value of Object.values(policy.nativeFallback.claudeModels)) validateModel(value)
+  return nativeProfiles
 }
 
 function destination(root: string, path: string): string {
@@ -349,7 +353,7 @@ function destination(root: string, path: string): string {
 }
 
 export function renderOutputs(root: string, policy: Policy = POLICY): Output[] {
-  validatePolicy(policy)
+  const nativeProfiles = validatePolicy(policy)
   const outputs: Output[] = []
   const inputs = new Map<string, string>()
   function read(path: string): string {
@@ -360,9 +364,9 @@ export function renderOutputs(root: string, policy: Policy = POLICY): Output[] {
     if (outputs.some(output => output.path === path)) throw new Error(`Duplicate generated destination: ${path}`)
     outputs.push({ path, content, previous })
   }
-  function document(path: string, blocks: Blocks): void {
+  function document(path: string, blocks: Blocks, format: "markdown" | "yaml" = "markdown"): void {
     const previous = read(path)
-    emit(path, replaceBlocks(previous, blocks), previous)
+    emit(path, replaceBlocks(previous, blocks, format === "yaml"), previous)
   }
   function json(path: string, project: (data: JsonObject) => void, source = path): void {
     const previous = read(path)
@@ -388,7 +392,7 @@ export function renderOutputs(root: string, policy: Policy = POLICY): Output[] {
     const oldOpenCode = Object.keys(object(object(previous.opencode, "previous opencode").efforts, "previous OpenCode efforts"))
     if (oldNames.some(name => typeof name !== "string" || !/^[a-z][a-z0-9-]*$/.test(name)) ||
         oldOpenCode.some(name => !/^[a-z][a-z0-9-]*$/.test(name))) throw new Error("Invalid previous policy profile membership")
-    const names = new Set(profiles(policy).map(profile => profile.name))
+    const names = new Set(nativeProfiles.map(profile => profile.name))
     const settings = object(JSON.parse(read(`${PROFILE}/settings.json`)) as Json, "Pi settings")
     const sub = object(settings.subagents, "Pi subagents")
     const overrides = object(sub.agentOverrides, "Pi overrides")
@@ -413,7 +417,7 @@ export function renderOutputs(root: string, policy: Policy = POLICY): Output[] {
   const direct = directModels(policy)
   document("dotfiles/base/.agents/skills/orchestrate/SKILL.md", {
     "routing-intro": routingIntro(policy),
-    "native-parents": [openCode(policy), devin(policy), commandCode(policy), antigravity(policy), copilot(policy), nativeFallback(policy)].filter(Boolean).join("\n\n"),
+    "native-parents": [...NATIVE_PARENTS.map(id => NATIVE_DESCRIPTIONS[id](policy)), nativeFallback(policy)].filter(Boolean).join("\n\n"),
     "go-boundary": goBoundary(policy),
     "expert-guidance": expertGuidance(policy),
     "devin-review": devinReview(policy),
@@ -433,33 +437,23 @@ export function renderOutputs(root: string, policy: Policy = POLICY): Output[] {
   document("docs/pi.md", { "routing-summary": summary(policy) })
   document("docs/agent-setup.md", { "routing-summary": summary(policy) })
   for (const pin of Object.values(policy.antigravityDirect.tiers)) {
-    const path = `dotfiles/base/.gemini/config/agents/${pin.name}.md`
-    const previous = read(path)
     const fields = [`model: ${pin.selector}`, "subagent: true", "mainAgent: false"]
-    emit(path, replaceBlocks(previous, { "native-agent": fields.join("\n") }, true), previous)
+    document(`dotfiles/base/.gemini/config/agents/${pin.name}.md`, { "native-agent": fields.join("\n") }, "yaml")
   }
   for (const pin of Object.values(policy.copilotNative)) {
-    const path = `dotfiles/base/.copilot/agents/${pin.name}.agent.md`
-    const previous = read(path)
     const fields = [`model: ${pin.model}`, `reasoning-effort: ${pin.effort}`, "model-policy: required"]
-    emit(path, replaceBlocks(previous, { "native-agent": fields.join("\n") }, true), previous)
+    document(`dotfiles/base/.copilot/agents/${pin.name}.agent.md`, { "native-agent": fields.join("\n") }, "yaml")
   }
   for (const pin of Object.values(policy.commandNative)) {
-    const path = `dotfiles/base/.commandcode/agents/${pin.name}.md`
-    const previous = read(path)
     const fields = [`model: ${pin.model}`, ...("effort" in pin && pin.effort ? [`reasoningEffort: ${pin.effort}`] : [])]
-    emit(path, replaceBlocks(previous, { "native-agent": fields.join("\n") }, true), previous)
+    document(`dotfiles/base/.commandcode/agents/${pin.name}.md`, { "native-agent": fields.join("\n") }, "yaml")
   }
   for (const pin of Object.values(policy.devinNative)) {
-    const path = `dotfiles/base/.config/devin/agents/${pin.name}.md`
-    const previous = read(path)
-    emit(path, replaceBlocks(previous, { "native-agent": `model: ${pin.model}` }, true), previous)
+    document(`dotfiles/base/.config/devin/agents/${pin.name}.md`, { "native-agent": `model: ${pin.model}` }, "yaml")
   }
-  const activeProfiles = profiles(policy).filter(profile => piProviderEnabled(profile.pin.providerID, policy.harnesses))
+  const activeProfiles = nativeProfiles.filter(profile => piProviderEnabled(profile.pin.providerID, policy.harnesses))
   const activeNames = new Set(activeProfiles.map(profile => profile.name))
-  for (const profile of profiles(policy)) {
-    const path = `${PROFILE}/agents/${profile.name}.md`
-    const previous = read(path)
+  for (const profile of nativeProfiles) {
     const frontmatter = [
       `model: ${profile.pin.providerID}/${profile.pin.id}`, `thinking: ${profile.pin.variant}`, "tools:",
       ...policy.nativePi.tools[profile.tier].map(tool => `  - ${tool}`),
@@ -467,7 +461,7 @@ export function renderOutputs(root: string, policy: Policy = POLICY): Output[] {
       profile.allowed.some(name => activeNames.has(name)) ? "allowedAgents:" : "allowedAgents: []",
       ...profile.allowed.filter(name => activeNames.has(name)).map(name => `  - ${name}`),
     ].join("\n")
-    emit(path, replaceBlocks(previous, { "native-profile": frontmatter }, true), previous)
+    document(`${PROFILE}/agents/${profile.name}.md`, { "native-profile": frontmatter }, "yaml")
   }
   json(`${PROFILE}/settings.json`, settings => {
     const sub = object(settings.subagents, "subagents")
@@ -477,7 +471,7 @@ export function renderOutputs(root: string, policy: Policy = POLICY): Output[] {
     scope.enforce = true
     scope.strict = true
     scope.allow = policy.nativePi.modelAllowlist.filter(pin => piProviderEnabled(pin.split("/")[0], policy.harnesses))
-    for (const profile of profiles(policy)) {
+    for (const profile of nativeProfiles) {
       if (!activeNames.has(profile.name)) {
         delete overrides[profile.name]
         delete agents[profile.name]

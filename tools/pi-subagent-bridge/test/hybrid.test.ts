@@ -8,10 +8,10 @@ import { appendFileSync, chmodSync, copyFileSync, existsSync, mkdtempSync, mkdir
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { fileURLToPath } from "node:url"
-import { makeHybridBridge, type Scope } from "./harness-fixtures.ts"
+import { hybridOwnerOps, makeHybridBridge, type Scope } from "./harness-fixtures.ts"
 import { stateDir, readStateDir } from "../src/git.ts"
 import { inspectStored } from "../src/inspect.ts"
-import { STEER_LIMIT, TURN_LIMIT_CONTINUATIONS } from "../src/session.ts"
+import { STEER_LIMIT, TURN_LIMIT_CONTINUATIONS, type ExecutionPlan } from "../src/session.ts"
 import { startCodex, codexResult, cancelCodex, codexSession } from "../src/codex.ts"
 import type { LaunchRequest } from "../src/launch.ts"
 import { ROOT_PLANS, type CliPin, type RootPlan } from "../src/policy.ts"
@@ -119,6 +119,57 @@ const commandCalls = (calls: unknown[]) =>
   calls.filter((value) => !!value && typeof value === "object" && "command" in value)
 const piCreates = (calls: unknown[]) =>
   calls.filter((value) => !!value && typeof value === "object" && "title" in value)
+
+const admissionPlans: ExecutionPlan[] = [
+  { kind: "leaf", target: { executor: "command-code", selection: ROOT_PLANS.worker.command } },
+  { kind: "pi-only", pi: [ROOT_PLANS.worker.pi[0]] },
+  ROOT_PLANS.worker,
+  { ...ROOT_PLANS.worker, kind: "fx-fallback", fx: { provider: "fixture", model: "fixture", effort: "high", runtimeVersion: "0.0.17" } },
+]
+for (const plan of admissionPlans) {
+  for (const outcome of ["owner failure", "save failure", "launch failure", "success"] as const) {
+    test(`admission ownership transaction: ${plan.kind}, ${outcome}`, async () => {
+      const f = fixture()
+      try {
+        const m = fake(f.cwd), directory = stateDir(f.cwd)
+        const owner = { owner_id: "6ac845d5-1aef-4aa1-8e41-308bc07ca98a", owner_generation: 2 }
+        const failure = new Error(outcome)
+        let sessionId = "", ownerCalls = 0, launches = 0
+        const onLaunch = () => {
+          launches++
+          const saved = JSON.parse(readFileSync(join(directory, sessionId + ".json"), "utf8"))
+          assert.deepEqual(saved.owner, owner)
+          assert.equal(saved.plan.kind, plan.kind)
+          assert.equal(saved.execution.kind, "transition")
+          assert.equal(saved.attempts, 0)
+          assert.equal(activeWorktreeOwner(directory, f.cwd), sessionId)
+          if (outcome === "launch failure") throw failure
+        }
+        const bridge = makeHybridBridge(piAdapter({ ...m.api, create: async input => { onLaunch(); return m.api.create(input) } }),
+          { ...m.command, start: request => { onLaunch(); return m.command.start(request) } }, noCodex, () => plan)
+        hybridOwnerOps(bridge)!.setOwnerResolver(state => {
+          ownerCalls++
+          assert.equal(state, directory)
+          sessionId = activeWorktreeOwner(directory, f.cwd)!
+          assert.ok(sessionId)
+          assert.equal(existsSync(join(directory, sessionId + ".json")), false)
+          if (outcome === "owner failure") throw failure
+          if (outcome === "save failure") mkdirSync(join(directory, sessionId + ".json"))
+          return owner
+        })
+        const started = bridge.start(f.cwd, "admission", "worker", f.scope, "Edit README")
+        if (outcome === "success") assert.equal((await started).session_id, sessionId)
+        else if (outcome === "save failure") await assert.rejects(started, { code: "EISDIR" })
+        else await assert.rejects(started, error => error === failure)
+        assert.equal(ownerCalls, 1)
+        assert.equal(launches, outcome === "success" || outcome === "launch failure" ? 1 : 0)
+        const retained = outcome === "success" || (outcome === "launch failure" && plan.kind !== "pi-only")
+        assert.equal(activeWorktreeOwner(directory, f.cwd), retained ? sessionId : null)
+        assert.equal(readdirSync(directory).some(name => name.endsWith(".tmp")), false)
+      } finally { f.close() }
+    })
+  }
+}
 
 function steerable(f: ReturnType<typeof fixture>, m: ReturnType<typeof fake>) {
   const control = { cancelled: false, starts: 0, alwaysRunning: false }

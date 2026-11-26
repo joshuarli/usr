@@ -79,7 +79,7 @@ On the bridge path, call `worker_model_check` for the tier you are about to assi
 
 **Native expert lanes get the bridge's guarantees by hand.** On native-only parents, nothing enforces scope on a native subagent, so the parent supplies what admission would:
 
-- Create its worktree and branch, and name that worktree in the brief as the only place it may write. Write the scope as a bridge scope JSON (`base_revision`, `writable_paths`, `acceptance_proof`, `stop_on`).
+- Create its worktree and branch following [Worktree lifecycle](#worktree-lifecycle). Write the scope as a bridge scope JSON (`base_revision`, `writable_paths`, `acceptance_proof`, `stop_on`).
 - Put the bridge's worker contract in the brief: commit only on the lane branch, never amend pre-existing commits, merge, rebase, switch branches or push; keep working until the acceptance proof is met or a listed stop condition applies; end with a proof record of exact commands, exit codes and decisive output, and a final `ACCEPTANCE: met` or `ACCEPTANCE: not met` line.
 - Register it with `pi-subagent-bridge scope-check CWD SCOPE_JSON_FILE BRANCH --register TITLE` and retain the returned lane ID. When it finishes, from the repository run `pi-subagent-bridge scope-check --lane ID`. It reports changed and out-of-scope paths since `base_revision` and whether HEAD stayed on the lane, and exits 1 when either fails. Then review the diff as for any worker.
 
@@ -89,9 +89,9 @@ On the bridge path, call `worker_model_check` for the tier you are about to assi
 
 Use the MCP tools `worker_model_check`, `worker_start`, `worker_status`, `worker_resume`, `worker_cancel`, or the `pi-subagent-bridge` CLI shim where a harness has no MCP (see `tools/pi-subagent-bridge/README.md`).
 
-Create a clean worktree under `.work/wt/<slice>`, call `worker_model_check`, then `worker_start`. The schema enforces the scope's shape; the judgment is yours: `acceptance_proof` is a named command with its expected result (or a source file:line for research), `attempt_limit` is 1 unless one same-scope correction is justified, and `stop_on` covers ambiguity, scope expansion, new dependencies, contract changes, and unavailable proof. The `brief` states one outcome, the relevant facts, prohibited changes, and whether an allowed level of nested fanout is justified.
+Create a clean worktree following [Worktree lifecycle](#worktree-lifecycle), call `worker_model_check`, then `worker_start`. The schema enforces the scope's shape; the judgment is yours: `acceptance_proof` is a named command with its expected result (or a source file:line for research), `attempt_limit` is 1 unless one same-scope correction is justified, and `stop_on` covers ambiguity, scope expansion, new dependencies, contract changes, and unavailable proof.
 
-**Admission is not completion.** Run the `watch` command that `worker_start` returns as a background task, so the harness wakes you when the worker ends; never end a turn on an admitted worker without one. The default idle threshold is 45 minutes. Then read `worker_status`. For a reviewed same-scope correction, `worker_resume` may add up to two lifetime attempts with `extend_attempts` and `extension_reason`. State `incomplete` means the worker exited without a final `ACCEPTANCE: met`; treat it as unaccepted work, not success. For unmet acceptance, check `stopped_on` and `stop_condition_valid` against the assigned stop conditions. It reports the actual backend, model, thinking/effort, changed paths, out-of-scope changes, and whether HEAD stayed pinned. Require exact commands, exit codes and decisive output; prose is only a claim.
+**Admission is not completion.** Bridge workers do not deliver native harness notifications. Run the `watch` command that `worker_start` returns as a background task, so the harness wakes you when the worker ends; never end a turn on an admitted worker without one. The default idle threshold is 45 minutes. Then read `worker_status`. Never restart a worker merely because the parent lost its notification. For a reviewed same-scope correction, `worker_resume` may add up to two lifetime attempts with `extend_attempts` and `extension_reason`. State `incomplete` means the worker exited without a final `ACCEPTANCE: met`; treat it as unaccepted work, not success. For unmet acceptance, check `stopped_on` and `stop_condition_valid` against the assigned stop conditions. It reports the actual backend, model, thinking/effort, changed paths, out-of-scope changes, and whether HEAD stayed pinned. Require exact commands, exit codes and decisive output; prose is only a claim.
 
 The parent independently reviews `git diff --check`, the diff against `base_revision` (including commits) and untracked paths once. Verify requested behavior, permitted scope, imports and obvious regressions before integrating. An optional single `worker_resume` correction may touch only the same files, without increasing the attempt budget. Otherwise park or reject. Scouts never commit; other workers may commit on their lane branch. Workers never merge, push, switch branches, or clean worktrees.
 
@@ -124,18 +124,18 @@ Size concurrency for accepted progress, not resource headroom. Serial is the def
 
 When a child reports, a merge lands, or a check fails, reassess ready work and the limiting stage. A briefing, environment, or verification failure gets its cause fixed and at most one retry at the same tier with a materially changed approach. Escalate to a stronger tier only for evidenced reasoning limits; where tiers share a model, use fresh context, never a provider switch. Never repeat an unchanged failure. Owner intent, public contracts, required proof, and permissions stay fixed unless the owner changes them.
 
-Give every parallel writer its own worktree, created by you with `git worktree add .work/wt/<name> -b <branch>` and named in the brief as the only place it may write. A child's final report is not shown to the user: relay what matters. Bridge workers do not deliver native harness notifications; use `pi-subagent-bridge watch` where available and inspect `worker_status` when complete. Never restart a worker merely because the parent lost its notification.
+A child's final report is not shown to the user: relay what matters.
 
 Carry forward findings and failed approaches. Every child gets:
 
 - Clear ownership and write boundaries.
-- A concrete deliverable with only the needed context.
+- A brief stating one outcome, relevant facts, prohibited changes, and whether an allowed level of nested fanout is justified; include only the needed context.
 - Proportionate checks, an attempt limit, and a stopping condition.
 - The current campaign ruling, plus a duty to report misleading metrics, repeated gate failures, or shared blockers rather than work around them.
 
 ## Worktree lifecycle
 
-The parent owns each child worktree from creation through removal. Every skill that removes worktrees or branches follows this section. Record its exact path, its branch when it has one, and the integration worktree when you create it or the harness creates it. A child finishing does not remove its worktree. Remove only the recorded path, never every entry under `.work/wt/`.
+The parent owns each child worktree from creation through removal. Create bridge worktrees under `.work/wt/`. Give every parallel writer its own with `git worktree add .work/wt/<name> -b <branch>`. Name the assigned worktree in the brief as the only place the child may write. Record its exact path, its branch when it has one, and the integration worktree at creation, including harness-created worktrees. Every skill that removes worktrees or branches follows this section. A child finishing does not remove its worktree. Remove only the recorded path, never every entry under `.work/wt/`.
 
 Treat retirement as part of accepting the lane, regardless of free disk space. A harness exit hook may not retire a finished subagent lane; the parent must explicitly retire it. Separately, unsolicited cleanup sweeps require an `agent-disk-pressure` notice and a fresh reading strictly below 16 GiB; use `cleanup`, never periodic model polling. Workers report pressure to their parent and keep their assigned scope.
 

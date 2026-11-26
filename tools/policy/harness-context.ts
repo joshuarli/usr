@@ -1,5 +1,8 @@
 import { harnessEnabled, type HarnessId, type HarnessSwitches } from "../pi-subagent-bridge/src/harnesses.ts"
 
+/** Native-only parents, in the order used by policy prose and its decision graph. */
+export const NATIVE_PARENTS = ["opencode", "devin", "command-code", "antigravity", "copilot"] as const satisfies readonly HarnessId[]
+
 type Entry = readonly [HarnessId, string]
 
 const COMMANDS: readonly Entry[] = [

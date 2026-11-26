@@ -2,7 +2,12 @@
 
 The old binary is the oracle. A real PTY gives it a terminal, so it exercises the
 same raw mode, alternate screen, mouse reporting, resize handling, and output
-diffing the user gets. An in-process test backend does not.
+diffing the user gets. An in-process test backend shares the framework's layout
+and diff logic, so it cannot prove that the replacement matches the terminal.
+
+Add the harness before touching the renderer and keep the framework installed
+for this phase. Run the suite against the untouched app and keep it green before
+replacing anything.
 
 ## Harness shape
 
@@ -26,7 +31,7 @@ At minimum:
 | Geometry | 80x24, 40x12, 200x60, one very short and one very narrow |
 | Content | empty, loading, error, populated, very long names, Unicode and emoji |
 | Navigation | every pane/tab, focus changes, paging, home/end, filter, command bar |
-| Modals | help, settings, chat, browse, room list, confirmation |
+| Modals | every modal, including help, settings, chat, browse, room list, confirmation |
 | Editing | ASCII, Unicode, backspace, delete, cursor movement, paste |
 | Resize | grow, shrink, cross a layout breakpoint |
 | Mouse | click, drag, wheel, coordinates at edges |
@@ -54,15 +59,19 @@ when styling matters, which is almost always.
 
 The fixture must run the real UI, not a parallel renderer:
 
-- If the app already takes an `Arc<dyn SessionApi>` (or equivalent), implement a
-  deterministic fixture session and add a small feature-gated example binary.
+- Use the existing session/API seam, such as `Arc<dyn SessionApi>`, with a
+  deterministic fixture session. Add a small feature-gated fixture binary or
+  example only when no existing seam can be driven from a binary.
 - The example enters and restores the terminal exactly like the real binary.
 - Keep fixture-only state out of release builds; use a Cargo feature or a
   separate example target.
 - If the app cannot run without login, still capture the login screen from the
   real binary with no credentials; a fixture is only needed past that point.
 
-## Hillclimb order
+## Hillclimb to parity
+
+Run the oracle snapshots against the new binary after each slice, one behavior
+area at a time. Fix differences in this order:
 
 1. Content and placement.
 2. Style and modifiers.
@@ -71,4 +80,17 @@ The fixture must run the real UI, not a parallel renderer:
 5. Raw output, if it matters.
 
 Run only the failing scenario while developing; run the whole matrix at each
-slice boundary.
+slice boundary, including cramped, ordinary, and wide sizes.
+
+Compare semantic screens first. Only after they match compare normalized raw
+output where it matters; a different diff strategy or cursor movement between
+equal cells need not produce identical bytes. Never normalize away visible
+content.
+
+For a mismatch, fix the smallest rule that explains it: a layout split, border,
+padding, column allocation, wrap point, clipping rule, or highlight column. Add a
+unit test for that rule before moving on. Keep the oracle snapshots passing
+while testing the new layer's edge cases: wide characters, zero-size areas,
+one-cell terminals, and scrolling past the end.
+
+The loop ends when every scenario matches, not when the code compiles.
