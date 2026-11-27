@@ -1,0 +1,236 @@
+#!/usr/bin/env python3
+"""Resume a stopped agent session in a tmux pane with the message "continue"."""
+from __future__ import annotations
+
+import argparse
+import datetime as dt
+import json
+import os
+import signal
+import sqlite3
+import subprocess
+import sys
+from pathlib import Path
+
+HOME = Path.home()
+TMUX = "/opt/homebrew/bin/tmux"
+AGY_SUMMARIES = HOME / ".gemini/antigravity-cli/conversation_summaries.db"
+AGY_HISTORY = HOME / ".gemini/antigravity-cli/history.jsonl"
+DEVIN_SESSIONS = HOME / ".local/share/devin/cli/sessions.db"
+STALE_SECONDS = 180
+RECENT_CONTINUE_SECONDS = 120
+HARNESSES = ("agy", "devin")
+SOURCE_REVISION = "35761dbd"
+VERSION = f"0.1.0 ({SOURCE_REVISION})"
+INTERRUPT_SIGNALS = (signal.SIGINT, signal.SIGTERM, signal.SIGHUP, signal.SIGQUIT)
+COMMAND_TIMEOUT_SECONDS = 10
+
+
+class SessionNotFound(Exception):
+    pass
+
+
+class Interrupted(Exception):
+    def __init__(self, signum: int) -> None:
+        super().__init__(f"interrupted by signal {signum}")
+        self.signum = signum
+
+
+def execute_command(*args: str) -> subprocess.CompletedProcess[str]:
+    try:
+        return subprocess.run(
+            args, capture_output=True, text=True, check=False, timeout=COMMAND_TIMEOUT_SECONDS
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError(f"command timed out: {' '.join(args)}") from exc
+
+
+def run(*args: str) -> str:
+    return execute_command(*args).stdout
+
+
+def run_checked(*args: str) -> None:
+    result = execute_command(*args)
+    if result.returncode != 0:
+        reason = result.stderr.strip() or "no diagnostic"
+        raise RuntimeError(f"command failed ({result.returncode}): {reason}: {' '.join(args)}")
+
+
+def install_signal_handlers() -> None:
+    def handler(signum: int, _frame: object) -> None:
+        raise Interrupted(signum)
+
+    for sig in INTERRUPT_SIGNALS:
+        signal.signal(sig, handler)
+
+
+def die_by_signal(signum: int) -> None:
+    signal.signal(signum, signal.SIG_DFL)
+    os.kill(os.getpid(), signum)
+
+
+def now() -> dt.datetime:
+    return dt.datetime.now(dt.timezone.utc)
+
+
+def find_pane(workdir: str, harness: str) -> str | None:
+    panes = run(TMUX, "list-panes", "-a", "-F", "#{pane_id} #{pane_pid} #{pane_current_path}")
+    for line in panes.splitlines():
+        parts = line.split(" ", 2)
+        if len(parts) != 3 or parts[2] != workdir:
+            continue
+        pane, shell_pid = parts[0], parts[1]
+        children = run("pgrep", "-P", shell_pid).split()
+        if any(harness in run("ps", "-o", "command=", "-p", pid) for pid in children):
+            return pane
+    return None
+
+
+def read_only(path: Path) -> sqlite3.Connection:
+    return sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+
+
+def agy_state(workdir: str, stale: int = STALE_SECONDS) -> tuple[str, bool, float, str]:
+    uri = f"file://{workdir}"
+    con = read_only(AGY_SUMMARIES)
+    try:
+        row = con.execute(
+            "select conversation_id, status, last_modified_time, step_count "
+            "from conversation_summaries where workspace_uris like ? "
+            "order by last_modified_time desc limit 1",
+            (f"%{uri}%",),
+        ).fetchone()
+    finally:
+        con.close()
+    if row is None:
+        raise SessionNotFound(f"no agy conversation for {uri}")
+    conversation, status, modified, steps = (str(row[0]), str(row[1]), str(row[2]), int(row[3]))
+    modified_at = dt.datetime.fromisoformat(modified)
+    if modified_at.tzinfo is None:
+        raise ValueError(f"agy conversation {conversation} has a naive last_modified_time")
+    stopped = status == "CASCADE_RUN_STATUS_IDLE" and (now() - modified_at).total_seconds() >= stale
+
+    latest = 0
+    try:
+        with open(AGY_HISTORY, encoding="utf-8") as handle:
+            for line in handle:
+                try:
+                    entry = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if entry.get("conversationId") == conversation and entry.get("display") == "continue":
+                    latest = max(latest, int(entry.get("timestamp", 0)))
+    except FileNotFoundError:
+        pass
+    detail = f"status={status} steps={steps}"
+    return conversation, stopped, latest / 1000, detail
+
+
+def devin_state(workdir: str, stale: int = STALE_SECONDS) -> tuple[str, bool, float, str]:
+    con = read_only(DEVIN_SESSIONS)
+    try:
+        row = con.execute(
+            "select id, last_activity_at from sessions where working_directory = ? "
+            "order by last_activity_at desc limit 1",
+            (workdir,),
+        ).fetchone()
+        latest = 0
+        if row is not None:
+            latest_row = con.execute(
+                "select max(timestamp) from prompt_history "
+                "where session_id = ? and content = 'continue'",
+                (row[0],),
+            ).fetchone()
+            latest = int(latest_row[0] or 0)
+    finally:
+        con.close()
+    if row is None:
+        raise SessionNotFound(f"no devin session for {workdir}")
+    session_id, activity = str(row[0]), int(row[1])
+    stopped = (now() - dt.datetime.fromtimestamp(activity, dt.timezone.utc)).total_seconds() >= stale
+    detail = f"last_activity={activity}"
+    return session_id, stopped, float(latest), detail
+
+
+def send_continue(pane: str) -> None:
+    try:
+        run_checked(TMUX, "send-keys", "-t", pane, "C-u")
+        run_checked(TMUX, "send-keys", "-t", pane, "-l", "continue")
+        run_checked(TMUX, "send-keys", "-t", pane, "Enter")
+    except Interrupted:
+        execute_command(TMUX, "send-keys", "-t", pane, "C-u")
+        raise
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description=__doc__,
+        epilog=(
+            "examples:\n"
+            "  session-supervisor --workdir /Users/josh/repos/tf agy\n"
+            "  session-supervisor --workdir /Users/josh/repos/tf devin --dry-run\n"
+            "  session-supervisor --workdir /Users/josh/repos/tf agy --stale 300\n"
+            "\n"
+            "signals:\n"
+            "  INT, TERM, HUP and QUIT stop before the next tmux key and exit by that\n"
+            "  signal (130 for INT); a second signal during cleanup exits immediately\n"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument("harness", choices=HARNESSES, help="harness whose session is supervised")
+    parser.add_argument("--workdir", default=os.getcwd(), help="directory hosting the session (default: cwd)")
+    parser.add_argument(
+        "--stale", type=int, default=STALE_SECONDS,
+        help="seconds without progress before sending continue (default: 180)",
+    )
+    parser.add_argument("--dry-run", action="store_true", help="report the decision without typing into the pane")
+    parser.add_argument("--version", action="version", version=f"session-supervisor {VERSION}")
+    return parser
+
+
+def execute(args: argparse.Namespace) -> int:
+    workdir = str(Path(args.workdir).resolve())
+
+    pane = find_pane(workdir, args.harness)
+    if pane is None:
+        print(f"[{now():%FT%T%z}] no {args.harness} pane in {workdir}; no action")
+        return 0
+
+    session_id, stopped, last_continue, detail = (
+        agy_state(workdir, args.stale) if args.harness == "agy" else devin_state(workdir, args.stale)
+    )
+    if not stopped:
+        print(f"[{now():%FT%T%z}] {args.harness} {session_id} active: {detail}; no action")
+        return 0
+
+    if last_continue and now().timestamp() - last_continue < RECENT_CONTINUE_SECONDS:
+        print(f"[{now():%FT%T%z}] {args.harness} {session_id} stopped but continue was just sent; no action")
+        return 0
+
+    if not args.dry_run:
+        send_continue(pane)
+    verb = "would send" if args.dry_run else "sent"
+    print(f"[{now():%FT%T%z}] {args.harness} {session_id} stopped: {detail}; {verb} continue to {pane}")
+    return 0
+
+
+def main() -> int:
+    parser = build_parser()
+    if len(sys.argv) == 1:
+        parser.print_help()
+        return 0
+    args = parser.parse_args()
+    install_signal_handlers()
+    try:
+        return execute(args)
+    except Interrupted as exc:
+        print(f"session-supervisor: interrupted by signal {exc.signum}", file=sys.stderr)
+        die_by_signal(exc.signum)
+        return 128 + exc.signum
+    except (SessionNotFound, RuntimeError, OSError, sqlite3.Error, TypeError, ValueError) as exc:
+        print(f"session-supervisor: {exc}", file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
