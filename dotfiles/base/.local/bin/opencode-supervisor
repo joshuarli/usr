@@ -1,20 +1,22 @@
 #!/usr/bin/env python3
-"""Resume a paused opencode goal in a tmux pane, then send "continue"."""
+"""Find the newest opencode session in a directory and, after confirmation, resume a paused goal with "continue"."""
 from __future__ import annotations
 
 import argparse
 import datetime as dt
 import json
 import os
+import shutil
 import signal
 import sqlite3
 import subprocess
 import sys
 import time
 from pathlib import Path
+from typing import TypedDict
 
 HOME = Path.home()
-TMUX = "/opt/homebrew/bin/tmux"
+TMUX = shutil.which("tmux") or "/opt/homebrew/bin/tmux"
 OPENCODE_DB = HOME / ".local/share/opencode/opencode.db"
 GOAL_KEY_PREFIX = "plugin:" + "opencode.goal".encode("utf-16-be").hex() + ":session:"
 STALE_SECONDS = 180
@@ -22,10 +24,23 @@ RECENT_RESUME_SECONDS = 120
 RESUME_COMMAND = "/goal resume"
 CONTINUE_MESSAGE = "continue"
 RESUME_WAIT_SECONDS = 10
-SOURCE_REVISION = "4e197232"
+SOURCE_REVISION = "3b3fd7c2"
 VERSION = f"0.1.0 ({SOURCE_REVISION})"
 INTERRUPT_SIGNALS = (signal.SIGINT, signal.SIGTERM, signal.SIGHUP, signal.SIGQUIT)
 COMMAND_TIMEOUT_SECONDS = 10
+
+
+class Goal(TypedDict):
+    status: str
+    updatedAt: int
+    objective: str
+
+
+class Session(TypedDict):
+    pane: str
+    id: str
+    title: str
+    updated: int
 
 
 class SessionNotFound(Exception):
@@ -115,7 +130,33 @@ def pane_session(shell_child: str, workdir: str) -> str | None:
     return str(row[0]) if row else None
 
 
-def goal_state(session_id: str) -> dict[str, object]:
+def detect_session(workdir: str) -> Session | None:
+    found: list[Session] = []
+    for pane, child in find_panes(workdir):
+        session_id = pane_session(child, workdir)
+        if session_id is None:
+            continue
+        con = read_only()
+        try:
+            row = con.execute(
+                "select title, time_updated from session_v2 where id = ?", (session_id,)
+            ).fetchone()
+        finally:
+            con.close()
+        if row is None:
+            continue
+        found.append(
+            {
+                "pane": pane,
+                "id": session_id,
+                "title": str(row[0] or "untitled"),
+                "updated": int(row[1] or 0),
+            }
+        )
+    return max(found, key=lambda session: session["updated"]) if found else None
+
+
+def goal_state(session_id: str) -> Goal:
     con = read_only()
     try:
         row = con.execute("select value from kv where key = ?", (GOAL_KEY_PREFIX + session_id,)).fetchone()
@@ -124,14 +165,22 @@ def goal_state(session_id: str) -> dict[str, object]:
     if row is None:
         raise SessionNotFound(f"no goal for opencode session {session_id}")
     try:
-        goal = json.loads(str(row[0]))
+        raw = json.loads(str(row[0]))
     except json.JSONDecodeError as exc:
         raise ValueError(f"corrupt goal for session {session_id}") from exc
-    if goal.get("status") not in ("active", "paused", "complete") or not isinstance(
-        goal.get("updatedAt"), int
+    if not isinstance(raw, dict):
+        raise ValueError(f"invalid goal for session {session_id}")
+    status = raw.get("status")
+    updated_at = raw.get("updatedAt")
+    objective = raw.get("objective")
+    if (
+        status not in ("active", "paused", "complete")
+        or not isinstance(updated_at, int)
+        or isinstance(updated_at, bool)
+        or not isinstance(objective, str)
     ):
         raise ValueError(f"invalid goal for session {session_id}")
-    return goal
+    return {"status": status, "updatedAt": updated_at, "objective": objective}
 
 
 def last_resume(session_id: str) -> float:
@@ -149,42 +198,46 @@ def last_resume(session_id: str) -> float:
             message = json.loads(str(data))
         except json.JSONDecodeError:
             continue
-        metadata = message.get("metadata") or {}
-        text = str(message.get("text", ""))
-        if metadata.get("source") == "goal" and "resumed the goal" in text:
-            return int(message.get("time", {}).get("created", 0)) / 1000
+        if not isinstance(message, dict):
+            continue
+        metadata = message.get("metadata")
+        text = message.get("text")
+        timestamp = message.get("time")
+        if not isinstance(metadata, dict) or metadata.get("source") != "goal":
+            continue
+        if not isinstance(text, str) or "resumed the goal" not in text:
+            continue
+        if not isinstance(timestamp, dict):
+            continue
+        created = timestamp.get("created")
+        if isinstance(created, int) and not isinstance(created, bool):
+            return created / 1000
     return 0.0
 
 
-def paused_goal(workdir: str, stale: int) -> tuple[str, str, str, str] | None:
-    for pane, child in find_panes(workdir):
-        session_id = pane_session(child, workdir)
-        if session_id is None:
-            continue
-        try:
-            goal = goal_state(session_id)
-        except SessionNotFound:
-            continue
-        if goal["status"] != "paused":
-            continue
-        age = (int(now().timestamp() * 1000) - int(goal["updatedAt"])) / 1000
-        if age < stale:
-            continue
-        last = last_resume(session_id)
-        if last and now().timestamp() - last < RECENT_RESUME_SECONDS:
-            continue
-        return pane, session_id, str(goal["objective"]), f"paused {int(age)}s"
-    return None
+def confirm(prompt: str) -> bool:
+    try:
+        answer = input(f"{prompt} [y/N] ")
+    except EOFError:
+        return False
+    return answer.strip().lower() in ("y", "yes")
 
 
 def send_keys(pane: str, text: str) -> None:
+    run_checked(TMUX, "send-keys", "-t", pane, "C-u")
+    sent = False
     try:
-        run_checked(TMUX, "send-keys", "-t", pane, "C-u")
         run_checked(TMUX, "send-keys", "-t", pane, "-l", text)
         run_checked(TMUX, "send-keys", "-t", pane, "Enter")
-    except Interrupted:
-        execute_command(TMUX, "send-keys", "-t", pane, "C-u")
-        raise
+        sent = True
+    finally:
+        if not sent:
+            result = execute_command(TMUX, "send-keys", "-t", pane, "C-u")
+            if result.returncode != 0:
+                print(
+                    f"opencode-supervisor: line cleanup failed in {pane}: {result.stderr.strip()}",
+                    file=sys.stderr,
+                )
 
 
 def wait_for_active(session_id: str, timeout: float = RESUME_WAIT_SECONDS) -> bool:
@@ -208,9 +261,15 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=__doc__,
         epilog=(
+            "With no arguments, finds the most recently updated opencode session in the current\n"
+            "directory and asks before supervising it. A goal is supervised only when paused.\n"
+            "Requires tmux on PATH; tested on macOS with Homebrew tmux.\n"
+            "\n"
             "examples:\n"
-            "  opencode-supervisor --workdir /Users/josh/repos/laputa-systems/asterinas\n"
-            "  opencode-supervisor --workdir /Users/josh/repos/tf --dry-run\n"
+            "  opencode-supervisor\n"
+            "  opencode-supervisor --yes\n"
+            "  opencode-supervisor --workdir /Users/josh/repos/tf --yes\n"
+            "  opencode-supervisor --dry-run\n"
             "  opencode-supervisor --workdir /Users/josh/repos/tf --stale 300\n"
             "\n"
             "signals:\n"
@@ -224,6 +283,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--stale", type=int, default=STALE_SECONDS,
         help="seconds paused before resuming (default: 180)",
     )
+    parser.add_argument("--yes", action="store_true", help="supervise without prompting (for automation)")
     parser.add_argument("--dry-run", action="store_true", help="report the decision without typing into the pane")
     parser.add_argument("--version", action="version", version=f"opencode-supervisor {VERSION}")
     return parser
@@ -231,24 +291,47 @@ def build_parser() -> argparse.ArgumentParser:
 
 def execute(args: argparse.Namespace) -> int:
     workdir = str(Path(args.workdir).resolve())
-    found = paused_goal(workdir, args.stale)
-    if found is None:
-        print(f"[{now():%FT%T%z}] no paused opencode goal in {workdir}; no action")
+    stamp = f"[{now():%FT%T%z}]"
+    session = detect_session(workdir)
+    if session is None:
+        print(f"{stamp} no opencode session in {workdir}; no action")
         return 0
-    pane, session_id, objective, detail = found
-    if not args.dry_run and not resume(pane, session_id):
-        print(f"[{now():%FT%T%z}] opencode {session_id} did not resume; no continue sent", file=sys.stderr)
+    try:
+        goal = goal_state(session["id"])
+    except SessionNotFound:
+        print(f"{stamp} opencode {session['id']} ({session['title']}) has no goal; no action")
+        return 0
+    print(
+        f"{stamp} found opencode {session['id']} ({session['title']}) in {session['pane']}: "
+        f"goal {goal['status']}: {goal['objective']}"
+    )
+    if not args.yes and not confirm("Supervise this session?"):
+        print(f"{stamp} declined; no action")
+        return 0
+    goal = goal_state(session["id"])
+    if goal["status"] != "paused":
+        print(f"{stamp} goal {goal['status']}; no action")
+        return 0
+    age = (int(now().timestamp() * 1000) - goal["updatedAt"]) / 1000
+    if age < args.stale:
+        print(f"{stamp} goal paused {int(age)}s ago; no action")
+        return 0
+    last = last_resume(session["id"])
+    if last and now().timestamp() - last < RECENT_RESUME_SECONDS:
+        print(f"{stamp} continue was just sent; no action")
+        return 0
+    if args.dry_run:
+        print(f"{stamp} would resume {session['id']} and send continue to {session['pane']}")
+        return 0
+    if not resume(session["pane"], session["id"]):
+        print(f"{stamp} opencode {session['id']} did not resume; no continue sent", file=sys.stderr)
         return 1
-    verb = "would resume" if args.dry_run else "resumed"
-    print(f"[{now():%FT%T%z}] opencode {session_id} {detail}: {objective}; {verb} and sent continue to {pane}")
+    print(f"{stamp} resumed {session['id']} and sent continue to {session['pane']}")
     return 0
 
 
 def main() -> int:
     parser = build_parser()
-    if len(sys.argv) == 1:
-        parser.print_help()
-        return 0
     args = parser.parse_args()
     install_signal_handlers()
     try:
