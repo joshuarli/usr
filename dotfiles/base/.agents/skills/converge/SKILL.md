@@ -30,7 +30,7 @@ Read the default branch with `gh repo view --json defaultBranchRef --jq .default
 
 Put each item in exactly one class and keep the evidence:
 
-- **Held:** the default branch contains the work. The branch is an ancestor, `git cherry <default> <branch>` shows only `-`, or `worktree-retire --dry-run` accepts it. A squash merge counts when one default-branch commit has the lane's net diff: compare `git diff --stat <commit>^ <commit>` with `git diff --stat <default>...<branch>`, then compare the diffs.
+- **Held:** the default branch contains the work. The branch is an ancestor, `git cherry <default> <branch>` shows only `-`, or `worktree-retire --dry-run` accepts it. A squash merge counts when one default-branch commit has the lane's net diff: compare `git diff --stat <commit>^ <commit>` with `git diff --stat <default>...<branch>`, then compare the diffs. A squash merge that was edited later defeats both checks: compare per file instead. A file is held when `git apply -R --check` accepts its lane diff against the default branch, or when every added line of the lane exists in the default branch's version of that file. Check uncommitted changes the same way.
 - **Superseded:** the default branch reached the same end state by another route. Prove it on the changed lines, for example a pin that already matches or a dependency that is already gone. A matching subject is not proof.
 - **Unique:** commits or uncommitted changes the default branch lacks and does not supersede. Use a branch's newest local or remote tip.
 - **Orphaned:** a process whose parent is init or launchd, whose owning session is gone, or whose inputs stopped changing long ago. A process with a live owning session is **Live**.
@@ -39,7 +39,7 @@ Put each item in exactly one class and keep the evidence:
 
 ## Retire held work
 
-Retire each **Held** lane and delete its branch under [`orchestrate`'s worktree lifecycle](../orchestrate/SKILL.md#worktree-lifecycle), with `--into <default>`. Put any lane the tool refuses in the table with its reason. Delete a squash-merged or patch-equivalent branch the tool keeps with `git branch -D`, and record every deleted tip SHA. Delete the stale retention lines that name retired items, commit, and push.
+Retire each **Held** lane and delete its branch under [`orchestrate`'s worktree lifecycle](../orchestrate/SKILL.md#worktree-lifecycle), with `--into <default>`. Get the tool's integration verdict with `--dry-run --discard-ignored`, because an ignored-file refusal hides it; then confirm that the ignored files are scratch. Put any lane the tool refuses, such as a detached HEAD with no surviving ref, in the table with its reason and your content evidence. Delete a squash-merged or patch-equivalent branch the tool keeps with `git branch -D`, and record every deleted tip SHA. Delete the stale retention lines that name retired items, commit, and push.
 
 ## Review unique work
 
