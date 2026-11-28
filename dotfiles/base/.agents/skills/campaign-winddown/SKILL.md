@@ -35,7 +35,7 @@ The handoff is the roadmap's **Status** block, never a separate file or section.
 
 - `paused <date>`, the campaign and slice where work stopped, and the first command. The resume prompt is always "resume the roadmap".
 - The last accepted revision, and whether the integration branch is green.
-- Each parked branch with its item, cause, and retry condition.
+- Each parked branch with its item, cause, and retry condition. A parked item is a branch; name no checkout as retained unless a process still uses it, and never record retention without a cause.
 - The next slice, which may belong to a different campaign in **Sequence**.
 
 Commit the roadmap alone as `docs(roadmap): pause ...` and stop.

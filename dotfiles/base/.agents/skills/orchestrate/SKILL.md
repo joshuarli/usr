@@ -143,7 +143,9 @@ After a child finishes, review its changes and decide whether to integrate or pa
 
 Retire it with `worktree-retire <child-worktree> --into <integration-head>`. The tool keeps the worktree when it is locked, dirty, or not integrated, and lists ignored files: preserve any worth keeping, then rerun with `--discard-ignored`. It deletes the branch only when it is an ancestor, so a squash-integrated branch survives. Use `--dry-run` to preview. Never force-delete a branch or worktree.
 
-When you park unfinished work, commit it on a named branch and record its exact path and resume conditions. Keep the checkout while it has a consumer or is not safely integrated; a pressure sweep cannot decide to discard a parked lane. Do not point `--into` at the lane's own HEAD or branch to make retirement pass.
+Before parking a lane, check whether the integration head already holds it: `worktree-retire --dry-run` accepts it, or one integration commit carries its net diff. If so, retire it. To park unfinished work, commit it on a named branch and record the branch, its cause and its retry condition in **Status**. A parked lane is a branch, not a checkout: once no process uses its clean checkout, remove it with `git worktree remove <path>` without `--force`, keeping the branch. A pressure sweep cannot decide to discard a parked branch.
+
+Never record a lane, branch or path as retained without a cause and a retry condition. "Owner unknown" and "not established by this checkout" are not causes: classify the item by content and retire it, park it, or ask the owner. A retention line whose item the integration head already holds is stale; delete it when you find it. Do not point `--into` at the lane's own HEAD or branch to make retirement pass.
 
 ## Campaigns
 

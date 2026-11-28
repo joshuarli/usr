@@ -39,9 +39,7 @@ Put each item in exactly one class and keep the evidence:
 
 ## Retire held work
 
-1. Retire each **Held** lane with `worktree-retire <path> --into <default> --dry-run`, then without `--dry-run`. Pass `--discard-ignored` only when the listed ignored files are scratch. If the tool refuses a lane, put it in the table with the tool's reason. Never use `git worktree remove --force` or `rm` on a registered worktree.
-2. Preview `git-branch-consolidation <remote> <default>`, then run it with `--delete`. Delete a squash-merged or patch-equivalent branch it keeps with `git branch -D`. Record every deleted tip SHA so it can be restored from the reflog.
-3. Remove the durable-doc lines that name retired items, commit with a Conventional Commit, and push. A stale "keep this" line blocks the next session.
+Retire each **Held** lane and delete its branch under [`orchestrate`'s worktree lifecycle](../orchestrate/SKILL.md#worktree-lifecycle), with `--into <default>`. Put any lane the tool refuses in the table with its reason. Delete a squash-merged or patch-equivalent branch the tool keeps with `git branch -D`, and record every deleted tip SHA. Delete the stale retention lines that name retired items, commit, and push.
 
 ## Review unique work
 
