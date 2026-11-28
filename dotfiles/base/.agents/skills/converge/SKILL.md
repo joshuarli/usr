@@ -39,7 +39,7 @@ Put each item in exactly one class and keep the evidence:
 
 ## Retire held work
 
-Retire each **Held** lane and delete its branch under [`orchestrate`'s worktree lifecycle](../orchestrate/SKILL.md#worktree-lifecycle), with `--into <default>`. Get the tool's integration verdict with `--dry-run --discard-ignored`, because an ignored-file refusal hides it; then confirm that the ignored files are scratch. Put any lane the tool refuses, such as a detached HEAD with no surviving ref, in the table with its reason and your content evidence. Delete a squash-merged or patch-equivalent branch the tool keeps with `git branch -D`, and record every deleted tip SHA. Delete the stale retention lines that name retired items, commit, and push.
+Retire each **Held** lane and delete its branch under [`orchestrate`'s worktree lifecycle](../orchestrate/SKILL.md#worktree-lifecycle), with `--into <default>`. Get the tool's integration verdict with `--dry-run --discard-ignored`, because an ignored-file refusal hides it; then confirm that the ignored files are scratch. Put any lane the tool refuses, in the table with its reason and your content evidence. Delete a squash-merged or patch-equivalent branch the tool keeps with `git branch -D`, and record every deleted tip SHA. Delete the stale retention lines that name retired items, commit, and push.
 
 ## Review unique work
 
