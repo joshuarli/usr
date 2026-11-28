@@ -13,7 +13,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import TypedDict
+from typing import Literal, TypedDict, cast
 
 HOME = Path.home()
 TMUX = shutil.which("tmux") or "/opt/homebrew/bin/tmux"
@@ -35,7 +35,7 @@ COMMAND_TIMEOUT_SECONDS = 10
 
 
 class Goal(TypedDict):
-    status: str
+    status: Literal["active", "paused", "complete"]
     updatedAt: int
     objective: str
 
@@ -54,8 +54,7 @@ class Target(TypedDict):
     detail: str
     stopped: bool
     last_continue: float
-    command: str
-    wait_for_goal: bool
+    action: Literal["continue", "resume"]
 
 
 class SessionNotFound(Exception):
@@ -200,7 +199,8 @@ def goal_state(session_id: str) -> Goal:
         or not isinstance(objective, str)
     ):
         raise ValueError(f"invalid goal for session {session_id}")
-    return {"status": status, "updatedAt": updated_at, "objective": objective}
+    goal_status = cast(Literal["active", "paused", "complete"], status)
+    return {"status": goal_status, "updatedAt": updated_at, "objective": objective}
 
 
 def opencode_last_resume(session_id: str) -> float:
@@ -235,16 +235,21 @@ def opencode_last_resume(session_id: str) -> float:
     return 0.0
 
 
-def agy_state(workdir: str, stale: int = STALE_SECONDS) -> tuple[str, bool, float, str]:
+def agy_state(
+    workdir: str, stale: int = STALE_SECONDS, session_id: str | None = None
+) -> tuple[str, bool, float, str]:
     uri = f"file://{workdir}"
+    query = (
+        "select conversation_id, status, last_modified_time, step_count "
+        "from conversation_summaries where workspace_uris like ?"
+    )
+    params = [f"%{uri}%"]
+    if session_id is not None:
+        query += " and conversation_id = ?"
+        params.append(session_id)
     con = read_only(AGY_SUMMARIES)
     try:
-        row = con.execute(
-            "select conversation_id, status, last_modified_time, step_count "
-            "from conversation_summaries where workspace_uris like ? "
-            "order by last_modified_time desc limit 1",
-            (f"%{uri}%",),
-        ).fetchone()
+        row = con.execute(query + " order by last_modified_time desc limit 1", tuple(params)).fetchone()
     finally:
         con.close()
     if row is None:
@@ -275,14 +280,17 @@ def agy_state(workdir: str, stale: int = STALE_SECONDS) -> tuple[str, bool, floa
     return conversation, stopped, latest / 1000, detail
 
 
-def devin_state(workdir: str, stale: int = STALE_SECONDS) -> tuple[str, bool, float, str]:
+def devin_state(
+    workdir: str, stale: int = STALE_SECONDS, session_id: str | None = None
+) -> tuple[str, bool, float, str]:
+    query = "select id, last_activity_at from sessions where working_directory = ?"
+    params = [workdir]
+    if session_id is not None:
+        query += " and id = ?"
+        params.append(session_id)
     con = read_only(DEVIN_SESSIONS)
     try:
-        row = con.execute(
-            "select id, last_activity_at from sessions where working_directory = ? "
-            "order by last_activity_at desc limit 1",
-            (workdir,),
-        ).fetchone()
+        row = con.execute(query + " order by last_activity_at desc limit 1", tuple(params)).fetchone()
         latest = 0
         if row is not None:
             latest_row = con.execute(
@@ -301,6 +309,21 @@ def devin_state(workdir: str, stale: int = STALE_SECONDS) -> tuple[str, bool, fl
     return session_id, stopped, float(latest), detail
 
 
+def make_target(
+    harness: str, pane: str, session_id: str, detail: str, stopped: bool, last_continue: float
+) -> Target:
+    action = "resume" if harness == "opencode" else "continue"
+    return {
+        "harness": harness,
+        "pane": pane,
+        "id": session_id,
+        "detail": detail,
+        "stopped": stopped,
+        "last_continue": last_continue,
+        "action": action,
+    }
+
+
 def target_for(harness: str, workdir: str, stale: int) -> Target | None:
     if harness == "opencode":
         session = detect_opencode_session(workdir)
@@ -311,31 +334,48 @@ def target_for(harness: str, workdir: str, stale: int) -> Target | None:
         except SessionNotFound:
             return None
         age = (int(now().timestamp() * 1000) - goal["updatedAt"]) / 1000
-        return {
-            "harness": harness,
-            "pane": session["pane"],
-            "id": session["id"],
-            "detail": f"goal {goal['status']}: {goal['objective']}",
-            "stopped": goal["status"] == "paused" and age >= stale,
-            "last_continue": opencode_last_resume(session["id"]),
-            "command": RESUME_COMMAND,
-            "wait_for_goal": True,
-        }
+        return make_target(
+            harness,
+            session["pane"],
+            session["id"],
+            f"goal {goal['status']}: {goal['objective']}",
+            goal["status"] == "paused" and age >= stale,
+            opencode_last_resume(session["id"]),
+        )
     pane = find_pane(workdir, harness)
     if pane is None:
         return None
     state = agy_state(workdir, stale) if harness == "agy" else devin_state(workdir, stale)
     session_id, stopped, last_continue, detail = state
-    return {
-        "harness": harness,
-        "pane": pane,
-        "id": session_id,
-        "detail": detail,
-        "stopped": stopped,
-        "last_continue": last_continue,
-        "command": CONTINUE_MESSAGE,
-        "wait_for_goal": False,
-    }
+    return make_target(harness, pane, session_id, detail, stopped, last_continue)
+
+
+def refresh_target(target: Target, workdir: str, stale: int) -> Target | None:
+    harness, pane, session_id = target["harness"], target["pane"], target["id"]
+    if harness == "opencode":
+        try:
+            goal = goal_state(session_id)
+        except SessionNotFound:
+            return None
+        age = (int(now().timestamp() * 1000) - goal["updatedAt"]) / 1000
+        return make_target(
+            harness,
+            pane,
+            session_id,
+            f"goal {goal['status']}: {goal['objective']}",
+            goal["status"] == "paused" and age >= stale,
+            opencode_last_resume(session_id),
+        )
+    try:
+        state = (
+            agy_state(workdir, stale, session_id=session_id)
+            if harness == "agy"
+            else devin_state(workdir, stale, session_id=session_id)
+        )
+    except SessionNotFound:
+        return None
+    _, stopped, last_continue, detail = state
+    return make_target(harness, pane, session_id, detail, stopped, last_continue)
 
 
 def confirm(prompt: str) -> bool:
@@ -375,11 +415,11 @@ def wait_for_active(session_id: str, timeout: float = RESUME_WAIT_SECONDS) -> bo
 def supervise(target: Target, dry_run: bool) -> bool:
     if dry_run:
         return True
-    send_keys(target["pane"], target["command"])
-    if target["wait_for_goal"]:
+    if target["action"] == "resume":
+        send_keys(target["pane"], RESUME_COMMAND)
         if not wait_for_active(target["id"]):
             return False
-        send_keys(target["pane"], CONTINUE_MESSAGE)
+    send_keys(target["pane"], CONTINUE_MESSAGE)
     return True
 
 
@@ -387,7 +427,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=__doc__,
         epilog=(
-            "With no harness, checks opencode, agy and devin in that order. When attached to a\n"
+            f"With no harness, checks {', '.join(HARNESSES)} in that order. When attached to a\n"
             "terminal it asks before sending anything; automation proceeds without a prompt.\n"
             "\n"
             "examples:\n"
@@ -405,7 +445,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "harness", nargs="?", choices=HARNESSES,
-        help="harness whose session is supervised (default: detect in opencode, agy, devin order)",
+        help=f"harness whose session is supervised (default: detect in {', '.join(HARNESSES)} order)",
     )
     parser.add_argument("--workdir", default=os.getcwd(), help="directory hosting the session (default: cwd)")
     parser.add_argument(
@@ -438,7 +478,7 @@ def execute(args: argparse.Namespace) -> int:
         print(f"{stamp} declined; no action")
         return 0
     try:
-        fresh = target_for(target["harness"], workdir, args.stale)
+        fresh = refresh_target(target, workdir, args.stale)
     except SessionNotFound:
         fresh = None
     if fresh is None:

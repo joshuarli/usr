@@ -50,17 +50,18 @@ class SupervisorTest(unittest.TestCase):
             "detail": "goal paused: do the work",
             "stopped": stopped,
             "last_continue": last_continue,
-            "command": supervisor.RESUME_COMMAND if harness == "opencode" else supervisor.CONTINUE_MESSAGE,
-            "wait_for_goal": harness == "opencode",
+            "action": "resume" if harness == "opencode" else "continue",
         }
         values.update(overrides)
         return cast(Any, {key: value for key, value in values.items()})
 
-    def run_execute(self, args, targets, **patches):
+    def run_execute(self, args, targets, fresh="default", **patches):
         stdout = io.StringIO()
         stderr = io.StringIO()
+        refreshed = (targets[-1] if targets else None) if fresh == "default" else fresh
         defaults = {
             "target_for": mock.patch.object(supervisor, "target_for", side_effect=targets),
+            "refresh_target": mock.patch.object(supervisor, "refresh_target", side_effect=[refreshed]),
             "supervise": mock.patch.object(supervisor, "supervise", return_value=True),
             "isatty": mock.patch.object(supervisor.sys.stdin, "isatty", return_value=False),
         }
@@ -260,8 +261,7 @@ class SupervisorTest(unittest.TestCase):
         ):
             target = supervisor.target_for("opencode", str(self.workdir), 180)
         self.assertTrue(target["stopped"])
-        self.assertEqual(target["command"], "/goal resume")
-        self.assertTrue(target["wait_for_goal"])
+        self.assertEqual(target["action"], "resume")
 
     def test_auto_detect_tries_harnesses_in_order(self):
         calls = []
@@ -311,9 +311,23 @@ class SupervisorTest(unittest.TestCase):
 
     def test_fresh_target_prevents_stale_action(self):
         target = self.target()
-        code, out, _ = self.run_execute(self.args(), [target, None])
+        code, out, _ = self.run_execute(self.args(), [target], fresh=None)
         self.assertEqual(code, 0)
         self.assertIn("no longer available", out)
+
+    def test_refresh_uses_confirmed_session_id(self):
+        target = self.target()
+        goal = {
+            "status": "paused",
+            "updatedAt": int((dt.datetime.now().timestamp() - 600) * 1000),
+            "objective": "do the work",
+        }
+        with mock.patch.object(supervisor, "goal_state", return_value=goal) as goal_state, mock.patch.object(
+            supervisor, "opencode_last_resume", return_value=0.0
+        ):
+            fresh = supervisor.refresh_target(target, str(self.workdir), 180)
+        goal_state.assert_called_once_with("ses-1")
+        self.assertEqual(fresh["id"], "ses-1")
 
     def test_dry_run_reports_without_typing(self):
         target = self.target()
