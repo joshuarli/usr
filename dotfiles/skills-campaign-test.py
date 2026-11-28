@@ -114,7 +114,6 @@ class SkillCampaignTests(unittest.TestCase):
             "double-take",
             "green",
             "self-contained-prompt",
-            "settle",
             "ultrareview",
             "ultratriage",
             "yea",
