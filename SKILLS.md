@@ -98,6 +98,7 @@ Repo upkeep and getting work merged.
 | `standardize [standard...] [path...]` | Explicit | Bring a repo or paths up to every applicable coding standard in `~/.agents/standards/`; a whole-repo run also does each standard's adoption work (tool pins, floors, stack migrations). |
 | `docs-refresh` | Explicit | Bring docs up to date with the code and make them shorter. Edits docs and comments, never behavior. |
 | `settle` | Explicit | Make the default branch the cutting edge: merge every open and partial branch, pull request and lane into it, push what remains, then prune merged local branches with `git-branch-consolidation --delete`. |
+| `converge` | Explicit | Reduce a repo to its default branch: retire every lane, branch and scratch path the default branch already holds (merged, patch-equivalent, squashed or superseded), then list what was withheld and remove it after one confirmation. Use `settle` first when unmerged work should land. |
 | `linux-capsule` | Explicit | Prove a fresh Linux host can set up the repo from scratch: run its bootstrap and full checks in a pristine container from a clean clone, and fix what breaks. |
 
 ## Keep the skills themselves honest
