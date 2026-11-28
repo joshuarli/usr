@@ -108,7 +108,7 @@ class SkillCampaignTests(unittest.TestCase):
             "campaign-plan",
             "campaign-preflight",
             "campaign-winddown",
-            "converge",
+            "vacation",
             "create-verification-skill",
             "docs-refresh",
             "double-take",

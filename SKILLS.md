@@ -97,7 +97,7 @@ Repo upkeep and getting work merged.
 | `upgrade` | Explicit | Bump dependencies and pins to the newest stable versions, then run focused checks. |
 | `standardize [standard...] [path...]` | Explicit | Bring a repo or paths up to every applicable coding standard in `~/.agents/standards/`; a whole-repo run also does each standard's adoption work (tool pins, floors, stack migrations). |
 | `docs-refresh` | Explicit | Bring docs up to date with the code and make them shorter. Edits docs and comments, never behavior. |
-| `converge` | Explicit | Reduce a repo to its default branch: retire every lane, branch and scratch path it already holds, review and trial-merge unique work, then act on one confirmed table of merge, keep and delete recommendations. |
+| `vacation` | Explicit | Leave a repo so its `.work/` can be deleted with nothing lost: pause any campaign, ship unique lanes, branches and scratch to the default branch, pushed branches or an archive branch, record the rebuild order in **Status**, then delete `.work/` after one confirmation. |
 | `linux-capsule` | Explicit | Prove a fresh Linux host can set up the repo from scratch: run its bootstrap and full checks in a pristine container from a clean clone, and fix what breaks. |
 
 ## Keep the skills themselves honest
